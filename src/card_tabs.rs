@@ -242,7 +242,7 @@ impl OctoBuddyView {
             item.label(cx, ids!(spec_state)).set_text(cx, &state);
             item.label(cx, ids!(spec_meta)).set_text(cx, &row.meta);
             // In progress: blue; applied: green; earlier tasks: faint.
-            let (border, size, bg) = if row.working { (0x2f6feb, 1.5, 0xf3f8ff) } else if row.applied { (0x1a7f37, 1.0, 0xffffff) } else if !row.in_force { (0xe5e7eb, 1.0, 0xfafbfc) } else { (0xd8dee4, 1.0, 0xffffff) };
+            let (border, size, bg) = if row.working { (crate::theme::hex("accent"), 1.5, crate::theme::hex("accent_soft")) } else if row.applied { (crate::theme::hex("success"), 1.0, crate::theme::hex("raised")) } else if !row.in_force { (crate::theme::hex("hover"), 1.0, crate::theme::hex("panel")) } else { (crate::theme::hex("line"), 1.0, crate::theme::hex("raised")) };
             let (border, bg) = (crate::hex_color(border), crate::hex_color(bg));
             let mut w = item.view(cx, ids!(row));
             script_apply_eval!(cx, w, { draw_bg +: {color: #(bg) border_color: #(border) border_size: #(size)} });

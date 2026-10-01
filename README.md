@@ -35,6 +35,13 @@ It was called OctoLoop until 2026-10-02.
 - **Views.** Chat, the flow graph of the outer and inner loops, a timeline to replay the session, and (with the native TUI plugin) the agent's own terminal UI.
 - **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, and the native TUI (off by default). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
 
+## Appearance
+
+Settings › Appearance picks its look. **Follow OctoSense** (the default) is OctoBuddy's light theme, or its dark one while OctoSense's style is dark; it changes as soon as OctoSense does. The other choices are themes of its own: Light, Dark, GitHub Light, GitHub Dark, Atom One Light, Atom One Dark, Dracula, Nord, Solarized Light and Solarized Dark. A theme takes effect at once, without a restart.
+
+- **Where it is kept:** the choice is in `<data>/appearance.json`.
+- **How a theme is made:** each one names eleven colours in `src/theme.rs` (page, sidebar, panel, text, its quieter shade, lines, accent, success, danger, warning, purple). The other tokens are mixed from them, so adding a theme is adding eleven colours.
+
 ## Build and test
 
 In this repository:

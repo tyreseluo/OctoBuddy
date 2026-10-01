@@ -49,12 +49,14 @@ mod claude_proxy;
 mod claude_inner;
 mod card_tabs;
 mod picker;
+mod appearance;
 pub mod plugins;
 mod plugins_view;
 mod tools_info;
 mod reveal;
 mod tui;
 mod resize;
+pub mod theme;
 mod layout;
 mod pack;
 mod responses_bridge;
@@ -102,6 +104,7 @@ enum SettingsTab {
     Plugins,
     Tools,
     Language,
+    Appearance,
     About,
 }
 
@@ -109,38 +112,88 @@ script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
 
-    let ink = #x1f2328
-    let muted = #x6e7781
-    let line = #xd8dee4
-    let accent = #x2f6feb
-    let sidebar_bg = #xf3f4f6
-    let pane_bg = #xffffff
+    // The theme (theme.rs): its tokens, taken when this script is registered.
+    let th_resolved = #(crate::theme::resolve(vm))
+    let th_accent = #(crate::theme::c("accent"))
+    let th_accent_down = #(crate::theme::c("accent_down"))
+    let th_accent_hover = #(crate::theme::c("accent_hover"))
+    let th_accent_ink = #(crate::theme::c("accent_ink"))
+    let th_accent_line = #(crate::theme::c("accent_line"))
+    let th_accent_selected = #(crate::theme::c("accent_selected"))
+    let th_accent_soft = #(crate::theme::c("accent_soft"))
+    let th_bg = #(crate::theme::c("bg"))
+    let th_danger = #(crate::theme::c("danger"))
+    let th_danger_bg = #(crate::theme::c("danger_bg"))
+    let th_danger_bg_down = #(crate::theme::c("danger_bg_down"))
+    let th_danger_bg_hover = #(crate::theme::c("danger_bg_hover"))
+    let th_danger_strong = #(crate::theme::c("danger_strong"))
+    let th_faint = #(crate::theme::c("faint"))
+    let th_hover = #(crate::theme::c("hover"))
+    let th_ink = #(crate::theme::c("ink"))
+    let th_ink2 = #(crate::theme::c("ink2"))
+    let th_inverse_bg = #(crate::theme::c("inverse_bg"))
+    let th_inverse_fg = #(crate::theme::c("inverse_fg"))
+    let th_line = #(crate::theme::c("line"))
+    let th_line_strong = #(crate::theme::c("line_strong"))
+    let th_muted = #(crate::theme::c("muted"))
+    let th_muted_strong = #(crate::theme::c("muted_strong"))
+    let th_on_accent = #(crate::theme::c("on_accent"))
+    let th_panel = #(crate::theme::c("panel"))
+    let th_purple = #(crate::theme::c("purple"))
+    let th_purple_bg = #(crate::theme::c("purple_bg"))
+    let th_purple_bg_strong = #(crate::theme::c("purple_bg_strong"))
+    let th_purple_line = #(crate::theme::c("purple_line"))
+    let th_raised = #(crate::theme::c("raised"))
+    let th_sidebar = #(crate::theme::c("sidebar"))
+    let th_success = #(crate::theme::c("success"))
+    let th_success_bg = #(crate::theme::c("success_bg"))
+    let th_success_line = #(crate::theme::c("success_line"))
+    let th_success_strong = #(crate::theme::c("success_strong"))
+    let th_warning = #(crate::theme::c("warning"))
+    let th_warning_bg = #(crate::theme::c("warning_bg"))
+    let th_scrim = #(crate::theme::scrim())
+    let th_glass = #(crate::theme::ca("bg", 0xfa))
+    let th_glass_raised = #(crate::theme::ca("raised", 0xee))
+    let th_glass_panel = #(crate::theme::ca("panel", 0xe6))
+    let th_accent_glow = #(crate::theme::ca("accent", 0x33))
+    let th_select_on_accent = #(crate::theme::ca("on_accent", 0x55))
+    // The scroll bars in OctoBuddy's colours (Makepad's take the stock
+    // theme's when it defines them): every ScrollBar in this VM.
+    mod.widgets.ScrollBar = set_type_default() do mod.widgets.ScrollBar{
+        draw_bg +: {color: th_line_strong color_hover: th_faint color_drag: th_muted}
+    }
+    let ink = th_ink
+    let muted = th_muted
+    let line = th_line
+    let accent = th_accent
+    let sidebar_bg = th_sidebar
+    let pane_bg = th_bg
 
     let ChevronRight = Vector{width: 12 height: 12 viewbox: vec4(0 0 24 24)
-        Path{d: "M9 6l6 6-6 6" fill: false stroke: #x6e7781 stroke_width: 2.2 stroke_linecap: "round" stroke_linejoin: "round"}
+        Path{d: "M9 6l6 6-6 6" fill: false stroke: th_muted stroke_width: 2.2 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let ChevronDown = Vector{width: 12 height: 12 viewbox: vec4(0 0 24 24)
-        Path{d: "M6 9l6 6 6-6" fill: false stroke: #x6e7781 stroke_width: 2.2 stroke_linecap: "round" stroke_linejoin: "round"}
+        Path{d: "M6 9l6 6 6-6" fill: false stroke: th_muted stroke_width: 2.2 stroke_linecap: "round" stroke_linejoin: "round"}
     }
 
     let SmallButton = ButtonFlatter{
         width: 24 height: 24
-        draw_bg +: {color_hover: #xe5e7eb border_color_hover: #xe5e7eb}
-        draw_text +: {color: #x6e7781 color_hover: #x1f2328 color_down: #x1f2328 color_focus: #x6e7781 text_style +: {font_size: 13}}
+        draw_bg +: {color_hover: th_hover border_color_hover: th_hover}
+        draw_text +: {color: th_muted color_hover: th_ink color_down: th_ink color_focus: th_muted text_style +: {font_size: 13}}
     }
 
     let InputStyle = TextInput{
         draw_bg +: {
-            color: #xffffff color_hover: #xffffff color_focus: #xffffff color_empty: #xffffff
-            border_color: #xd8dee4 border_color_hover: #xafb8c1 border_color_focus: #x2f6feb border_color_empty: #xd8dee4
+            color: th_raised color_hover: th_raised color_focus: th_raised color_empty: th_raised
+            border_color: th_line border_color_hover: th_line_strong border_color_focus: th_accent border_color_empty: th_line
             border_radius: 4.0
         }
         padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
         draw_text +: {
-            color: #x1f2328 color_hover: #x1f2328 color_focus: #x1f2328 color_down: #x1f2328
-            color_empty: #x8c959f color_empty_hover: #x8c959f color_empty_focus: #x8c959f
+            color: th_ink color_hover: th_ink color_focus: th_ink color_down: th_ink
+            color_empty: th_faint color_empty_hover: th_faint color_empty_focus: th_faint
         }
-        draw_cursor +: {color: #x1f2328}
+        draw_cursor +: {color: th_ink}
     }
 
     let ProjectRow = View{
@@ -153,12 +206,12 @@ script_mod! {
             open := View{width: Fit height: Fit ChevronDown{}}
             closed := View{width: Fit height: Fit ChevronRight{}}
             name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
-            pin := Label{text: "" padding: 0 draw_text.color: #x8c959f draw_text.text_style.font_size: 8}
+            pin := Label{text: "" padding: 0 draw_text.color: th_faint draw_text.text_style.font_size: 8}
             add_session := SmallButton{text: "+"}
         }
     }
     // Archived, under the list's "Archived": greyed.
-    let ProjectRowArchived = ProjectRow{row +: {name +: {draw_text.color: #x8c959f}}}
+    let ProjectRowArchived = ProjectRow{row +: {name +: {draw_text.color: th_faint}}}
 
     let SessionRow = View{
         width: Fill height: Fit
@@ -170,17 +223,17 @@ script_mod! {
             draw_bg.color: #x00000000 draw_bg.border_radius: 6.0
             flow: Right spacing: 6 align: Align{y: 0.5}
             title := Label{width: Fill text: "" max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 10.5}
-            pin := Label{text: "" padding: 0 draw_text.color: #x8c959f draw_text.text_style.font_size: 8}
+            pin := Label{text: "" padding: 0 draw_text.color: th_faint draw_text.text_style.font_size: 8}
         }
     }
 
     let SessionRowActive = SessionRow{
         row +: {
-            draw_bg.color: #xdde7fb
-            title +: {draw_text.color: #x0b3d91}
+            draw_bg.color: th_accent_selected
+            title +: {draw_text.color: th_accent_ink}
         }
     }
-    let SessionRowArchived = SessionRow{row +: {title +: {draw_text.color: #x8c959f}}}
+    let SessionRowArchived = SessionRow{row +: {title +: {draw_text.color: th_faint}}}
 
     let SidebarEmpty = View{
         width: Fill height: Fit padding: 16
@@ -189,8 +242,8 @@ script_mod! {
 
     // Two sheets: copy.
     let CopyIcon = Vector{width: 13 height: 13 viewbox: vec4(0 0 24 24)
-        Path{d: "M9 9h11v11H9z" fill: false stroke: #x8c959f stroke_width: 2 stroke_linejoin: "round"}
-        Path{d: "M5 15H4V4h11v1" fill: false stroke: #x8c959f stroke_width: 2 stroke_linecap: "round" stroke_linejoin: "round"}
+        Path{d: "M9 9h11v11H9z" fill: false stroke: th_faint stroke_width: 2 stroke_linejoin: "round"}
+        Path{d: "M5 15H4V4h11v1" fill: false stroke: th_faint stroke_width: 2 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     // Under an agent's reply: copy it, and how long the turn took.
     let MsgFooter = View{
@@ -200,8 +253,8 @@ script_mod! {
             cursor: MouseCursor.Hand grab_key_focus: false
             CopyIcon{}
         }
-        copied := Label{text: "" padding: 0 draw_text.color: #x1a7f37 draw_text.text_style.font_size: 8.5}
-        took := Label{text: "" padding: 0 draw_text.color: #x8c959f draw_text.text_style.font_size: 8.5}
+        copied := Label{text: "" padding: 0 draw_text.color: th_success draw_text.text_style.font_size: 8.5}
+        took := Label{text: "" padding: 0 draw_text.color: th_faint draw_text.text_style.font_size: 8.5}
     }
 
     // What the agents write is Markdown.
@@ -211,35 +264,35 @@ script_mod! {
         // Drag to select part of it; Cmd+C copies the selection, Cmd+A all.
         // (The theme's selection colour is near white: invisible on white.)
         selectable: true
-        draw_selection +: {color: #x2f6feb33}
+        draw_selection +: {color: th_accent_glow}
         font_size: 10.5
-        font_color: #x1f2328
+        font_color: th_ink
         paragraph_spacing: 8
         pre_code_spacing: 6
         heading_base_scale: 2.2
-        draw_text +: {color: #x1f2328}
+        draw_text +: {color: th_ink}
         text_style_normal: theme.font_regular{font_size: 10.5}
         text_style_italic: theme.font_italic{font_size: 10.5}
         text_style_bold: theme.font_bold{font_size: 10.5}
         text_style_bold_italic: theme.font_bold_italic{font_size: 10.5}
         text_style_fixed: theme.font_code{font_size: 9.5}
         draw_block +: {
-            line_color: #x1f2328 sep_color: #xd8dee4
-            quote_bg_color: #xf6f8fa quote_fg_color: #x57606a
-            code_color: #xf3f4f6
-            table_header_bg_color: #xf6f8fa table_border_color: #xd8dee4
+            line_color: th_ink sep_color: th_line
+            quote_bg_color: th_panel quote_fg_color: th_muted_strong
+            code_color: th_sidebar
+            table_header_bg_color: th_panel table_border_color: th_line
         }
     }
     // The person's words, white on the bubble, selectable like the rest.
     let UserMarkdown = MsgMarkdown{
-        font_color: #xffffff
-        draw_text +: {color: #xffffff}
-        draw_selection +: {color: #xffffff55}
+        font_color: th_on_accent
+        draw_text +: {color: th_on_accent}
+        draw_selection +: {color: th_select_on_accent}
     }
     let CardMarkdown = MsgMarkdown{
         font_size: 9.5
-        font_color: #x3d444d
-        draw_text +: {color: #x3d444d}
+        font_color: th_ink2
+        draw_text +: {color: th_ink2}
         text_style_normal: theme.font_regular{font_size: 9.5}
         text_style_italic: theme.font_italic{font_size: 9.5}
         text_style_bold: theme.font_bold{font_size: 9.5}
@@ -256,7 +309,7 @@ script_mod! {
         bubble := RoundedView{
             width: Fit height: Fit new_batch: true
             padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
-            draw_bg.color: #x2f6feb draw_bg.border_radius: 12.0
+            draw_bg.color: th_accent draw_bg.border_radius: 12.0
             body := UserMarkdown{width: Fit}
         }
     }
@@ -266,7 +319,7 @@ script_mod! {
         bubble := RoundedView{
             width: Fill height: Fit new_batch: true
             padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
-            draw_bg.color: #x2f6feb draw_bg.border_radius: 12.0
+            draw_bg.color: th_accent draw_bg.border_radius: 12.0
             body := UserMarkdown{}
         }
     }
@@ -284,7 +337,7 @@ script_mod! {
             bubble := RoundedView{
                 width: Fit height: Fit new_batch: true
                 padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
-                draw_bg.color: #x2f6feb draw_bg.border_radius: 12.0
+                draw_bg.color: th_accent draw_bg.border_radius: 12.0
                 body := UserMarkdown{width: Fit}
             }
         }
@@ -296,7 +349,7 @@ script_mod! {
         bubble := RoundedView{
             width: Fill height: Fit new_batch: true
             padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
-            draw_bg.color: #x2f6feb draw_bg.border_radius: 12.0
+            draw_bg.color: th_accent draw_bg.border_radius: 12.0
             body := UserMarkdown{}
         }
         View{width: Fill height: Fit flow: Right new_batch: true Filler{} tag := SteerTag{}}
@@ -327,16 +380,16 @@ script_mod! {
             RoundedView{
                 width: Fill height: Fit new_batch: true flow: Down spacing: 4
                 padding: Inset{left: 10 right: 10 top: 6 bottom: 6}
-                draw_bg.color: #xf6f8fa draw_bg.border_radius: 6.0
+                draw_bg.color: th_panel draw_bg.border_radius: 6.0
                 steps_head := View{
                     width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
                     cursor: MouseCursor.Hand grab_key_focus: false
-                    steps_sum := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x57606a draw_text.text_style: theme.font_code{font_size: 8}}
+                    steps_sum := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 8}}
                     steps_fold := Label{text: "" padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
                 }
                 steps_body := View{
                     width: Fill height: Fit visible: false
-                    steps := Label{width: Fill text: "" draw_text.color: #x6e7781 draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+                    steps := Label{width: Fill text: "" draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
                 }
             }
             body := MsgMarkdown{}
@@ -360,10 +413,10 @@ script_mod! {
             width: Fill height: Fit new_batch: true flow: Down spacing: 4
             padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
             cursor: MouseCursor.Hand grab_key_focus: false
-            draw_bg.color: #xfbfaff draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xe4dcf7
+            draw_bg.color: th_purple_bg draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_purple_bg_strong
             View{
                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
-                header := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x8250df draw_text.text_style: theme.font_bold{font_size: 9}}
+                header := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_purple draw_text.text_style: theme.font_bold{font_size: 9}}
                 fold := Label{text: "show all" padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8.5}
             }
             // Folded: its header only; the whole message when opened.
@@ -374,11 +427,11 @@ script_mod! {
         card := RoundedView{
             width: Fill height: Fit new_batch: true flow: Down spacing: 4
             padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
-            draw_bg.color: #xffffff draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8b7ef
+            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_purple_line
             card_head := View{
                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                 cursor: MouseCursor.Hand grab_key_focus: false
-                header := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x8250df draw_text.text_style: theme.font_bold{font_size: 9}}
+                header := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_purple draw_text.text_style: theme.font_bold{font_size: 9}}
                 fold := Label{text: "collapse" padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8.5}
             }
             body := CardMarkdown{}
@@ -387,7 +440,7 @@ script_mod! {
 
     let SystemMsg = View{
         width: Fill height: Fit padding: Inset{left: 32 right: 24 top: 4 bottom: 4}
-        body := Label{width: Fill text: "" draw_text.color: #x8c959f draw_text.wrap: Words draw_text.text_style.font_size: 9}
+        body := Label{width: Fill text: "" draw_text.color: th_faint draw_text.wrap: Words draw_text.text_style.font_size: 9}
     }
 
     let ChatEmpty = View{
@@ -428,9 +481,9 @@ script_mod! {
         width: Fill height: Fit visible: false new_batch: true
         flow: Right spacing: 6 align: Align{y: 0.5}
         padding: Inset{left: 8 right: 2 top: 2 bottom: 2}
-        draw_bg.color: #xf6f8fa draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xe5e7eb
+        draw_bg.color: th_panel draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_hover
         num := Label{text: "" padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8.5}
-        who := Label{text: "" padding: 0 draw_text.color: #x8250df draw_text.text_style: theme.font_bold{font_size: 8.5}}
+        who := Label{text: "" padding: 0 draw_text.color: th_purple draw_text.text_style: theme.font_bold{font_size: 8.5}}
         text := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: ink draw_text.text_style.font_size: 9}
         // The person's message, into the turn running now (the outer queue).
         steer := SmallButton{text: "Steer in" width: Fit height: 22 visible: false padding: Inset{left: 8 right: 8}}
@@ -452,13 +505,13 @@ script_mod! {
 
     let SendButton = ButtonFlat{
         text: "Send" width: Fit height: 30 padding: Inset{left: 16 right: 16}
-        draw_bg +: {color: #x2f6feb color_hover: #x2a62d1 color_down: #x2456b8 color_focus: #x2f6feb border_size: 0.0 border_radius: 6.0}
-        draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}
+        draw_bg +: {color: th_accent color_hover: th_accent_hover color_down: th_accent_down color_focus: th_accent border_size: 0.0 border_radius: 6.0}
+        draw_text +: {color: th_on_accent color_hover: th_on_accent color_down: th_on_accent color_focus: th_on_accent}
     }
 
     // What a loop runs, under its input: the agent's mark and name, the model's.
     let ModelIcon = Svg{width: 14 height: 14 animating: false draw_svg +: {svg: crate_resource("self:resources/claude.svg")}}
-    let ModelText = Label{text: "" padding: 0 draw_text.color: #x57606a draw_text.text_style.font_size: 9}
+    let ModelText = Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 9}
     // The engine picker's rows: an agent (its icon, its name, its current
     // model under it), a model of the agent chosen.
     // A rounded row that tints under the pointer (a soft blue wash over
@@ -508,38 +561,62 @@ script_mod! {
         cursor: MouseCursor.Hand grab_key_focus: false
         draw_bg.color: #x00000000 draw_bg.border_radius: 6.0
         label := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 9.5}
-        mark := Label{text: "" padding: 0 draw_text.color: #x1a7f37 draw_text.text_style: theme.font_bold{font_size: 10}}
+        mark := Label{text: "" padding: 0 draw_text.color: th_success draw_text.text_style: theme.font_bold{font_size: 10}}
+    }
+    // A theme in Settings › Appearance: a swatch in its own colours (set by
+    // the code), its name, whether it is light or dark, a mark when in use.
+    let ThemeRow = HoverRow{
+        width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5} new_batch: true
+        padding: Inset{left: 10 right: 14 top: 8 bottom: 8}
+        cursor: MouseCursor.Hand grab_key_focus: false
+        draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+        swatch := RoundedView{
+            width: 60 height: 36 flow: Down spacing: 5 new_batch: true padding: Inset{left: 7 right: 7 top: 7 bottom: 7}
+            draw_bg.color: th_bg draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            sw_ink := RoundedView{width: 34 height: 5 draw_bg.color: th_ink draw_bg.border_radius: 2.5}
+            View{
+                width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                sw_accent := RoundedView{width: 16 height: 9 draw_bg.color: th_accent draw_bg.border_radius: 3.0}
+                sw_muted := RoundedView{width: 20 height: 4 draw_bg.color: th_muted draw_bg.border_radius: 2.0}
+            }
+        }
+        View{
+            width: Fill height: Fit flow: Down spacing: 2
+            name := Label{text: "" padding: 0 draw_text.color: th_ink draw_text.text_style: theme.font_bold{font_size: 10.5}}
+            sub := Label{text: "" padding: 0 draw_text.color: th_muted draw_text.text_style.font_size: 9}
+        }
+        mark := Label{text: "" padding: 0 draw_text.color: th_accent draw_text.text_style: theme.font_bold{font_size: 13}}
     }
     // An effort level in the picker (the one in use, tinted by the code).
     let EffortChip = HoverRow{
         width: Fit height: 26 flow: Right align: Align{x: 0.5 y: 0.5} new_batch: true visible: false
         padding: Inset{left: 10 right: 10}
         cursor: MouseCursor.Hand grab_key_focus: false
-        draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xe1e5ea
+        draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
         label := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style.font_size: 9}
     }
 
     let Chip = RoundedView{
         width: Fit height: Fit new_batch: true
         padding: Inset{left: 8 right: 8 top: 3 bottom: 3}
-        draw_bg.color: #xf3f4f6 draw_bg.border_radius: 9.0
+        draw_bg.color: th_sidebar draw_bg.border_radius: 9.0
         label := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9}
     }
 
     let SegOff = ButtonFlat{
         width: Fit height: 24 padding: Inset{left: 10 right: 10}
-        draw_bg +: {color: #xf3f4f6 color_hover: #xe5e7eb color_down: #xd8dee4 color_focus: #xf3f4f6 border_size: 0.0 border_radius: 6.0}
-        draw_text +: {color: #x57606a color_hover: #x1f2328 color_down: #x1f2328 color_focus: #x57606a text_style +: {font_size: 9.5}}
+        draw_bg +: {color: th_sidebar color_hover: th_hover color_down: th_line color_focus: th_sidebar border_size: 0.0 border_radius: 6.0}
+        draw_text +: {color: th_muted_strong color_hover: th_ink color_down: th_ink color_focus: th_muted_strong text_style +: {font_size: 9.5}}
     }
     let SegOn = SegOff{
-        draw_bg +: {color: #x1f2328 color_hover: #x1f2328 color_down: #x1f2328 color_focus: #x1f2328}
-        draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}
+        draw_bg +: {color: th_inverse_bg color_hover: th_inverse_bg color_down: th_inverse_bg color_focus: th_inverse_bg}
+        draw_text +: {color: th_inverse_fg color_hover: th_inverse_fg color_down: th_inverse_fg color_focus: th_inverse_fg}
     }
 
     let NavOff = ButtonFlat{
         width: Fill height: 32 align: Align{x: 0.0 y: 0.5} padding: Inset{left: 12 right: 12}
-        draw_bg +: {color: #x00000000 color_hover: #xe5e7eb color_down: #xd8dee4 color_focus: #x00000000 border_size: 0.0 border_radius: 6.0}
-        draw_text +: {color: #x3d444d color_hover: #x1f2328 color_down: #x1f2328 color_focus: #x3d444d text_style +: {font_size: 10.5}}
+        draw_bg +: {color: #x00000000 color_hover: th_hover color_down: th_line color_focus: #x00000000 border_size: 0.0 border_radius: 6.0}
+        draw_text +: {color: th_ink2 color_hover: th_ink color_down: th_ink color_focus: th_ink2 text_style +: {font_size: 10.5}}
     }
     // One slice in the plan panel: where it stands, who took it, its time.
     let PlanRow = View{
@@ -547,16 +624,16 @@ script_mod! {
         cursor: MouseCursor.Hand grab_key_focus: false
         View{
             width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
-            dot := RoundedView{width: 8 height: 8 new_batch: true draw_bg.color: #x8c959f draw_bg.border_radius: 4.0}
+            dot := RoundedView{width: 8 height: 8 new_batch: true draw_bg.color: th_faint draw_bg.border_radius: 4.0}
             name := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 8.5}}
-            who := Label{text: "" padding: 0 draw_text.color: #x8250df draw_text.text_style.font_size: 8}
+            who := Label{text: "" padding: 0 draw_text.color: th_purple draw_text.text_style.font_size: 8}
         }
-        meta := Label{width: Fill text: "" padding: Inset{left: 14} draw_text.color: #x6e7781 draw_text.wrap: Words draw_text.text_style.font_size: 8}
+        meta := Label{width: Fill text: "" padding: Inset{left: 14} draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style.font_size: 8}
     }
     // What does what cannot be undone.
     let DangerButton = SegOff{
-        draw_bg +: {color: #xcf222e color_hover: #xa40e26 color_down: #x82071e color_focus: #xcf222e}
-        draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}
+        draw_bg +: {color: th_danger color_hover: th_danger_strong color_down: th_danger_strong color_focus: th_danger}
+        draw_text +: {color: th_on_accent color_hover: th_on_accent color_down: th_on_accent color_focus: th_on_accent}
     }
     // A right-click menu's row.
     // A tappable icon (its `icon` child): no text, a hand cursor.
@@ -567,12 +644,12 @@ script_mod! {
     }
     let MenuItem = NavOff{height: 28 padding: Inset{left: 8 right: 8} draw_text +: {text_style +: {font_size: 9.5}}}
     let NavOn = NavOff{
-        draw_bg +: {color: #xdde7fb color_hover: #xdde7fb color_down: #xdde7fb color_focus: #xdde7fb}
-        draw_text +: {color: #x0b3d91 color_hover: #x0b3d91 color_down: #x0b3d91 color_focus: #x0b3d91}
+        draw_bg +: {color: th_accent_selected color_hover: th_accent_selected color_down: th_accent_selected color_focus: th_accent_selected}
+        draw_text +: {color: th_accent_ink color_hover: th_accent_ink color_down: th_accent_ink color_focus: th_accent_ink}
     }
 
     let SectionTitle = Label{text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 12.5}}
-    let Body = Label{width: Fill text: "" draw_text.color: #x3d444d draw_text.wrap: Words draw_text.text_style.font_size: 10.5}
+    let Body = Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 10.5}
 
     let PeerTab = View{
         width: 132 height: Fill padding: Inset{left: 3 right: 3}
@@ -580,32 +657,32 @@ script_mod! {
             width: Fill height: Fill new_batch: true flow: Down spacing: 4
             padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
             cursor: MouseCursor.Hand grab_key_focus: false
-            draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+            draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
             head := View{
                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                 Svg{width: 14 height: 14 animating: false draw_svg +: {svg: crate_resource("self:resources/octos.svg")}}
                 role := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 10}}
-                dot := RoundedView{width: 7 height: 7 draw_bg.color: #x8c959f draw_bg.border_radius: 3.5}
+                dot := RoundedView{width: 7 height: 7 draw_bg.color: th_faint draw_bg.border_radius: 3.5}
             }
             state := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8.5}
         }
     }
-    let TabRunning = PeerTab{tab +: {head +: {dot +: {draw_bg.color: #x0969da}}}}
-    let TabDone = PeerTab{tab +: {head +: {dot +: {draw_bg.color: #x1a7f37}}}}
-    let TabFailed = PeerTab{tab +: {head +: {dot +: {draw_bg.color: #xcf222e}}}}
-    let TabHalted = PeerTab{tab +: {head +: {dot +: {draw_bg.color: #x9a6700}}}}
+    let TabRunning = PeerTab{tab +: {head +: {dot +: {draw_bg.color: th_accent}}}}
+    let TabDone = PeerTab{tab +: {head +: {dot +: {draw_bg.color: th_success}}}}
+    let TabFailed = PeerTab{tab +: {head +: {dot +: {draw_bg.color: th_danger}}}}
+    let TabHalted = PeerTab{tab +: {head +: {dot +: {draw_bg.color: th_warning}}}}
     // The selected tab: the same, with an accent border and tint.
-    let TabQueuedSel = PeerTab{tab +: {draw_bg.color: #xf0f5ff draw_bg.border_color: #x2f6feb draw_bg.border_size: 1.5}}
-    let TabRunningSel = TabRunning{tab +: {draw_bg.color: #xf0f5ff draw_bg.border_color: #x2f6feb draw_bg.border_size: 1.5}}
-    let TabDoneSel = TabDone{tab +: {draw_bg.color: #xf0f5ff draw_bg.border_color: #x2f6feb draw_bg.border_size: 1.5}}
-    let TabFailedSel = TabFailed{tab +: {draw_bg.color: #xf0f5ff draw_bg.border_color: #x2f6feb draw_bg.border_size: 1.5}}
-    let TabHaltedSel = TabHalted{tab +: {draw_bg.color: #xf0f5ff draw_bg.border_color: #x2f6feb draw_bg.border_size: 1.5}}
+    let TabQueuedSel = PeerTab{tab +: {draw_bg.color: th_accent_soft draw_bg.border_color: th_accent draw_bg.border_size: 1.5}}
+    let TabRunningSel = TabRunning{tab +: {draw_bg.color: th_accent_soft draw_bg.border_color: th_accent draw_bg.border_size: 1.5}}
+    let TabDoneSel = TabDone{tab +: {draw_bg.color: th_accent_soft draw_bg.border_color: th_accent draw_bg.border_size: 1.5}}
+    let TabFailedSel = TabFailed{tab +: {draw_bg.color: th_accent_soft draw_bg.border_color: th_accent draw_bg.border_size: 1.5}}
+    let TabHaltedSel = TabHalted{tab +: {draw_bg.color: th_accent_soft draw_bg.border_color: th_accent draw_bg.border_size: 1.5}}
 
     let Badge = RoundedView{
         width: Fit height: Fit new_batch: true visible: false
         padding: Inset{left: 8 right: 8 top: 2 bottom: 2}
-        draw_bg.color: #xeef1f4 draw_bg.border_radius: 8.0
-        label := Label{text: "" draw_text.color: #x57606a draw_text.text_style: theme.font_bold{font_size: 8.5}}
+        draw_bg.color: th_panel draw_bg.border_radius: 8.0
+        label := Label{text: "" draw_text.color: th_muted_strong draw_text.text_style: theme.font_bold{font_size: 8.5}}
     }
 
     // A spec in the open card's Spec tab: its file, its state, where it came from.
@@ -615,7 +692,7 @@ script_mod! {
             width: Fill height: Fit new_batch: true flow: Down spacing: 2
             cursor: MouseCursor.Hand grab_key_focus: false
             padding: Inset{left: 10 right: 10 top: 7 bottom: 7}
-            draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+            draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
             View{
                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                 spec_name := Label{width: Fill text: "" max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
@@ -631,12 +708,12 @@ script_mod! {
         card := RoundedView{
             width: Fill height: Fit new_batch: true flow: Right spacing: 10 align: Align{y: 0.5}
             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
-            draw_bg.color: #xffffff draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
             View{
                 width: Fill height: Fit flow: Down spacing: 3
                 name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
                 detail := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
-                adds := Label{width: Fill text: "" draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                adds := Label{width: Fill text: "" draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
             }
             on := SegOn{text: "On" height: 26}
             off := SegOff{text: "Off" height: 26}
@@ -648,12 +725,12 @@ script_mod! {
         width: 300 height: Fit new_batch: true flow: Down spacing: 4 visible: false
         margin: Inset{bottom: 12}
         padding: Inset{left: 14 right: 14 top: 12 bottom: 12}
-        draw_bg.color: #xffffff draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+        draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
         name := Label{width: Fill text: "" max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
-        version := Label{width: Fill text: "" max_lines: 1 draw_text.color: #x1a7f37 draw_text.text_style: theme.font_code{font_size: 9}}
+        version := Label{width: Fill text: "" max_lines: 1 draw_text.color: th_success draw_text.text_style: theme.font_code{font_size: 9}}
         what := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
-        repo := Label{width: Fill text: "" draw_text.color: #x0969da draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
-        path := Label{width: Fill text: "" draw_text.color: #x6e7781 draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 7.5}}
+        repo := Label{width: Fill text: "" draw_text.color: th_accent draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+        path := Label{width: Fill text: "" draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 7.5}}
     }
 
     let ProviderRowView = View{
@@ -661,7 +738,7 @@ script_mod! {
         card := RoundedView{
             width: Fill height: Fit new_batch: true flow: Right spacing: 10 align: Align{y: 0.5}
             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
-            draw_bg.color: #xffffff draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
             View{
                 width: Fill height: Fit flow: Down spacing: 3
                 name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
@@ -670,8 +747,8 @@ script_mod! {
             role_badge := RoundedView{
                 width: Fit height: Fit new_batch: true
                 padding: Inset{left: 8 right: 8 top: 2 bottom: 2}
-                draw_bg.color: #xe8effd draw_bg.border_radius: 8.0
-                role := Label{text: "" draw_text.color: #x0b3d91 draw_text.text_style: theme.font_bold{font_size: 8.5}}
+                draw_bg.color: th_accent_soft draw_bg.border_radius: 8.0
+                role := Label{text: "" draw_text.color: th_accent_ink draw_text.text_style: theme.font_bold{font_size: 8.5}}
             }
         }
     }
@@ -687,7 +764,7 @@ script_mod! {
         width: Fit height: 30 new_batch: true flow: Right spacing: 5 align: Align{y: 0.5}
         padding: Inset{left: 10 right: 11 top: 0 bottom: 0}
         cursor: MouseCursor.Hand grab_key_focus: false
-        draw_bg.color: #xffffffee draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xe1e5ea
+        draw_bg.color: th_glass_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
     }
     let FloatName = Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style.font_size: 9}
     let FloatSub = Label{text: "" padding: 0 max_lines: 1 draw_text.color: muted draw_text.text_style.font_size: 8}
@@ -702,38 +779,38 @@ script_mod! {
         sub := FloatSub{}
     }
     let FlowIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M3 4h6v5H3zM15 15h6v5h-6z" fill: false stroke: #x57606a stroke_width: 1.8 stroke_linejoin: "round"}
-        Path{d: "M9 6.5c5 0 1 11 6 11" fill: false stroke: #x57606a stroke_width: 1.8 stroke_linecap: "round"}
+        Path{d: "M3 4h6v5H3zM15 15h6v5h-6z" fill: false stroke: th_muted_strong stroke_width: 1.8 stroke_linejoin: "round"}
+        Path{d: "M9 6.5c5 0 1 11 6 11" fill: false stroke: th_muted_strong stroke_width: 1.8 stroke_linecap: "round"}
     }
     let ChatIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M4 5h16v11H10l-5 4v-4H4z" fill: false stroke: #x57606a stroke_width: 1.8 stroke_linejoin: "round"}
+        Path{d: "M4 5h16v11H10l-5 4v-4H4z" fill: false stroke: th_muted_strong stroke_width: 1.8 stroke_linejoin: "round"}
     }
     let PlayIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M8 5l11 7-11 7z" fill: false stroke: #x1a7f37 stroke_width: 1.8 stroke_linejoin: "round"}
+        Path{d: "M8 5l11 7-11 7z" fill: false stroke: th_success stroke_width: 1.8 stroke_linejoin: "round"}
     }
     let TimeIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M3 7h9M3 12h14M3 17h6" fill: false stroke: #x57606a stroke_width: 1.8 stroke_linecap: "round"}
-        Path{d: "M20 4v16" fill: false stroke: #xcf222e stroke_width: 1.6 stroke_linecap: "round"}
+        Path{d: "M3 7h9M3 12h14M3 17h6" fill: false stroke: th_muted_strong stroke_width: 1.8 stroke_linecap: "round"}
+        Path{d: "M20 4v16" fill: false stroke: th_danger stroke_width: 1.6 stroke_linecap: "round"}
     }
     let FloatFlow = FloatSquare{icon := FlowIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatChat = FloatSquare{icon := ChatIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatTime = FloatSquare{icon := TimeIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let TermIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM7 10l3 2-3 2M12 15h5" fill: false stroke: #x1f2328 stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
+        Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM7 10l3 2-3 2M12 15h5" fill: false stroke: th_ink stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let FloatTui = FloatSquare{icon := TermIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatApp = FloatSquare{icon := PlayIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let DataIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" fill: false stroke: #x8250df stroke_width: 1.6 stroke_linejoin: "round"}
+        Path{d: "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" fill: false stroke: th_purple stroke_width: 1.6 stroke_linejoin: "round"}
     }
     let FloatData = FloatSquare{icon := DataIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let PublishIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M12 15V4M7 9l5-5 5 5M5 15v4h14v-4" fill: false stroke: #x0969da stroke_width: 1.8 stroke_linecap: "round" stroke_linejoin: "round"}
+        Path{d: "M12 15V4M7 9l5-5 5 5M5 15v4h14v-4" fill: false stroke: th_accent stroke_width: 1.8 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let FloatPublish = FloatSquare{icon := PublishIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     // An external plugin's button (Settings › Plugins).
     let PluginIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4" fill: false stroke: #x57606a stroke_width: 1.7 stroke_linecap: "round" stroke_linejoin: "round"}
+        Path{d: "M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4" fill: false stroke: th_muted_strong stroke_width: 1.7 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let FloatPlugin = FloatSquare{icon := PluginIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
 
@@ -742,13 +819,13 @@ script_mod! {
     // What kind of agent a card is, at its top right.
     let FlowTag = RoundedView{
         width: Fit height: Fit new_batch: true padding: Inset{left: 5 right: 5 top: 1 bottom: 1}
-        draw_bg.color: #xf3f4f6 draw_bg.border_radius: 3.0
-        tag := Label{text: "" padding: 0 draw_text.color: #x57606a draw_text.text_style.font_size: 7.5}
+        draw_bg.color: th_sidebar draw_bg.border_radius: 3.0
+        tag := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 7.5}
     }
     let FlowOuterCard = RoundedView{
         width: Fill height: Fill new_batch: true flow: Down spacing: 4
         padding: Inset{left: 12 right: 12 top: 10 bottom: 10}
-        draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+        draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
         View{
             width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
             Svg{width: 18 height: 18 animating: false draw_svg +: {svg: crate_resource("self:resources/claude.svg")}}
@@ -757,20 +834,20 @@ script_mod! {
         }
         status := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 9}
         // What it runs on: engine · model · effort.
-        model := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x8c959f draw_text.text_style: theme.font_code{font_size: 7.5}}
-        detail := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x57606a draw_text.text_style.font_size: 8.5}
+        model := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_faint draw_text.text_style: theme.font_code{font_size: 7.5}}
+        detail := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 8.5}
         // What waits for it, under a line.
         queue_box := View{
             width: Fill height: Fit flow: Down spacing: 2 visible: false
-            SolidView{width: Fill height: 1 margin: Inset{top: 3 bottom: 2} draw_bg.color: #xe5e7eb}
-            queue := Label{width: Fill text: "" max_lines: 4 padding: 0 draw_text.color: #x6e7781 draw_text.text_style.font_size: 8}
+            SolidView{width: Fill height: 1 margin: Inset{top: 3 bottom: 2} draw_bg.color: th_hover}
+            queue := Label{width: Fill text: "" max_lines: 4 padding: 0 draw_text.color: th_muted draw_text.text_style.font_size: 8}
         }
     }
-    let FlowOuterCardLit = FlowOuterCard{draw_bg.border_color: #x2f6feb draw_bg.border_size: 2.0 draw_bg.color: #xf5f9ff}
+    let FlowOuterCardLit = FlowOuterCard{draw_bg.border_color: th_accent draw_bg.border_size: 2.0 draw_bg.color: th_accent_soft}
     let FlowInnerCard = RoundedView{
         width: Fill height: Fill new_batch: true flow: Down spacing: 3
         padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
-        draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+        draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
         View{
             width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
             Svg{width: 15 height: 15 animating: false draw_svg +: {svg: crate_resource("self:resources/octos.svg")}}
@@ -778,28 +855,28 @@ script_mod! {
             kind := FlowTag{}
         }
         status := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8.5}
-        model := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x8c959f draw_text.text_style: theme.font_code{font_size: 7.5}}
-        detail := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x57606a draw_text.text_style.font_size: 8.5}
+        model := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_faint draw_text.text_style: theme.font_code{font_size: 7.5}}
+        detail := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 8.5}
         // What waits for it, under a line.
         queue_box := View{
             width: Fill height: Fit flow: Down spacing: 2 visible: false
-            SolidView{width: Fill height: 1 margin: Inset{top: 3 bottom: 2} draw_bg.color: #xe5e7eb}
-            queue := Label{width: Fill text: "" max_lines: 4 padding: 0 draw_text.color: #x6e7781 draw_text.text_style.font_size: 8}
+            SolidView{width: Fill height: 1 margin: Inset{top: 3 bottom: 2} draw_bg.color: th_hover}
+            queue := Label{width: Fill text: "" max_lines: 4 padding: 0 draw_text.color: th_muted draw_text.text_style.font_size: 8}
         }
     }
     // At work: green. Chosen (its conversation open): blue, like an outer loop's.
-    let FlowInnerCardLit = FlowInnerCard{draw_bg.border_color: #x1a7f37 draw_bg.border_size: 2.0 draw_bg.color: #xf6fef9}
-    let FlowInnerCardSel = FlowInnerCard{draw_bg.border_color: #x2f6feb draw_bg.border_size: 2.0 draw_bg.color: #xf5f9ff}
-    let FlowInnerCardSelLit = FlowInnerCard{draw_bg.border_color: #x2f6feb draw_bg.border_size: 2.0 draw_bg.color: #xf6fef9}
+    let FlowInnerCardLit = FlowInnerCard{draw_bg.border_color: th_success draw_bg.border_size: 2.0 draw_bg.color: th_success_bg}
+    let FlowInnerCardSel = FlowInnerCard{draw_bg.border_color: th_accent draw_bg.border_size: 2.0 draw_bg.color: th_accent_soft}
+    let FlowInnerCardSelLit = FlowInnerCard{draw_bg.border_color: th_accent draw_bg.border_size: 2.0 draw_bg.color: th_success_bg}
     // A subagent: sent for one job, shown while it runs.
     let FlowSubCard = RoundedView{
         width: 190 height: 56 new_batch: true flow: Down spacing: 3
         padding: Inset{left: 10 right: 10 top: 7 bottom: 7}
-        draw_bg.color: #xfbfaff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8b7ef
+        draw_bg.color: th_purple_bg draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_purple_line
         View{
             width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
-            title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x8250df draw_text.text_style: theme.font_bold{font_size: 9}}
-            kind := FlowTag{draw_bg.color: #xf3eefe tag +: {draw_text.color: #x8250df}}
+            title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_purple draw_text.text_style: theme.font_bold{font_size: 9}}
+            kind := FlowTag{draw_bg.color: th_purple_bg tag +: {draw_text.color: th_purple}}
         }
         status := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8.5}
         detail := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
@@ -809,17 +886,17 @@ script_mod! {
     mod.widgets.ResizeHandle = set_type_default() do mod.widgets.ResizeHandleBase{
         width: 7 height: Fill
         draw_bg +: {color: #x00000000}
-        line_color: #xd8dee4
-        active_color: #x2f6feb
+        line_color: th_line
+        active_color: th_accent
     }
     let ResizeHandle = mod.widgets.ResizeHandle
     mod.widgets.FlowCanvasBase = #(flow::FlowCanvas::register_widget(vm))
     mod.widgets.FlowCanvas = set_type_default() do mod.widgets.FlowCanvasBase{
         width: Fill height: Fill
-        draw_bg +: {color: #xf6f8fa}
-        line_color: #xafb8c1
-        lit_color: #x2f6feb
-        wave_color: #x8250df
+        draw_bg +: {color: th_panel}
+        line_color: th_line_strong
+        lit_color: th_accent
+        wave_color: th_purple
         draw_text +: {text_style: theme.font_bold{font_size: 8}}
     }
     // Registered in this module, after its `use mod.widgets.*`: bound by name here.
@@ -827,7 +904,7 @@ script_mod! {
     mod.widgets.TimelineCanvasBase = #(timeline::TimelineCanvas::register_widget(vm))
     mod.widgets.TimelineCanvas = set_type_default() do mod.widgets.TimelineCanvasBase{
         width: Fill height: Fill
-        draw_bg +: {color: #xffffff}
+        draw_bg +: {color: th_raised}
         draw_text +: {text_style: theme.font_regular{font_size: 8}}
     }
     let TimelineCanvas = mod.widgets.TimelineCanvas
@@ -856,7 +933,7 @@ script_mod! {
                     add_project := SmallButton{text: "+" width: 28 height: 28}
                     // The sidebar folds away (the button at the stage's top left opens it).
                     sidebar_close := IconButton{icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-                            Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14" fill: false stroke: #x57606a stroke_width: 1.6 stroke_linejoin: "round"}
+                            Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14" fill: false stroke: th_muted_strong stroke_width: 1.6 stroke_linejoin: "round"}
                         }}
                 }
                 SolidView{width: Fill height: 1 draw_bg.color: line}
@@ -877,8 +954,8 @@ script_mod! {
                     // Settings: a gear.
                     settings_button := IconButton{
                         icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-                            Path{d: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill: false stroke: #x57606a stroke_width: 1.7}
-                            Path{d: "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill: false stroke: #x57606a stroke_width: 1.5 stroke_linejoin: "round"}
+                            Path{d: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill: false stroke: th_muted_strong stroke_width: 1.7}
+                            Path{d: "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill: false stroke: th_muted_strong stroke_width: 1.5 stroke_linejoin: "round"}
                         }
                     }
                 }
@@ -909,14 +986,14 @@ script_mod! {
                           SolidView{
                             width: Fill height: Fit flow: Down spacing: 6 new_batch: true
                             padding: Inset{left: 20 right: 20 top: 8 bottom: 8}
-                            draw_bg.color: #xf6f8fa
-                            worktree_info := Label{width: Fill text: "" draw_text.color: #x3d444d draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                            draw_bg.color: th_panel
+                            worktree_info := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
                             View{
                                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                 merge_worktree := ButtonFlat{
                                     text: "Merge" width: Fit height: 26 padding: Inset{left: 12 right: 12}
-                                    draw_bg +: {color: #x1a7f37 color_hover: #x167030 color_down: #x12602a color_focus: #x1a7f37 border_size: 0.0 border_radius: 6.0}
-                                    draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}
+                                    draw_bg +: {color: th_success color_hover: th_success_strong color_down: th_success_strong color_focus: th_success border_size: 0.0 border_radius: 6.0}
+                                    draw_text +: {color: th_on_accent color_hover: th_on_accent color_down: th_on_accent color_focus: th_on_accent}
                                 }
                                 discard_worktree := SegOff{text: "Discard worktree" height: 26}
                             }
@@ -949,7 +1026,7 @@ script_mod! {
                                 width: Fill height: Fill align: Align{y: 1.0} padding: Inset{left: 10 bottom: 10}
                                 RoundedView{
                                     width: Fit height: Fit new_batch: true padding: Inset{left: 6 right: 6 top: 3 bottom: 3}
-                                    draw_bg.color: #xf6f8fae6 draw_bg.border_radius: 4.0
+                                    draw_bg.color: th_glass_panel draw_bg.border_radius: 4.0
                                     flow_hint := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9}
                                 }
                             }
@@ -958,7 +1035,7 @@ script_mod! {
                                 Filler{}
                                 flow_popup := RoundedView{
                                     width: 400 height: Fill flow: Down new_batch: true visible: false
-                                    draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
                                     View{
                                         width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                         padding: Inset{left: 14 right: 8 top: 10 bottom: 2}
@@ -1087,7 +1164,7 @@ script_mod! {
                                 tui_restart := SegOff{text: "Reconnect" height: 26}
                             }
                             // Its own surface (the desktop's terminal colours), framed lightly.
-                            cli_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: #xd8dee4}}
+                            cli_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}}
                             tui_note := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                         }
                         // The session's run on a time axis, to replay.
@@ -1102,12 +1179,12 @@ script_mod! {
                                 time_speed := SegOff{text: "20×"}
                                 time_squeeze := SegOff{text: "Squeeze idle"}
                                 Filler{}
-                                time_clock := Label{text: "" padding: 0 draw_text.color: #xcf222e draw_text.text_style: theme.font_code{font_size: 9}}
+                                time_clock := Label{text: "" padding: 0 draw_text.color: th_danger draw_text.text_style: theme.font_code{font_size: 9}}
                             }
-                            time_summary := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x57606a draw_text.text_style.font_size: 9}
+                            time_summary := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 9}
                             RoundedView{
                                 width: Fill height: Fill new_batch: true padding: 1
-                                draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                 timeline := TimelineCanvas{}
                             }
                             time_legend := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
@@ -1115,25 +1192,25 @@ script_mod! {
                                 width: Fill height: 180 flow: Right spacing: 10
                                 RoundedView{
                                     width: Fill height: Fill flow: Down spacing: 5 new_batch: true padding: 10
-                                    draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                     time_now_title := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9}}
-                                    time_now := Label{width: Fill text: "" padding: 0 draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                    time_now := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                                 }
                                 RoundedView{
                                     width: Fill height: Fill flow: Down spacing: 5 new_batch: true padding: 10
-                                    draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                     time_events_title := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9}}
-                                    time_events := Label{width: Fill text: "" padding: 0 draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                    time_events := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                                 }
                                 RoundedView{
                                     width: Fill height: Fill flow: Down spacing: 5 new_batch: true padding: 10
-                                    draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                     View{
                                         width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                         time_sel_title := Label{width: Fill text: "" padding: 0 draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 9}}
                                         time_open := SegOff{text: "Open" height: 22 visible: false}
                                     }
-                                    time_sel := Label{width: Fill text: "" padding: 0 draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                    time_sel := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                                 }
                             }
                         }
@@ -1141,34 +1218,34 @@ script_mod! {
                         // at the right, the outer and inner loops, the app.
                         SolidView{
                             width: Fill height: Fit flow: Right new_batch: true padding: Inset{top: 6 left: 14 right: 14 bottom: 6}
-                            draw_bg.color: #xfffffffa
+                            draw_bg.color: th_glass
                             View{
                                 width: Fit height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                 // The sidebar, folded away: opened again here.
                                 sidebar_open := IconButton{visible: false icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-                            Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14" fill: false stroke: #x57606a stroke_width: 1.6 stroke_linejoin: "round"}
+                            Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM9 5v14" fill: false stroke: th_muted_strong stroke_width: 1.6 stroke_linejoin: "round"}
                         }}
                                 view_chat := FloatChat{}
-                                view_chat_on := FloatChat{visible: false draw_bg.color: #xeef4ff draw_bg.border_color: #xa9c5f5 draw_bg.border_size: 1.0}
+                                view_chat_on := FloatChat{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 view_flow := FloatFlow{}
-                                view_flow_on := FloatFlow{visible: false draw_bg.color: #xeef4ff draw_bg.border_color: #xa9c5f5 draw_bg.border_size: 1.0}
+                                view_flow_on := FloatFlow{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 view_time := FloatTime{}
-                                view_time_on := FloatTime{visible: false draw_bg.color: #xeef4ff draw_bg.border_color: #xa9c5f5 draw_bg.border_size: 1.0}
+                                view_time_on := FloatTime{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 // The native TUI plugin: the outer loop's own CLI.
                                 view_tui := FloatTui{visible: false}
-                                view_tui_on := FloatTui{visible: false draw_bg.color: #xeef4ff draw_bg.border_color: #xa9c5f5 draw_bg.border_size: 1.0}
+                                view_tui_on := FloatTui{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                             }
                             Filler{}
                             View{
                                 width: Fit height: Fit flow: Right spacing: 6
                                 outer_btn := FloatOuter{}
-                                outer_btn_on := FloatOuter{visible: false draw_bg.color: #xeef4ff draw_bg.border_color: #xa9c5f5 draw_bg.border_size: 1.0}
+                                outer_btn_on := FloatOuter{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 inner_btn := FloatInner{}
-                                inner_btn_on := FloatInner{visible: false draw_bg.color: #xeef4ff draw_bg.border_color: #xa9c5f5 draw_bg.border_size: 1.0}
+                                inner_btn_on := FloatInner{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 new_peer_btn := FloatInner{visible: false}
                                 data_btn := FloatData{visible: false}
                                 preview_btn := FloatApp{visible: false}
-                                preview_btn_on := FloatApp{visible: false draw_bg.color: #xe6f4ea draw_bg.border_color: #xa6d6b4 draw_bg.border_size: 1.0}
+                                preview_btn_on := FloatApp{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
                                 publish_btn := FloatPublish{visible: false}
                                 plug_btn0 := FloatPlugin{visible: false}
                                 plug_btn1 := FloatPlugin{visible: false}
@@ -1183,14 +1260,14 @@ script_mod! {
                             data_panel := RoundedView{
                                 width: 440 height: Fit flow: Down spacing: 8 visible: false new_batch: true
                                 padding: Inset{left: 12 right: 12 top: 10 bottom: 10}
-                                draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                 View{
                                     width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                     DataIcon{}
                                     data_title := Label{text: "Data for the app" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9}}
                                 }
                                 // What the app already has: one line per source.
-                                data_known := Label{width: Fill text: "" padding: 0 draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                data_known := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                                 View{
                                     width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
                                     data_csv := SegOff{text: "Choose a CSV file…" height: 28}
@@ -1204,7 +1281,7 @@ script_mod! {
                         // graph: the person drags it by its header.
                         plan_panel := RoundedView{
                             width: 340 height: Fit flow: Down visible: false new_batch: true
-                            draw_bg.color: #xfffffffa draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+                            draw_bg.color: th_glass draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
                             plan_head := View{
                                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                 padding: Inset{left: 10 right: 6 top: 6 bottom: 6}
@@ -1216,8 +1293,8 @@ script_mod! {
                             }
                             plan_body := View{
                                 width: Fill height: Fit flow: Down spacing: 7 padding: Inset{left: 10 right: 10 bottom: 10}
-                                plan_intent := Label{width: Fill text: "" padding: 0 draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
-                                SolidView{width: Fill height: 1 draw_bg.color: #xe5e7eb}
+                                plan_intent := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                SolidView{width: Fill height: 1 draw_bg.color: th_hover}
                                 pr0 := PlanRow{}
                                 pr1 := PlanRow{}
                                 pr2 := PlanRow{}
@@ -1234,7 +1311,7 @@ script_mod! {
                         flow_menu := RoundedView{
                             width: 236 height: Fit flow: Down visible: false new_batch: true
                             padding: Inset{left: 4 right: 4 top: 4 bottom: 4}
-                            draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+                            draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
                             menu_title := Label{width: Fill text: "" max_lines: 1 padding: Inset{left: 8 right: 8 top: 4 bottom: 4} draw_text.color: muted draw_text.text_style.font_size: 8}
                             m_new_peer := MenuItem{}
                             m_open := MenuItem{}
@@ -1242,7 +1319,7 @@ script_mod! {
                             m_budget := MenuItem{}
                             m_new_outer := MenuItem{}
                             m_new_free := MenuItem{}
-                            m_delete := MenuItem{draw_text +: {color: #xcf222e color_hover: #xa40e26 color_focus: #xcf222e}}
+                            m_delete := MenuItem{draw_text +: {color: th_danger color_hover: th_danger_strong color_focus: th_danger}}
                         }
                       }
                         composer_area := View{
@@ -1263,21 +1340,21 @@ script_mod! {
                                     width: Fit height: 28 new_batch: true flow: Right spacing: 6 align: Align{y: 0.5}
                                     padding: Inset{left: 8 right: 8}
                                     cursor: MouseCursor.Hand grab_key_focus: false
-                                    draw_bg.color: #xf3f4f6 draw_bg.border_radius: 4.0
+                                    draw_bg.color: th_sidebar draw_bg.border_radius: 4.0
                                     outer_icon := View{width: Fit height: Fit ModelIcon{}}
                                     outer_icon_octos := View{width: Fit height: Fit visible: false ModelIcon{draw_svg +: {svg: crate_resource("self:resources/octos.svg")}}}
                                     outer_icon_codex := View{width: Fit height: Fit visible: false ModelIcon{draw_svg +: {svg: crate_resource("self:resources/codex.svg")}}}
                                     outer_icon_pi := View{width: Fit height: Fit visible: false ModelIcon{draw_svg +: {svg: crate_resource("self:resources/pi.svg")}}}
                                     outer_model := ModelText{}
                                     Vector{width: 10 height: 10 viewbox: vec4(0 0 24 24)
-                                        Path{d: "M6 9l6 6 6-6" fill: false stroke: #x6e7781 stroke_width: 2.5 stroke_linecap: "round" stroke_linejoin: "round"}
+                                        Path{d: "M6 9l6 6 6-6" fill: false stroke: th_muted stroke_width: 2.5 stroke_linecap: "round" stroke_linejoin: "round"}
                                     }
                                 }
                                 use_worktree := CheckBox{
                                     text: "Use a git worktree"
                                     draw_text +: {
-                                        color: #x57606a color_hover: #x1f2328 color_down: #x1f2328
-                                        color_focus: #x57606a color_active: #x1f2328
+                                        color: th_muted_strong color_hover: th_ink color_down: th_ink
+                                        color_focus: th_muted_strong color_active: th_ink
                                         text_style: theme.font_regular{font_size: 9}
                                     }
                                 }
@@ -1286,20 +1363,20 @@ script_mod! {
                                     text: "Stop" width: Fit height: 30 visible: false
                                     padding: Inset{left: 12 right: 12}
                                     draw_bg +: {
-                                        color: #xffebe9 color_hover: #xffd8d3 color_down: #xffc1ba color_focus: #xffebe9
+                                        color: th_danger_bg color_hover: th_danger_bg_hover color_down: th_danger_bg_down color_focus: th_danger_bg
                                         border_size: 0.0 border_radius: 6.0
                                     }
-                                    draw_text +: {color: #xcf222e color_hover: #xcf222e color_down: #xcf222e color_focus: #xcf222e}
+                                    draw_text +: {color: th_danger color_hover: th_danger color_down: th_danger color_focus: th_danger}
                                 }
                                 // After a stop: what waited, or the turn cut off, goes on.
                                 go_on := ButtonFlat{
                                     text: "Go on" width: Fit height: 30 visible: false
                                     padding: Inset{left: 12 right: 12}
                                     draw_bg +: {
-                                        color: #xeef4ff color_hover: #xdde9fd color_down: #xcfe0fc color_focus: #xeef4ff
+                                        color: th_accent_soft color_hover: th_accent_selected color_down: th_accent_selected color_focus: th_accent_soft
                                         border_size: 0.0 border_radius: 6.0
                                     }
-                                    draw_text +: {color: #x0b3d91 color_hover: #x0b3d91 color_down: #x0b3d91 color_focus: #x0b3d91}
+                                    draw_text +: {color: th_accent_ink color_hover: th_accent_ink color_down: th_accent_ink color_focus: th_accent_ink}
                                 }
                                 send := SendButton{}
                             }
@@ -1310,7 +1387,7 @@ script_mod! {
                     preview_divider := View{width: Fit height: Fill visible: false preview_handle := ResizeHandle{}}
                     preview_panel := SolidView{
                         width: 400 height: Fill flow: Down new_batch: true visible: false
-                        draw_bg.color: #xf6f8fa
+                        draw_bg.color: th_panel
                         View{
                             width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
                             padding: Inset{left: 16 right: 10 top: 14 bottom: 4}
@@ -1329,11 +1406,11 @@ script_mod! {
                             RoundedView{
                                 width: Fill height: Fit flow: Down spacing: 6 new_batch: true
                                 padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
-                                draw_bg.color: #xfff1f0 draw_bg.border_radius: 6.0
-                                preview_problem_title := Label{width: Fill text: "" draw_text.color: #xcf222e draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 9}}
+                                draw_bg.color: th_danger_bg draw_bg.border_radius: 6.0
+                                preview_problem_title := Label{width: Fill text: "" draw_text.color: th_danger draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 9}}
                                 ScrollYView{
                                     width: Fill height: 110 flow: Down
-                                    preview_errors := Label{width: Fill text: "" draw_text.color: #x82071e draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                                    preview_errors := Label{width: Fill text: "" draw_text.color: th_danger_strong draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
                                 }
                                 preview_fix := SegOff{text: "Ask the outer loop to fix it" height: 24}
                             }
@@ -1341,7 +1418,7 @@ script_mod! {
                         SolidView{width: Fill height: 1 draw_bg.color: line}
                         SolidView{
                             width: Fill height: Fill new_batch: true
-                            draw_bg.color: #xffffff
+                            draw_bg.color: th_raised
                             preview := Splash{width: Fill height: Fill}
                         }
                     }
@@ -1349,7 +1426,7 @@ script_mod! {
                     inner_divider := View{width: Fit height: Fill visible: false inner_handle := ResizeHandle{}}
                     inner_panel := SolidView{
                         width: 360 height: Fill flow: Down new_batch: true visible: false
-                        draw_bg.color: #xf6f8fa
+                        draw_bg.color: th_panel
                         View{
                             width: Fill height: Fit flow: Right align: Align{y: 0.5}
                             padding: Inset{left: 16 right: 10 top: 14 bottom: 4}
@@ -1403,10 +1480,10 @@ script_mod! {
                                     d_title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11.5}}
                                     close_peer := SegOff{text: "Close" height: 22 padding: Inset{left: 8 right: 8}}
                                     b_queued := Badge{label.text: "queued"}
-                                    b_running := Badge{draw_bg.color: #xddf4ff label +: {text: "running" draw_text.color: #x0969da}}
-                                    b_done := Badge{draw_bg.color: #xdafbe1 label +: {text: "done" draw_text.color: #x1a7f37}}
-                                    b_failed := Badge{draw_bg.color: #xffebe9 label +: {text: "failed" draw_text.color: #xcf222e}}
-                                    b_halted := Badge{draw_bg.color: #xfff8c5 label +: {draw_text.color: #x9a6700}}
+                                    b_running := Badge{draw_bg.color: th_accent_soft label +: {text: "running" draw_text.color: th_accent}}
+                                    b_done := Badge{draw_bg.color: th_success_bg label +: {text: "done" draw_text.color: th_success}}
+                                    b_failed := Badge{draw_bg.color: th_danger_bg label +: {text: "failed" draw_text.color: th_danger}}
+                                    b_halted := Badge{draw_bg.color: th_warning_bg label +: {draw_text.color: th_warning}}
                                 }
                                 d_meta := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                                 // What the flow canvas does to a card, here too: its budget, and handing it over.
@@ -1436,15 +1513,15 @@ script_mod! {
                                     width: Fill height: Fit flow: Down spacing: 6 visible: false new_batch: true
                                     margin: Inset{top: 4}
                                     padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
-                                    draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xe5e7eb
+                                    draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_hover
                                     View{
                                         width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
-                                        d_summary := Label{width: Fill text: "" padding: 0 draw_text.color: #x3d444d draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                                        d_summary := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9}
                                         toggle_details := SegOff{text: "Details" height: 22 padding: Inset{left: 8 right: 8}}
                                     }
                                     d_details := View{
                                         width: Fill height: Fit flow: Down spacing: 6 visible: false
-                                        d_verdict := Label{width: Fill text: "" padding: 0 draw_text.color: #x3d444d draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                                        d_verdict := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9}
                                         d_changes := Label{width: Fill text: "" padding: 0 draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
                                         d_actions := View{
                                             width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 6 align: Align{y: 0.5}
@@ -1453,38 +1530,38 @@ script_mod! {
                                         }
                                         d_patch_row := ScrollYView{
                                             width: Fill height: 220 visible: false
-                                            d_patch := Label{width: Fill text: "" draw_text.color: #x1f2328 draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+                                            d_patch := Label{width: Fill text: "" draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
                                         }
                                     }
                                 }
                             }
-                            SolidView{width: Fill height: 1 draw_bg.color: #xe5e7eb}
+                            SolidView{width: Fill height: 1 draw_bg.color: th_hover}
                             peer_messages_pane := View{
                                 width: Fill height: Fill
                                 peer_messages := ChatList{padding: Inset{left: 12 right: 12 top: 4 bottom: 8}}
                             }
                             inner_term_pane := View{
                                 width: Fill height: Fill visible: false margin: Inset{left: 8 right: 8 bottom: 8}
-                                inner_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: #xd8dee4}}
+                                inner_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}}
                             }
                         }
                         d_question_row := SolidView{
                             width: Fill height: Fit flow: Down visible: false new_batch: true
                             padding: Inset{left: 16 right: 16 top: 10 bottom: 10}
-                            draw_bg.color: #xddf4ff
-                            d_question := Label{width: Fill text: "" draw_text.color: #x0b3d91 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                            draw_bg.color: th_accent_soft
+                            d_question := Label{width: Fill text: "" draw_text.color: th_accent_ink draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
                         }
                         d_approval_row := SolidView{
                             width: Fill height: Fit flow: Down spacing: 6 visible: false new_batch: true
                             padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
-                            draw_bg.color: #xfff8c5
-                            d_approval_title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: #x3d444d draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                            draw_bg.color: th_warning_bg
+                            d_approval_title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_ink2 draw_text.text_style: theme.font_bold{font_size: 9.5}}
                             View{
                                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                 approve := ButtonFlat{
                                     text: "Approve" width: Fit height: 24 padding: Inset{left: 10 right: 10}
-                                    draw_bg +: {color: #x1a7f37 color_hover: #x167030 color_down: #x12602a color_focus: #x1a7f37 border_size: 0.0 border_radius: 6.0}
-                                    draw_text +: {color: #xffffff color_hover: #xffffff color_down: #xffffff color_focus: #xffffff}
+                                    draw_bg +: {color: th_success color_hover: th_success_strong color_down: th_success_strong color_focus: th_success border_size: 0.0 border_radius: 6.0}
+                                    draw_text +: {color: th_on_accent color_hover: th_on_accent color_down: th_on_accent color_focus: th_on_accent}
                                 }
                                 approve_session := SegOff{text: "Always in this session" height: 24}
                                 deny := SegOff{text: "Deny" height: 24}
@@ -1492,7 +1569,7 @@ script_mod! {
                             // The command can be long: it scrolls, the buttons stay in sight.
                             ScrollYView{
                                 width: Fill height: 96
-                                d_approval := Label{width: Fill text: "" padding: 0 draw_text.color: #x3d444d draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+                                d_approval := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
                             }
                         }
                         peer_composer := View{
@@ -1536,7 +1613,7 @@ script_mod! {
                 padding: Inset{left: 10 right: 16 top: 10 bottom: 10}
                 // Back to the conversations: its mark only, as the other icon buttons.
                 back := IconButton{icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-                    Path{d: "M15 5l-7 7 7 7" fill: false stroke: #x57606a stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
+                    Path{d: "M15 5l-7 7 7 7" fill: false stroke: th_muted_strong stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
                 }}
                 settings_title := Label{text: "Settings" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
             }
@@ -1555,6 +1632,8 @@ script_mod! {
                     nav_tools := NavOff{text: "Tools"}
                     nav_language_on := NavOn{text: "Language"}
                     nav_language := NavOff{text: "Language"}
+                    nav_appearance_on := NavOn{text: "Appearance" visible: false}
+                    nav_appearance := NavOff{text: "Appearance"}
                     nav_about_on := NavOn{text: "About"}
                     nav_about := NavOff{text: "About"}
                 }
@@ -1570,8 +1649,8 @@ script_mod! {
                             Filler{}
                             reload_providers := ButtonFlat{
                                 text: "Reload" width: Fit height: 28 padding: Inset{left: 12 right: 12}
-                                draw_bg +: {color: #xf3f4f6 color_hover: #xe5e7eb color_down: #xd8dee4 color_focus: #xf3f4f6 border_size: 0.0 border_radius: 6.0}
-                                draw_text +: {color: #x1f2328 color_hover: #x1f2328 color_down: #x1f2328 color_focus: #x1f2328}
+                                draw_bg +: {color: th_sidebar color_hover: th_hover color_down: th_line color_focus: th_sidebar border_size: 0.0 border_radius: 6.0}
+                                draw_text +: {color: th_ink color_hover: th_ink color_down: th_ink color_focus: th_ink}
                             }
                         }
                         providers_hint := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
@@ -1633,6 +1712,16 @@ script_mod! {
                             lang_zh := SegOff{text: "中文" height: 28}
                         }
                     }
+                    // The theme: OctoSense's light or dark, or one of OctoBuddy's own.
+                    appearance_section := ScrollYView{
+                        width: Fill height: Fill flow: Down spacing: 8 visible: false
+                        padding: Inset{left: 28 right: 28 top: 22 bottom: 22}
+                        appearance_title := Label{text: "Appearance" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 17}}
+                        appearance_hint := Body{text: ""}
+                        ap0 := ThemeRow{} ap1 := ThemeRow{} ap2 := ThemeRow{} ap3 := ThemeRow{}
+                        ap4 := ThemeRow{} ap5 := ThemeRow{} ap6 := ThemeRow{} ap7 := ThemeRow{}
+                        ap8 := ThemeRow{} ap9 := ThemeRow{} ap10 := ThemeRow{}
+                    }
                     about_section := ScrollYView{
                         width: Fill height: Fill flow: Down spacing: 10 visible: false
                         padding: Inset{left: 28 right: 28 top: 22 bottom: 22}
@@ -1655,7 +1744,7 @@ script_mod! {
         outer_picker := RoundedView{
             width: 640 height: Fit flow: Down spacing: 8 visible: false new_batch: true
             padding: Inset{left: 12 right: 12 top: 10 bottom: 10}
-            draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xd8dee4
+            draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
             View{
                 width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
                 pk_outer_on := SegOn{text: "Outer loop" height: 26}
@@ -1702,7 +1791,7 @@ script_mod! {
         add_menu := RoundedView{
             width: 230 height: Fit flow: Down visible: false new_batch: true
             padding: Inset{left: 4 right: 4 top: 4 bottom: 4}
-            draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+            draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
             a_project := MenuItem{}
             a_app := MenuItem{}
         }
@@ -1710,7 +1799,7 @@ script_mod! {
         side_menu := RoundedView{
             width: 220 height: Fit flow: Down visible: false new_batch: true
             padding: Inset{left: 4 right: 4 top: 4 bottom: 4}
-            draw_bg.color: #xffffff draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+            draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
             side_title := Label{width: Fill text: "" max_lines: 1 padding: Inset{left: 8 right: 8 top: 4 bottom: 4} draw_text.color: muted draw_text.text_style.font_size: 8}
             s_rename := MenuItem{}
             s_pin := MenuItem{}
@@ -1723,16 +1812,16 @@ script_mod! {
             s_mv3 := MenuItem{}
             s_mv4 := MenuItem{}
             s_mv5 := MenuItem{}
-            s_remove := MenuItem{draw_text +: {color: #xcf222e color_hover: #xa40e26 color_focus: #xcf222e}}
+            s_remove := MenuItem{draw_text +: {color: th_danger color_hover: th_danger_strong color_focus: th_danger}}
         }
         // Renaming a project or a session.
         rename_layer := View{
             width: Fill height: Fill flow: Overlay visible: false align: Align{x: 0.5 y: 0.35}
-            SolidView{width: Fill height: Fill cursor: MouseCursor.Default draw_bg.color: #x1f232833}
+            SolidView{width: Fill height: Fill cursor: MouseCursor.Default draw_bg.color: th_scrim}
             RoundedView{
                 width: 380 height: Fit flow: Down spacing: 12 new_batch: true
                 padding: Inset{left: 18 right: 18 top: 16 bottom: 14}
-                draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+                draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
                 rename_title := Label{width: Fill text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
                 rename_input := InputStyle{width: Fill height: 32}
                 View{
@@ -1746,10 +1835,10 @@ script_mod! {
         // A spec's file as written, opened from a card's Specs tab, over all.
         spec_layer := View{
             width: Fill height: Fill flow: Overlay visible: false align: Align{x: 0.5 y: 0.5}
-            spec_backdrop := SolidView{width: Fill height: Fill cursor: MouseCursor.Default grab_key_focus: false draw_bg.color: #x1f232833}
+            spec_backdrop := SolidView{width: Fill height: Fill cursor: MouseCursor.Default grab_key_focus: false draw_bg.color: th_scrim}
             RoundedView{
                 width: 720 height: 560 flow: Down new_batch: true
-                draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+                draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
                 View{
                     width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
                     padding: Inset{left: 18 right: 12 top: 14 bottom: 10}
@@ -1770,13 +1859,13 @@ script_mod! {
         // Deleting an outer loop, closing an inner one: asked first, over all.
         confirm_layer := View{
             width: Fill height: Fill flow: Overlay visible: false align: Align{x: 0.5 y: 0.4}
-            SolidView{width: Fill height: Fill cursor: MouseCursor.Default draw_bg.color: #x1f232833}
+            SolidView{width: Fill height: Fill cursor: MouseCursor.Default draw_bg.color: th_scrim}
             RoundedView{
                 width: 380 height: Fit flow: Down spacing: 12 new_batch: true
                 padding: Inset{left: 18 right: 18 top: 16 bottom: 14}
-                draw_bg.color: #xffffff draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xc8d1da
+                draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
                 confirm_title := Label{width: Fill text: "" padding: 0 draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 11}}
-                confirm_text := Label{width: Fill text: "" padding: 0 draw_text.color: #x57606a draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                confirm_text := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
                 View{
                     width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
                     Filler{}
@@ -2367,11 +2456,15 @@ impl OctoBuddyView {
 
     fn sync_settings(&mut self, cx: &mut Cx) {
         let tab = self.settings_tab;
+        if tab == SettingsTab::Appearance {
+            self.sync_appearance(cx);
+        }
         for (on, off, section, this) in [
             (ids!(nav_providers_on), ids!(nav_providers), ids!(providers_section), SettingsTab::Providers),
             (ids!(nav_plugins_on), ids!(nav_plugins), ids!(plugins_section), SettingsTab::Plugins),
             (ids!(nav_tools_on), ids!(nav_tools), ids!(tools_section), SettingsTab::Tools),
             (ids!(nav_language_on), ids!(nav_language), ids!(language_section), SettingsTab::Language),
+            (ids!(nav_appearance_on), ids!(nav_appearance), ids!(appearance_section), SettingsTab::Appearance),
             (ids!(nav_about_on), ids!(nav_about), ids!(about_section), SettingsTab::About),
         ] {
             self.view.button(cx, on).set_visible(cx, tab == this);
@@ -2594,7 +2687,7 @@ impl OctoBuddyView {
         for (id, text) in labels {
             self.view.label(cx, id).set_text(cx, text);
         }
-        let buttons: [(&[LiveId], &str); 25] = [
+        let buttons: [(&[LiveId], &str); 27] = [
             (ids!(stop), t("Stop", "停止")),
             (ids!(go_on), t("Go on", "继续")),
             (ids!(send), t("Send", "发送")),
@@ -2617,6 +2710,8 @@ impl OctoBuddyView {
             (ids!(reload_plugins), t("Rescan", "重新扫描")),
             (ids!(reload_tools), t("Check again", "重新检测")),
             (ids!(nav_language_on), t("Language", "语言")),
+            (ids!(nav_appearance_on), t("Appearance", "外观")),
+            (ids!(nav_appearance), t("Appearance", "外观")),
             (ids!(nav_language), t("Language", "语言")),
             (ids!(nav_about_on), t("About", "关于")),
             (ids!(nav_about), t("About", "关于")),
@@ -3101,20 +3196,20 @@ impl OctoBuddyView {
                 let (chosen, lit) = (matches!(card.template, t if t == live_id!(InnerSel) || t == live_id!(InnerSelLit)), card.active);
                 let tier = budget_tier(p);
                 let bg = match (tier, lit, chosen) {
-                    (3, _, _) => 0xffebe9,
-                    (2, _, _) => 0xfff1e5,
-                    (1, _, _) => 0xfff8e5,
-                    (_, true, _) => 0xf6fef9,
-                    (_, _, true) => 0xf5f9ff,
-                    _ => 0xffffff,
+                    (3, _, _) => crate::theme::hex("danger_bg"),
+                    (2, _, _) => crate::theme::hex("orange_bg"),
+                    (1, _, _) => crate::theme::hex("warning_bg"),
+                    (_, true, _) => crate::theme::hex("success_bg"),
+                    (_, _, true) => crate::theme::hex("accent_soft"),
+                    _ => crate::theme::hex("raised"),
                 };
                 let border = match (chosen, tier, lit) {
-                    (true, _, _) => 0x2f6feb,
-                    (_, 3, _) => 0xcf222e,
-                    (_, 2, _) => 0xe16f24,
-                    (_, 1, _) => 0xd4a72c,
-                    (_, _, true) => 0x1a7f37,
-                    _ => 0xd8dee4,
+                    (true, _, _) => crate::theme::hex("accent"),
+                    (_, 3, _) => crate::theme::hex("danger"),
+                    (_, 2, _) => crate::theme::hex("orange"),
+                    (_, 1, _) => crate::theme::hex("warning"),
+                    (_, _, true) => crate::theme::hex("success"),
+                    _ => crate::theme::hex("line"),
                 };
                 let size = if chosen || lit || tier > 0 { 2.0 } else { 1.0 };
                 let (bg, border) = (hex_color(bg), hex_color(border));
@@ -4084,7 +4179,8 @@ impl OctoBuddyView {
             self.page = Page::Chat;
             self.relayout(cx);
         }
-        let nav: [(&[LiveId], SettingsTab); 5] = [(ids!(nav_providers), SettingsTab::Providers), (ids!(nav_plugins), SettingsTab::Plugins), (ids!(nav_tools), SettingsTab::Tools), (ids!(nav_language), SettingsTab::Language), (ids!(nav_about), SettingsTab::About)];
+        let nav: [(&[LiveId], SettingsTab); 6] = [(ids!(nav_providers), SettingsTab::Providers), (ids!(nav_plugins), SettingsTab::Plugins), (ids!(nav_tools), SettingsTab::Tools), (ids!(nav_language), SettingsTab::Language), (ids!(nav_appearance), SettingsTab::Appearance), (ids!(nav_about), SettingsTab::About)];
+        self.appearance_actions(cx, actions);
         self.plugins_page_actions(cx, actions);
         for (id, lang) in [(ids!(lang_en), i18n::Lang::En), (ids!(lang_zh), i18n::Lang::Zh)] {
             if self.view.button(cx, id).clicked(actions) {

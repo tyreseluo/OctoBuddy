@@ -38,6 +38,15 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **视图。**对话；外环和内环的流程图；回放整个会话的时间轴；开启原生 TUI 插件后，还有 agent 自己的终端界面。
 - **插件。**内置的有：OctoSense 应用类型、应用预览与发布到 App Hub、应用数据、原生 TUI（默认关闭）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
 
+## 外观
+
+在设置 › 外观里选择它的样子。
+
+**跟随 OctoSense**（默认）：OctoSense 是深色时用 OctoBuddy 的深色主题，否则用浅色主题，OctoSense 一切换就跟着变。其余选项是 OctoBuddy 自己的主题：浅色、深色、GitHub Light、GitHub Dark、Atom One Light、Atom One Dark、Dracula、Nord、Solarized Light、Solarized Dark。选完立即生效，不用重启。
+
+- **选择保存在哪：**`<data>/appearance.json`。
+- **主题怎么定义：**每套主题在 `src/theme.rs` 里只写 11 个颜色（页面、侧栏、面板、文字、次要文字、分隔线、强调色、成功、危险、警告、紫色），其余 token 都由它们混合出来。所以加一套新主题，只要写 11 个颜色。
+
 ## 构建与测试
 
 在本仓库里：

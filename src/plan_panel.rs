@@ -33,15 +33,15 @@ fn round_peers(session: &Session) -> Option<(u64, Vec<&Peer>)> {
 /// Where a slice stands: its words and its dot's colour.
 fn standing(p: &Peer) -> (String, u32) {
     match (p.status.as_str(), p.review.as_deref().map(|r| r.split(':').next().unwrap_or("").trim())) {
-        ("running", _) => (status_word("running").into(), 0x1a7f37),
-        ("queued", _) => (status_word("queued").into(), 0xd4a72c),
-        ("checking", _) => (status_word("checking").into(), 0x0969da),
-        ("failed", _) => (status_word("failed").into(), 0xcf222e),
-        ("interrupted", _) => (status_word("interrupted").into(), 0x8c959f),
-        (_, Some("accept")) => (i18n::t("accepted", "已接受").into(), 0x2f6feb),
-        (_, Some("fix")) => (i18n::t("to fix", "待修复").into(), 0xe16f24),
-        ("closed", _) => (status_word("closed").into(), 0x8c959f),
-        _ => (i18n::t("done, under review", "已完成，待审查").into(), 0x8250df),
+        ("running", _) => (status_word("running").into(), crate::theme::hex("success")),
+        ("queued", _) => (status_word("queued").into(), crate::theme::hex("warning")),
+        ("checking", _) => (status_word("checking").into(), crate::theme::hex("accent")),
+        ("failed", _) => (status_word("failed").into(), crate::theme::hex("danger")),
+        ("interrupted", _) => (status_word("interrupted").into(), crate::theme::hex("faint")),
+        (_, Some("accept")) => (i18n::t("accepted", "已接受").into(), crate::theme::hex("accent")),
+        (_, Some("fix")) => (i18n::t("to fix", "待修复").into(), crate::theme::hex("orange")),
+        ("closed", _) => (status_word("closed").into(), crate::theme::hex("faint")),
+        _ => (i18n::t("done, under review", "已完成，待审查").into(), crate::theme::hex("purple")),
     }
 }
 

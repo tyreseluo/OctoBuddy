@@ -629,11 +629,11 @@ impl TimelineCanvas {
 
     fn span_color(&self, s: &Span) -> u32 {
         match (s.outcome.as_str(), self.tl.lanes[s.lane].kind) {
-            ("failed", _) => 0xcf222e,
-            ("interrupted", _) => 0x8c959f,
-            (_, Kind::Outer) => 0x2f6feb,
-            (_, Kind::Inner) => 0x1a7f37,
-            (_, Kind::Review) => 0x8250df,
+            ("failed", _) => crate::theme::hex("danger"),
+            ("interrupted", _) => crate::theme::hex("faint"),
+            (_, Kind::Outer) => crate::theme::hex("accent"),
+            (_, Kind::Inner) => crate::theme::hex("success"),
+            (_, Kind::Review) => crate::theme::hex("purple"),
         }
     }
 
@@ -789,7 +789,7 @@ impl Widget for TimelineCanvas {
         // Lanes: a light stripe every other one.
         for i in 0..lanes {
             if i % 2 == 1 && self.lane_visible(i) {
-                self.draw_vector.set_color_hex(0xf6f8fa, 1.0);
+                self.draw_vector.set_color_hex(crate::theme::hex("panel"), 1.0);
                 self.draw_vector.rect(rect.pos.x as f32, self.lane_y(i) as f32, rect.size.x as f32, lane_h as f32);
                 self.draw_vector.fill();
             }
@@ -800,11 +800,11 @@ impl Widget for TimelineCanvas {
                 continue;
             }
             let (xa, xb) = (self.x(a).max(x0), self.x(b).min(x1));
-            self.draw_vector.set_color_hex(0xeaeef2, 1.0);
+            self.draw_vector.set_color_hex(crate::theme::hex("hover"), 1.0);
             self.draw_vector.rect(xa as f32, (rect.pos.y + AXIS_H) as f32, (xb - xa).max(1.0) as f32, (bottom - rect.pos.y - AXIS_H) as f32);
             self.draw_vector.fill();
             if xb - xa > 18.0 {
-                texts.push((dvec2(xa + 2.0, rect.pos.y + 16.0), format!("≈{}", span_len(r1 - r0)), 7.0, rgb(0x8c959f, 1.0)));
+                texts.push((dvec2(xa + 2.0, rect.pos.y + 16.0), format!("≈{}", span_len(r1 - r0)), 7.0, rgb(crate::theme::hex("faint"), 1.0)));
             }
         }
         // Rounds: a dashed line where each began.
@@ -815,13 +815,13 @@ impl Widget for TimelineCanvas {
             }
             let mut y = rect.pos.y + AXIS_H;
             while y < bottom {
-                self.draw_vector.set_color_hex(0x8250df, 0.5);
+                self.draw_vector.set_color_hex(crate::theme::hex("purple"), 0.5);
                 self.draw_vector.rect(x as f32, y as f32, 1.0, 4.0);
                 self.draw_vector.fill();
                 y += 7.0;
             }
             // At the line's foot: the axis's top is the playhead's.
-            texts.push((dvec2(x + 3.0, bottom - 12.0), i18n::pick(format!("round {round}"), format!("第 {round} 轮")), 7.0, rgb(0x8250df, 1.0)));
+            texts.push((dvec2(x + 3.0, bottom - 12.0), i18n::pick(format!("round {round}"), format!("第 {round} 轮")), 7.0, rgb(crate::theme::hex("purple"), 1.0)));
         }
         // The turns: solid up to the playhead, faint after.
         let tip_rect = self.hover.and_then(|h| self.tl.spans.get(h)).map(|_| Rect::default());
@@ -839,7 +839,7 @@ impl Widget for TimelineCanvas {
                 self.draw_vector.fill();
             }
             if self.selected == Some(i) || self.hover == Some(i) {
-                self.draw_vector.set_color_hex(if self.selected == Some(i) { 0x24292f } else { 0x57606a }, 1.0);
+                self.draw_vector.set_color_hex(if self.selected == Some(i) { crate::theme::hex("ink") } else { crate::theme::hex("muted_strong") }, 1.0);
                 self.draw_vector.rounded_rect((r.pos.x - 1.5) as f32, (r.pos.y - 1.5) as f32, (r.size.x + 3.0) as f32, (r.size.y + 3.0) as f32, 4.0);
                 self.draw_vector.stroke(1.3);
             }
@@ -850,7 +850,7 @@ impl Widget for TimelineCanvas {
             let short = format!("#{}", s.turn);
             let ws = self.text_w(cx, &short, 7.5);
             let solid = cut - r.pos.x;
-            let ink = if solid > 8.0 { rgb(0xffffff, 1.0) } else { rgb(color, 1.0) };
+            let ink = if solid > 8.0 { rgb(crate::theme::hex("on_accent"), 1.0) } else { rgb(color, 1.0) };
             if r.pos.y < top {
                 // Partly under the axis: no label.
             } else if r.size.x > w + 8.0 {
@@ -869,7 +869,7 @@ impl Widget for TimelineCanvas {
             let mid = |lane: usize| self.lane_y(lane) + lane_h * 0.5;
             match (m.kind, m.to) {
                 (MarkKind::Dispatch | MarkKind::Report, Some(to)) => {
-                    let color = if m.kind == MarkKind::Dispatch { 0x2f6feb } else { 0x8250df };
+                    let color = if m.kind == MarkKind::Dispatch { crate::theme::hex("accent") } else { crate::theme::hex("purple") };
                     let (ya, yb) = (mid(m.lane), mid(to));
                     let dir = if yb > ya { 1.0 } else { -1.0 };
                     let (ya, yb) = (ya + dir * 7.0, yb - dir * 9.0);
@@ -889,13 +889,13 @@ impl Widget for TimelineCanvas {
                 }
                 (MarkKind::Person, _) if self.lane_visible(m.lane) => {
                     let y = self.lane_y(m.lane) + 4.0;
-                    self.draw_vector.set_color_hex(0xbf8700, alpha);
+                    self.draw_vector.set_color_hex(crate::theme::hex("warning"), alpha);
                     self.draw_vector.circle(x as f32, y as f32, 3.2);
                     self.draw_vector.fill();
                 }
                 (MarkKind::Commit, _) if self.lane_visible(m.lane) => {
                     let y = self.lane_y(m.lane) + lane_h - 5.0;
-                    self.draw_vector.set_color_hex(0x1a7f37, alpha);
+                    self.draw_vector.set_color_hex(crate::theme::hex("success"), alpha);
                     self.draw_vector.move_to(x as f32, (y - 3.5) as f32);
                     self.draw_vector.line_to((x + 3.5) as f32, y as f32);
                     self.draw_vector.line_to(x as f32, (y + 3.5) as f32);
@@ -907,7 +907,7 @@ impl Widget for TimelineCanvas {
             }
         }
         // The gutter: over anything that ran past the left edge.
-        self.draw_vector.set_color_hex(0xffffff, 1.0);
+        self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
         self.draw_vector.rect(rect.pos.x as f32, top as f32, (GUTTER - 6.0) as f32, (bottom - top).max(0.0) as f32);
         self.draw_vector.fill();
         for i in 0..lanes {
@@ -915,21 +915,21 @@ impl Widget for TimelineCanvas {
                 continue;
             }
             if i % 2 == 1 {
-                self.draw_vector.set_color_hex(0xf6f8fa, 1.0);
+                self.draw_vector.set_color_hex(crate::theme::hex("panel"), 1.0);
                 self.draw_vector.rect(rect.pos.x as f32, self.lane_y(i) as f32, (GUTTER - 6.0) as f32, lane_h as f32);
                 self.draw_vector.fill();
             }
-            let dot = match self.tl.lanes[i].kind { Kind::Outer => 0x2f6feb, Kind::Inner => 0x1a7f37, Kind::Review => 0x8250df };
+            let dot = match self.tl.lanes[i].kind { Kind::Outer => crate::theme::hex("accent"), Kind::Inner => crate::theme::hex("success"), Kind::Review => crate::theme::hex("purple") };
             self.draw_vector.set_color_hex(dot, if self.tl.lanes[i].closed { 0.4 } else { 1.0 });
             self.draw_vector.circle((rect.pos.x + 10.0) as f32, (self.lane_y(i) + if lane_h >= 30.0 { 11.0 } else { lane_h * 0.5 }) as f32, 3.5);
             self.draw_vector.fill();
         }
         // The axis' band, over the lanes scrolled under it.
-        self.draw_vector.set_color_hex(0xffffff, 1.0);
+        self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
         self.draw_vector.rect(rect.pos.x as f32, rect.pos.y as f32, rect.size.x as f32, (AXIS_H - 1.0) as f32);
         self.draw_vector.fill();
         // The axis: a rule, ticks every round interval of real time.
-        self.draw_vector.set_color_hex(0xd0d7de, 1.0);
+        self.draw_vector.set_color_hex(crate::theme::hex("line"), 1.0);
         self.draw_vector.rect(x0 as f32, (rect.pos.y + AXIS_H - 1.0) as f32, (x1 - x0) as f32, 1.0);
         self.draw_vector.fill();
         let (r0, r1) = (self.axis.real(v0), self.axis.real(v1));
@@ -941,29 +941,29 @@ impl Widget for TimelineCanvas {
             let squeezed = self.axis.gaps.iter().any(|g| tick > g.0 && tick < g.1);
             if !squeezed {
                 let x = self.x(self.axis.vis(tick));
-                self.draw_vector.set_color_hex(0xd0d7de, 1.0);
+                self.draw_vector.set_color_hex(crate::theme::hex("line"), 1.0);
                 self.draw_vector.rect(x as f32, (rect.pos.y + AXIS_H - 5.0) as f32, 1.0, 4.0);
                 self.draw_vector.fill();
                 let label = clock(tick);
                 if x + 3.0 + self.text_w(cx, &label, 7.5) <= x1 + RIGHT - 2.0 {
-                    texts.push((dvec2(x + 3.0, rect.pos.y + 4.0), label, 7.5, rgb(0x6e7781, 1.0)));
+                    texts.push((dvec2(x + 3.0, rect.pos.y + 4.0), label, 7.5, rgb(crate::theme::hex("muted"), 1.0)));
                 }
             }
             tick += step;
         }
         // The scroll bar, when the lanes do not all fit.
         if let Some(t) = self.thumb() {
-            self.draw_vector.set_color_hex(0xeaeef2, 1.0);
+            self.draw_vector.set_color_hex(crate::theme::hex("hover"), 1.0);
             self.draw_vector.rounded_rect(t.pos.x as f32, top as f32, t.size.x as f32, self.view_h() as f32, 2.5);
             self.draw_vector.fill();
-            self.draw_vector.set_color_hex(if self.dragging_bar.is_some() { 0x57606a } else { 0x8c959f }, 1.0);
+            self.draw_vector.set_color_hex(if self.dragging_bar.is_some() { crate::theme::hex("muted_strong") } else { crate::theme::hex("faint") }, 1.0);
             self.draw_vector.rounded_rect(t.pos.x as f32, t.pos.y as f32, t.size.x as f32, t.size.y as f32, 2.5);
             self.draw_vector.fill();
         }
         // The playhead.
         let xp = self.x(self.t);
         if xp >= x0 - 1.0 && xp <= x1 + 1.0 {
-            self.draw_vector.set_color_hex(0xcf222e, 1.0);
+            self.draw_vector.set_color_hex(crate::theme::hex("danger"), 1.0);
             self.draw_vector.rect((xp - 0.75) as f32, (rect.pos.y + AXIS_H - 6.0) as f32, 1.5, (bottom - rect.pos.y - AXIS_H + 6.0) as f32);
             self.draw_vector.fill();
             self.draw_vector.move_to((xp - 5.0) as f32, (rect.pos.y + AXIS_H - 10.0) as f32);
@@ -984,10 +984,10 @@ impl Widget for TimelineCanvas {
                 p.y = self.pointer.y - h - 8.0;
             }
             let r = Rect { pos: p, size: dvec2(w, h) };
-            self.draw_vector.set_color_hex(0xffffff, 1.0);
+            self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
             self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, r.size.x as f32, r.size.y as f32, 4.0);
             self.draw_vector.fill();
-            self.draw_vector.set_color_hex(0xd0d7de, 1.0);
+            self.draw_vector.set_color_hex(crate::theme::hex("line"), 1.0);
             self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, r.size.x as f32, r.size.y as f32, 4.0);
             self.draw_vector.stroke(1.0);
             tip = Some((r, lines));
@@ -1001,12 +1001,12 @@ impl Widget for TimelineCanvas {
             if y + 3.0 < top || y > rect.pos.y + rect.size.y - 12.0 {
                 continue;
             }
-            let ink = if lane.closed { rgb(0x8c959f, 1.0) } else { rgb(0x24292f, 1.0) };
+            let ink = if lane.closed { rgb(crate::theme::hex("faint"), 1.0) } else { rgb(crate::theme::hex("ink"), 1.0) };
             let name: String = lane.name.chars().take(18).collect();
             if lane_h >= 30.0 {
                 self.text(cx, dvec2(rect.pos.x + 18.0, y + 4.0), &name, 8.5, ink);
                 let sub: String = lane.sub.chars().take(24).collect();
-                self.text(cx, dvec2(rect.pos.x + 18.0, y + 18.0), &sub, 7.0, rgb(0x6e7781, 1.0));
+                self.text(cx, dvec2(rect.pos.x + 18.0, y + 18.0), &sub, 7.0, rgb(crate::theme::hex("muted"), 1.0));
             } else {
                 self.text(cx, dvec2(rect.pos.x + 18.0, y + lane_h * 0.5 - 6.0), &name, 8.0, ink);
             }
@@ -1024,11 +1024,11 @@ impl Widget for TimelineCanvas {
             let label = clock(now);
             let w = self.text_w(cx, &label, 7.5);
             let x = if xp + 6.0 + w > x1 { xp - 6.0 - w } else { xp + 6.0 };
-            self.text(cx, dvec2(x, rect.pos.y + AXIS_H - 16.0), &label, 7.5, rgb(0xcf222e, 1.0));
+            self.text(cx, dvec2(x, rect.pos.y + AXIS_H - 16.0), &label, 7.5, rgb(crate::theme::hex("danger"), 1.0));
         }
         if let Some((r, lines)) = tip {
             for (k, line) in lines.iter().enumerate() {
-                let color = if k == 0 { rgb(0x24292f, 1.0) } else { rgb(0x57606a, 1.0) };
+                let color = if k == 0 { rgb(crate::theme::hex("ink"), 1.0) } else { rgb(crate::theme::hex("muted_strong"), 1.0) };
                 self.text(cx, r.pos + dvec2(8.0, 5.0 + k as f64 * 15.0), line, 8.0, color);
             }
         }

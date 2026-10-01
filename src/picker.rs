@@ -113,7 +113,7 @@ impl OctoBuddyView {
             row.label(cx, ids!(name)).set_text(cx, Self::agent_name(agent));
             row.label(cx, ids!(sub)).set_text(cx, &sub);
             row.label(cx, ids!(arrow)).set_text(cx, if models.is_empty() { "" } else { "›" });
-            let bg = if agent == shown { crate::hex_color(0xdde7fb) } else { crate::hex_color(0xffffff) };
+            let bg = if agent == shown { crate::theme::vec4("accent_selected") } else { crate::theme::vec4("raised") };
             let mut w = row.clone();
             script_apply_eval!(cx, w, { draw_bg +: {color: #(bg)} });
         }
@@ -128,7 +128,7 @@ impl OctoBuddyView {
                 let on = *p == now;
                 row.label(cx, ids!(label)).set_text(cx, label);
                 row.label(cx, ids!(mark)).set_text(cx, if on { "✓" } else { "" });
-                let bg = if on { crate::hex_color(0xf0f6ff) } else { crate::hex_color(0xffffff) };
+                let bg = if on { crate::theme::vec4("accent_soft") } else { crate::theme::vec4("raised") };
                 let mut w = row.clone();
                 script_apply_eval!(cx, w, { draw_bg +: {color: #(bg)} });
             }
@@ -176,7 +176,7 @@ impl OctoBuddyView {
             if let Some(level) = choice {
                 let on = level.map(String::from) == current;
                 chip.label(cx, ids!(label)).set_text(cx, effort_word(level.unwrap_or("")));
-                let (bg, edge) = if on { (crate::hex_color(0xdde7fb), crate::hex_color(0xa9c5f5)) } else { (crate::hex_color(0xffffff), crate::hex_color(0xe1e5ea)) };
+                let (bg, edge) = if on { (crate::theme::vec4("accent_selected"), crate::theme::vec4("accent_line")) } else { (crate::theme::vec4("raised"), crate::theme::vec4("line")) };
                 let mut w = chip.clone();
                 script_apply_eval!(cx, w, { draw_bg +: {color: #(bg) border_color: #(edge)} });
             }
