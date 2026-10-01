@@ -5182,8 +5182,9 @@ mod tests {
     /// here instead of at runtime.
     #[test]
     fn view_script_evaluates() {
+        // No OS layer (no window server, no GPU): what a CI runner has, and
+        // all the script needs. OctoSense's own script tests do the same.
         let mut cx = Cx::new(Box::new(|_, _| {}));
-        cx.init_cx_os();
         cx.with_vm(|vm| {
             makepad_widgets::script_mod(vm);
             makepad_terminal::widget::script_mod(vm);
