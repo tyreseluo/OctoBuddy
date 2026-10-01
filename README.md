@@ -56,7 +56,7 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
   - The agent takes it up at its next step. If it arrives just after the turn ends, it goes first in the queue instead.
   - Below the message, a receipt says whether it was taken up.
 - **Views.** Chat, the flow graph of the outer and inner loops, a timeline to replay the session, and (with the native TUI plugin) the agent's own terminal UI.
-- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, and the native TUI (off by default). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
+- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
 
 ## Appearance
 

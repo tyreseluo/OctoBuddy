@@ -11,9 +11,9 @@ pub enum LoopEvent {
     /// Time to start octos again (it found its data directory still held).
     ServeRetry,
     /// A data source for a session's app was read (or could not be).
-    DataFound { session: String, found: Result<crate::datasource::Found, String>, commit: Option<String> },
+    DataFound { session: String, found: Result<crate::plugins::app_data::Found, String>, commit: Option<String> },
     /// An app was published to the local App Hub (or could not be).
-    Published { session: String, result: Result<crate::publish::Published, String> },
+    Published { session: String, result: Result<crate::plugins::app_publish::Published, String> },
     /// A request's context pack, built off the UI thread: the request goes on.
     PackReady { session: String, message: String, pack: Option<String> },
     /// Settings › Tools: the versions found on this machine.

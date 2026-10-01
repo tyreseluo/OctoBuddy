@@ -59,7 +59,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - agent 在下一步采纳它；如果刚好在这一轮结束后才到，就改成排在队列最前面。
   - 消息下方有一行回执，显示它是否已送达。
 - **视图。**对话；外环和内环的流程图；回放整个会话的时间轴；开启原生 TUI 插件后，还有 agent 自己的终端界面。
-- **插件。**内置的有：OctoSense 应用类型、应用预览与发布到 App Hub、应用数据、原生 TUI（默认关闭）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
+- **插件。**内置的有：OctoSense 应用类型、应用预览与发布到 App Hub、应用数据、原生 TUI（默认关闭）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
 
 ## 外观
 

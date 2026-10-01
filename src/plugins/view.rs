@@ -1,7 +1,7 @@
 //! Plugins in the window: the external plugins' buttons over the
 //! conversation, Settings › Plugins (each plugin, what it adds, its switch)
 //! and Settings › Tools (what OctoBuddy runs on, its versions), and the
-//! outer loop's `octobuddy_plugin` calls. The plugins themselves: `plugins.rs`.
+//! outer loop's `octobuddy_plugin` calls. The plugins themselves: this folder (`mod.rs`).
 use crate::events::{self, LoopEvent};
 use crate::{agents, i18n, plugins, tapped, tools_info, OctoBuddyView};
 use makepad_widgets::*;

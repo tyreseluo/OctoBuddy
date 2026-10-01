@@ -7,7 +7,7 @@
 //! inner loops the API reference inside the project (`.octobuddy/docs`),
 //! checks each one's work with App Hub's gate and a headless run
 //! ([`CHECK`], a script it writes) and runs the app in its own window
-//! (`preview.rs`). Publishing to App Hub stays the person's step: a publisher
+//! (`app_preview`). Publishing to App Hub stays the person's step: a publisher
 //! key, the listing, the store screenshots.
 use crate::workspace::search_path;
 use std::path::{Path, PathBuf};

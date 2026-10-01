@@ -422,7 +422,7 @@ impl OctoBuddyView {
                 let inbox = self.rt.inbox.clone();
                 std::thread::spawn(move || {
                     if app {
-                        let _ = crate::app::prepare(&cwd);
+                        let _ = crate::plugins::octosense_app::prepare(&cwd);
                     }
                     let pack = crate::pack::build(&project, &cwd, &text, first, app);
                     events::post(&inbox, LoopEvent::PackReady { session: id, message, pack });
@@ -605,7 +605,7 @@ impl OctoBuddyView {
         let plain = project.is_chats();
         // An OctoSense app: the outer loop is told how one is built.
         let app_rules = |view: &mut Self| if !plain && crate::plugins::active(crate::plugins::OCTOSENSE_APP, &project.path) {
-            crate::app::prepare(&cwd).unwrap_or_else(|err| {
+            crate::plugins::octosense_app::prepare(&cwd).unwrap_or_else(|err| {
                 view.system(at, &i18n::pick(format!("This is an OctoSense app, but its tools are missing: {err}"), format!("这是 OctoSense 应用项目，但缺少工具：{err}")));
                 String::new()
             })
@@ -893,7 +893,7 @@ impl OctoBuddyView {
         // An app's slices are checked the way an app is: by its gate and a headless run.
         if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &self.store.projects[at.0].path) {
             for slice in slices.iter_mut().filter(|s| s.check.is_none()) {
-                slice.check = Some(crate::app::CHECK.into());
+                slice.check = Some(crate::plugins::octosense_app::CHECK.into());
             }
         }
         let dir = match self.work_dir(at) {
@@ -1164,7 +1164,7 @@ What the person says to you after it stays between you and them.");
                 // An app's inner loop does not run the app: OctoBuddy does (for
                 // one on Claude Code, through its tools, as it works).
                 if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &p.dir) {
-                    text.push_str(if self.on_claude(peer) { crate::app::INNER_NOTE_TOOLS } else { crate::app::INNER_NOTE });
+                    text.push_str(if self.on_claude(peer) { crate::plugins::octosense_app::INNER_NOTE_TOOLS } else { crate::plugins::octosense_app::INNER_NOTE });
                 }
                 text
             }
@@ -1539,12 +1539,12 @@ It works for you now: message it, review its work, or close it.)\n"));
                 match result {
                     Ok(p) => {
                         let bumped = p.bumped.map(|c| i18n::pick(format!(" (version raised, commit {c})"), format!("（版本已提升，提交 {c}）"))).unwrap_or_default();
-                        let how = if crate::publish::shell_reads_it() {
+                        let how = if crate::plugins::app_publish::shell_reads_it() {
                             i18n::t("Open App Hub in the dock, choose it, Get, then Install (below its permissions) and Open.",
                                 "在 Dock 里打开 App Hub，选中它，点 Get，再点 Install（在权限说明下方），然后 Open。").to_string()
                         } else {
-                            let anchor = crate::publish::anchor().unwrap_or_default();
-                            let dir = crate::publish::hub_dir().display().to_string();
+                            let anchor = crate::plugins::app_publish::anchor().unwrap_or_default();
+                            let dir = crate::plugins::app_publish::hub_dir().display().to_string();
                             i18n::pick(format!("This OctoSense does not read the local App Hub yet: start it with OCTOSENSE_HUB={dir} OCTOSENSE_HUB_ANCHOR={anchor}, then App Hub lists it (Get, Install, Open)."),
                                 format!("这个 OctoSense 还没读取本地 App Hub：用 OCTOSENSE_HUB={dir} OCTOSENSE_HUB_ANCHOR={anchor} 启动它，App Hub 里就会列出（Get、Install、Open）。"))
                         };
@@ -2143,7 +2143,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             let mut verdict = Vec::new();
             // An app's manifest the peer rewrote: its digest made right first.
             if (commit.is_some() || auto.is_some()) && files.iter().any(|f| f == "bundle/manifest.json") {
-                crate::app::repair_digest(&dir);
+                crate::plugins::octosense_app::repair_digest(&dir);
             }
             let mut commit = commit.map(|message| workspace::commit_files(&dir, &files, &message));
             match &commit {
@@ -2156,7 +2156,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             }
             let mut passed = None;
             if let Some(cmd) = tests {
-                let outcome = match crate::app::ensure_check(&cmd) {
+                let outcome = match crate::plugins::octosense_app::ensure_check(&cmd) {
                     Ok(()) => crate::verify::run(&cmd, &dir, crate::verify::TIMEOUT),
                     Err(err) => crate::verify::Outcome { passed: false, status: format!("could not start: {err}"), tail: String::new() },
                 };

@@ -25,7 +25,7 @@ pub struct Running {
 /// it cannot run (a refusal, or the script's errors), one line each.
 pub fn start(cx: &mut Cx, splash: &SplashRef, project: &str) -> Result<Running, Vec<String>> {
     let one = |e: String| vec![e];
-    let bundle = crate::app::bundle(project);
+    let bundle = crate::plugins::octosense_app::bundle(project);
     let manifest = std::fs::read_to_string(bundle.join(octosense_app_policy::MANIFEST_FILE)).map_err(|e| one(format!("manifest.json: {e}")))?;
     let digest = octosense_app_policy::digest_dir(&bundle).map_err(one)?;
     // Edited while it runs, and unsigned: its digest is stamped in memory,
@@ -82,7 +82,7 @@ pub fn stamp(project: &str) -> u64 {
         }
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    walk(&crate::app::bundle(project), &mut h);
+    walk(&crate::plugins::octosense_app::bundle(project), &mut h);
     h.finish()
 }
 

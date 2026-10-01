@@ -205,7 +205,7 @@ pub fn search_path() -> String {
     let mut dirs: Vec<String> = std::env::var("PATH").unwrap_or_default().split(':').map(String::from).collect();
     // OctoBuddy's own commands first (`octobuddy-app-check`), then what
     // the agents it keeps bring along (Codex's ripgrep).
-    dirs.insert(0, crate::app::bin_dir().to_string_lossy().into_owned());
+    dirs.insert(0, crate::plugins::octosense_app::bin_dir().to_string_lossy().into_owned());
     for (i, extra) in crate::agents::extra_path().into_iter().enumerate() {
         dirs.insert(1 + i, extra.to_string_lossy().into_owned());
     }

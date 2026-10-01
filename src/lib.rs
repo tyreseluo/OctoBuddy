@@ -19,10 +19,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub mod agents;
-pub mod app;
 mod chat;
 mod context;
-pub mod datasource;
 pub mod flow;
 pub mod i18n;
 pub mod contract;
@@ -37,7 +35,6 @@ mod octos_outer;
 mod orchestrate;
 pub mod plan;
 mod persist;
-pub mod preview;
 pub mod providers;
 mod review;
 pub mod stream;
@@ -52,10 +49,8 @@ mod card_tabs;
 mod picker;
 mod appearance;
 pub mod plugins;
-mod plugins_view;
 mod tools_info;
 mod reveal;
-mod tui;
 mod resize;
 pub mod theme;
 mod layout;
@@ -63,7 +58,6 @@ mod pack;
 mod responses_bridge;
 mod rpc_lead;
 use card_tabs::{CardTab, SpecRow};
-pub mod publish;
 mod sidebar;
 mod system_chat;
 pub mod verify;
@@ -2128,7 +2122,7 @@ pub struct OctoBuddyView {
     #[rust]
     show_preview: bool,
     #[rust]
-    preview: Option<preview::Running>,
+    preview: Option<plugins::app_preview::Running>,
     // The project it runs, and its files' stamp then.
     #[rust]
     preview_of: Option<(String, u64)>,
@@ -2902,8 +2896,8 @@ impl OctoBuddyView {
     /// A new OctoSense app in `dir` (empty or new), or an app's own folder.
     fn add_app(&mut self, cx: &mut Cx, dir: &std::path::Path) {
         let path = dir.to_string_lossy().into_owned();
-        if !app::is_app(&path) {
-            if let Err(err) = app::create(dir) {
+        if !plugins::octosense_app::is_app(&path) {
+            if let Err(err) = plugins::octosense_app::create(dir) {
                 self.say(cx, &i18n::pick(format!("Could not make an OctoSense app there: {err}"), format!("无法在那里新建 OctoSense 应用：{err}")));
                 return;
             }
@@ -2928,7 +2922,7 @@ impl OctoBuddyView {
             "正在发布到本地 App Hub：签名一份 bundle 副本、补截图、跑 App Hub 的检查……"));
         let inbox = self.rt.inbox.clone();
         std::thread::spawn(move || {
-            let result = publish::publish(&project);
+            let result = plugins::app_publish::publish(&project);
             events::post(&inbox, events::LoopEvent::Published { session, result });
         });
         self.relayout(cx);
@@ -2947,14 +2941,14 @@ impl OctoBuddyView {
         std::thread::spawn(move || {
             let (found, commit) = match from {
                 DataFrom::Csv(file) => {
-                    let found = datasource::add_csv(&project, &file);
+                    let found = plugins::app_data::add_csv(&project, &file);
                     // Its data line is OctoBuddy's change: committed as such.
                     let commit = found.as_ref().ok().and_then(|f| {
                         workspace::commit_files(&project, &["bundle/main.splash".to_string()], &format!("chore(data): 加入数据 {}", f.name)).ok()
                     });
                     (found, commit)
                 }
-                DataFrom::Api(url) => (datasource::add_api(&project, &url), None),
+                DataFrom::Api(url) => (plugins::app_data::add_api(&project, &url), None),
             };
             events::post(&inbox, events::LoopEvent::DataFound { session, found, commit });
         });
@@ -2982,22 +2976,22 @@ impl OctoBuddyView {
         let splash = self.view.splash(cx, ids!(preview));
         let Some(project) = project.filter(|_| self.show_preview && self.page == Page::Chat) else {
             if self.preview.take().is_some() {
-                preview::stop(cx, &splash);
+                plugins::app_preview::stop(cx, &splash);
             }
             self.preview_of = None;
             self.preview_errors.clear();
             return;
         };
-        let stamp = preview::stamp(&project);
+        let stamp = plugins::app_preview::stamp(&project);
         if self.preview_of.as_ref() == Some(&(project.clone(), stamp)) {
             return;
         }
         let same_app = self.preview_of.as_ref().is_some_and(|(p, _)| *p == project);
         if !same_app && self.preview.take().is_some() {
-            preview::stop(cx, &splash);
+            plugins::app_preview::stop(cx, &splash);
         }
         self.preview_of = Some((project.clone(), stamp));
-        match preview::start(cx, &splash, &project) {
+        match plugins::app_preview::start(cx, &splash, &project) {
             Ok(running) => {
                 self.preview = Some(running);
                 self.preview_errors.clear();

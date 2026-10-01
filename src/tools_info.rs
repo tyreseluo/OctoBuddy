@@ -114,7 +114,7 @@ pub fn probe() -> Vec<ToolInfo> {
         path: estimation.display().to_string(),
         ..Default::default()
     });
-    let flow = crate::app::tools().ok();
+    let flow = crate::plugins::octosense_app::tools().ok();
     out.push(ToolInfo {
         name: "OctoScript App Design Flow".into(),
         what: t("How an OctoSense app is built: the docs the outer loop plans with, `tools/octo` (new, run, shot, check).", "OctoSense 应用的做法：外环规划时读的文档，以及 `tools/octo`（new、run、shot、check）。"),

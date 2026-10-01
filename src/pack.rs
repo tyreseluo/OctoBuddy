@@ -62,7 +62,7 @@ pub fn build(project: &str, cwd: &str, request: &str, first: bool, app: bool) ->
         let wing = memory::wing(project);
         let mut wings = vec![(wing.clone(), None)];
         if app {
-            wings.push((crate::app::SHARED_WING.to_string(), None));
+            wings.push((crate::plugins::octosense_app::SHARED_WING.to_string(), None));
         }
         wings.push((wing, Some("calibration")));
         // The wings at once: each search takes a second or two.

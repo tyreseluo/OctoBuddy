@@ -12,7 +12,7 @@
 //! already (committed in the project), the copy gets the screenshots its
 //! listing names (from a headless run), then `hub stamp`, `sign-manifest`,
 //! `check`, `publish` and `verify`.
-use crate::app::{self, Tools};
+use super::octosense_app::{self, Tools};
 use crate::model::data_dir;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -84,7 +84,7 @@ fn listed(id: &str) -> Vec<String> {
 
 /// Publishes `project`'s app to the local hub (blocks: run it off the UI thread).
 pub fn publish(project: &str) -> Result<Published, String> {
-    let tools = app::tools()?;
+    let tools = octosense_app::tools()?;
     let hub = tools.app_hub.clone().map(|d| d.join("target/release/hub")).filter(|h| h.is_file())
         .ok_or("App Hub's `hub` command was not found: build OctoSense-App-Hub (cargo build --release) beside OctoSense, or set OCTOSENSE_APP_HUB")?;
     let dir = Path::new(project);
@@ -132,8 +132,8 @@ fn write_script(tools: &Tools) -> Result<PathBuf, String> {
     // `tools/octo run` finds card-host through App Hub's folder.
     let hub = tools.app_hub.as_deref().map(|h| format!("OCTOSENSE_APP_HUB={}; export OCTOSENSE_APP_HUB\n", quote(h))).unwrap_or_default();
     let script = PUBLISH_SCRIPT.replace("{hub}", &hub).replace("{octo}", &quote(&tools.flow.join("tools/octo")));
-    let path = app::bin_dir().join("octobuddy-app-publish");
-    std::fs::create_dir_all(app::bin_dir()).map_err(|e| e.to_string())?;
+    let path = octosense_app::bin_dir().join("octobuddy-app-publish");
+    std::fs::create_dir_all(octosense_app::bin_dir()).map_err(|e| e.to_string())?;
     std::fs::write(&path, script).map_err(|e| e.to_string())?;
     Ok(path)
 }

@@ -191,11 +191,11 @@ impl OctoBuddyView {
         }
         std::thread::spawn(move || {
             let answer = match name.as_str() {
-                "octobuddy_app_look" if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) => crate::app::look(&dir),
+                "octobuddy_app_look" if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) => crate::plugins::octosense_app::look(&dir),
                 "octobuddy_app_look" => Err("this project is not an OctoSense app (or its plugin is switched off in Settings › Plugins)".into()),
                 "octobuddy_check" => match check {
                     None => Err("your slice has no check command: the lead set none".into()),
-                    Some(cmd) => crate::app::ensure_check(&cmd).map(|_| {
+                    Some(cmd) => crate::plugins::octosense_app::ensure_check(&cmd).map(|_| {
                         let outcome = crate::verify::run(&cmd, &dir, crate::verify::TIMEOUT);
                         outcome.summary(&cmd)
                     }),

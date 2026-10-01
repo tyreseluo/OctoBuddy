@@ -9,8 +9,13 @@
 //! project declares it. A disabled plugin's tools are refused at call time.
 //!
 //! Two kinds:
-//! - **Built-in** plugins live in this crate (`builtins()`): OctoSense apps,
-//!   their preview, their publishing, their data.
+//! - **Built-in** plugins live in this crate (`builtins()`), each in its own
+//!   file of this folder: `octosense_app` (OctoSense apps: the design-flow
+//!   rules, `tools/octo`, the app check), `app_preview` and `app_publish`
+//!   (the app beside the conversation, and on this device's App Hub),
+//!   `app_data` (a CSV or an API the app is built on), `native_tui` (an
+//!   agent's own terminal UI). `view` is their part of the window:
+//!   Settings › Plugins and Tools, and the buttons over the conversation.
 //! - **External** plugins are a folder in `<data>/plugins/<id>/` with a
 //!   `plugin.json` and a program. OctoBuddy runs the program once per call,
 //!   out of process (never inside OctoBuddy): `<command> tool <name>` with the
@@ -29,6 +34,13 @@
 //!   "buttons": [{"id": "lint", "name": "Lint", "sub": "report"}]
 //! }
 //! ```
+pub mod app_data;
+pub mod app_preview;
+pub mod app_publish;
+pub(crate) mod native_tui;
+pub mod octosense_app;
+pub(crate) mod view;
+
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
