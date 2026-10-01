@@ -568,6 +568,7 @@ pub struct Route {
 /// Starts Codex for `session` in `cwd`, resuming thread `resume` when given.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_codex(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, rules: &str, route: Option<&Route>, mcp: &[(String, String)], mode: Mode) -> Result<Lead, String> {
+    crate::agents::ready(inbox, "codex")?;
     let mut cmd = Command::new(find_bin("codex"));
     cmd.arg("app-server");
     if let Some(r) = route {
@@ -627,6 +628,7 @@ pub fn spawn_codex(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>
 /// Starts pi for `session` in `cwd` on `route`, resuming its session file `resume`.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_pi(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, rules: &str, route: &Route, mode: Mode) -> Result<Lead, String> {
+    crate::agents::ready(inbox, "pi")?;
     // Its own agent directory: the one provider, pointed at OctoBuddy's proxy.
     let safe: String = session.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
     let home = crate::model::data_dir().join("pi").join(&safe);

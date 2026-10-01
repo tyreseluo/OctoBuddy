@@ -1588,6 +1588,7 @@ It works for you now: message it, review its work, or close it.)\n"));
                 let _ = reply.send(answer);
             }
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
+            LoopEvent::AgentInstalled { name, result, awaited } => self.agent_installed(&name, result, awaited),
             LoopEvent::PackReady { session, message, pack } => self.pack_ready(&session, message, pack),
             LoopEvent::PluginSaid { session, plugin, result } => self.plugin_said(&session, &plugin, result),
             LoopEvent::ServeRetry => {

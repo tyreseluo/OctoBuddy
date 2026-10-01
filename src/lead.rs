@@ -269,7 +269,13 @@ impl Lead {
     /// `effort`: the reasoning effort picked (none: its own setting).
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, extra: &str, model: Option<&str>, effort: Option<&str>, mcp: &[(String, String)], mode: Mode, env: &[(String, String)]) -> Result<Lead, String> {
-        let mut cmd = Command::new(find_bin("claude"));
+        crate::agents::ready(inbox, "claude")?;
+        let bin = find_bin("claude");
+        let mut cmd = Command::new(&bin);
+        // OctoBuddy's copy stays the version it keeps: no self-update.
+        if crate::agents::is_kept(&bin) {
+            cmd.env("DISABLE_AUTOUPDATER", "1");
+        }
         let (tools, prompt) = match mode {
             Mode::Plain => ("Read,Glob,Grep,WebSearch,WebFetch", format!("{PLAIN_CHAT}{extra}")),
             // Agent: the lead may hand reading and research to subagents

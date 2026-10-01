@@ -15,7 +15,8 @@ const EFFORTS: [LiveId; 8] = [live_id!(pe0), live_id!(pe1), live_id!(pe2), live_
 fn installed(agent: &str) -> bool {
     match agent {
         "claude" | "octos" => true,
-        other => workspace::find_bin(other).is_file(),
+        // Not here yet, OctoBuddy installs its copy when first started.
+        other => workspace::find_bin(other).is_file() || crate::agents::installable(other),
     }
 }
 

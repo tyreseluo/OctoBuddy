@@ -18,6 +18,7 @@ use makepad_widgets::makepad_platform::file_dialogs::{FileDialog, FileDialogActi
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
+pub mod agents;
 pub mod app;
 mod chat;
 mod context;
@@ -728,6 +729,16 @@ script_mod! {
         draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
         name := Label{width: Fill text: "" max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
         version := Label{width: Fill text: "" max_lines: 1 draw_text.color: th_success draw_text.text_style: theme.font_code{font_size: 9}}
+        // An agent's program OctoBuddy keeps: which copy runs, and the choice.
+        source := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9}
+        agent_row := View{
+            width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5} visible: false
+            margin: Inset{top: 2 bottom: 2}
+            use_kept_on := SegOn{text: "OctoBuddy's"} use_kept := SegOff{text: "OctoBuddy's"}
+            use_own_on := SegOn{text: "Yours"} use_own := SegOff{text: "Yours"}
+            Filler{}
+            install := SegOff{text: "Install"}
+        }
         what := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
         repo := Label{width: Fill text: "" draw_text.color: th_accent draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
         path := Label{width: Fill text: "" draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 7.5}}
@@ -2734,7 +2745,7 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(new_outer_label)).set_text(cx, t("Outer loop it works for", "属于哪个外环"));
         self.view.text_input(cx, ids!(new_task)).set_empty_text(cx, t("Its first task (optional: you can message it later)", "它的第一个任务（可留空，之后再给它发消息）").into());
         self.view.button(cx, ids!(new_create)).set_text(cx, t("Create", "创建"));
-        let soon = if workspace::find_bin("pi").is_file() { "" } else { t("pi is not installed (Settings › Tools says where it comes from).", "pi 未安装（来源见 设置 › 工具）。") };
+        let soon = if workspace::find_bin("pi").is_file() || agents::installable("pi") { "" } else { t("pi is not installed (Settings › Tools says where it comes from).", "pi 未安装（来源见 设置 › 工具）。") };
         self.view.label(cx, ids!(pick_soon)).set_text(cx, soon);
         self.view.label(cx, ids!(data_title)).set_text(cx, t("Data for the app: the outer loop builds the app around it", "应用的数据：outer 会围绕它来做应用"));
         self.view.button(cx, ids!(data_csv)).set_text(cx, t("Choose a CSV file…", "选择 CSV 文件…"));

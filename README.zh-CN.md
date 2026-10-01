@@ -7,7 +7,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **内环**在项目目录（或它的 git worktree）里并行做这些切片；
 - **对话**只和一个 agent 交谈，不跑循环。
 
-它既能作为原生应用跑在 OctoSense 里，也能单独开一个自己的窗口运行。OctoSense 会像引入 Rinx 那样，在自己的 `native-apps.json` 里把它登记为应用 `octobuddy`，钉在本仓库的某个 revision 上。桌面 shell 默认编进去，手机 shell 不带。这项登记已经在 OctoSense 的一个 fork 上的分支 [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) 里准备好了（钉的是 `fad8480`）。**待完成：**还没有向 OctoSense 提 PR。
+它既能作为原生应用跑在 OctoSense 里，也能单独开一个自己的窗口运行。OctoSense 会像引入 Rinx 那样，在自己的 `native-apps.json` 里把它登记为应用 `octobuddy`，钉在本仓库的某个 revision 上。桌面 shell 默认编进去，手机 shell 不带。这项登记已经在 OctoSense 的一个 fork 上的分支 [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) 里准备好了（钉的是 `main` 上较新的一个 revision）。**待完成：**还没有向 OctoSense 提 PR。
 
 2026-10-02 之前它叫 OctoLoop。
 
@@ -27,6 +27,29 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - 同一个 agent 换模型会保留对话（Codex 恢复原线程，pi 恢复原会话文件）。
   - 换 agent 则从新对话开始。
   - 改思考强度会让 agent 接着原对话重启；如果这一轮还在运行，等它结束后再重启。
+
+## 自带的 agent
+
+和 Cindy 一样，OctoBuddy 为每个 agent 的程序自带一份，版本是测试过的那个。OctoBuddy 驱动它们用的协议会随版本变化，所以自带一份，同一个 OctoBuddy 在每台机器上的行为就一样。
+
+| 程序 | 版本 | 来源 | 校验依据 |
+| --- | --- | --- | --- |
+| Claude Code | 2.1.286 | npm，`@anthropic-ai/claude-code-<platform>` | npm 的 sha512 integrity |
+| Codex | 0.152.0 | npm，`@openai/codex@0.152.0-<platform>` | npm 的 sha512 integrity |
+| pi | 0.99.2 | npm，按 `resources/agents/pi/package-lock.json` 执行 `npm ci` | npm 对每个包的 integrity |
+| octos | 2.0.3-rc.12 | octos 在 GitHub release 里发布的 bundle | GitHub 的 sha256 摘要 |
+
+- **什么时候装。**第一次用到时安装。如果外环、内环或对话因为本机没有这个程序而起不来，OctoBuddy 会开始安装，并在对话里说明；装好后再发一次即可。也可以在 设置 › 工具 里提前安装。
+- **装在哪。**`<data>/agents/<name>/<version>/`。只有下载内容与固定的摘要一致、并且解压完成之后，这个版本的目录才会出现。不运行任何安装脚本（pi 用 `--ignore-scripts` 安装）。
+- **改用你自己的。**设置 › 工具 里每个 agent 的卡片可以选**自带的**（默认）或**你自己的**（`PATH` 上找到的第一个）。选择保存在 `<data>/agents.json`。自带的还没装好时，运行你自己的。切换只影响之后启动的 agent。
+- **登录。**登录仍然是你自己的：自带的 Claude Code 照样读 `~/.claude`。它以 `DISABLE_AUTOUPDATER=1` 运行，所以版本不会自己变。
+- **不覆盖的情况。**
+  - pi 需要 Node.js 和 npm。
+  - 这个 octos 版本没有 Intel Mac 的 bundle，所以 Intel Mac 上运行你自己的。
+  - Windows 上没有自带的版本。
+- **大小。**Apple silicon 上四个一共约 900 MB。
+- **升级版本。**改 `src/agents.rs` 里对应的固定项（pi 还要改 `resources/agents/pi/`）。
+- **已验证：**2026-10-02 在 macOS（Apple silicon）上验证。`installs_every_agent_this_machine_has_a_copy_of`（默认忽略）会把四个都下载到一个临时的 `OCTOBUDDY_HOME`，逐个安装并检查 `--version`。在 OctoSense 里：本机没有 pi 时，在 pi 的对话里发第一条消息就开始安装，再发一次即得到回复；Codex 和 Claude Code 的对话都跑在自带的版本上（Claude Code 用的是你自己的登录）。跑在自带 octos 上的内环还没有实测。Linux **未验证**。
 
 ## 对话中
 
@@ -57,10 +80,10 @@ cargo clippy --locked --all-targets --no-deps -- -D warnings
 cargo run            # 在 OctoSense 之外，单独开一个 OctoBuddy 窗口
 ```
 
-真实测试默认忽略。运行它们需要：各 agent 的 CLI、AI providers 里配好对应的 provider、shell 的 octos 目录。
+真实测试默认忽略。运行它们需要：各 agent 的程序（自带的或你自己的）、AI providers 里配好对应的 provider、shell 的 octos 目录。
 
 ```sh
-OCTOS_APP_CORE_DIR=<OctoSense home>/octos-home/.octos OCTOBUDDY_PI_BIN=<pi> \
+OCTOS_APP_CORE_DIR=<OctoSense home>/octos-home/.octos \
   cargo test --lib -- --ignored --nocapture <测试名>
 ```
 
@@ -102,7 +125,7 @@ Cargo 不能用同一个仓库的另一个 revision 去 patch 一个 git 来源�
 | 变量 | 用途 |
 | --- | --- |
 | `OCTOBUDDY_HOME` | 数据目录，放项目、对话和插件（默认 `~/.octobuddy`） |
-| `OCTOBUDDY_PI_BIN` | pi 不在 `PATH` 上时，它所在的位置 |
+| `OCTOBUDDY_<NAME>_BIN` | 指定 `claude`、`codex`、`pi`、`octos`（以及其他工具）运行哪个程序，优先于自带的和你自己的 |
 | `OCTOBUDDY_DEBUG_EVENTS=1` | 把每个循环事件打印到 stderr |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | 追加记录 Codex 转换层每次失败的调用（状态、请求和响应，从不含 key） |
 

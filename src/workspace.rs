@@ -203,9 +203,16 @@ pub fn is_git_repo(dir: &str) -> bool {
 pub fn search_path() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let mut dirs: Vec<String> = std::env::var("PATH").unwrap_or_default().split(':').map(String::from).collect();
-    // OctoBuddy's own commands first (`octobuddy-app-check`).
+    // OctoBuddy's own commands first (`octobuddy-app-check`), then what
+    // the agents it keeps bring along (Codex's ripgrep).
     dirs.insert(0, crate::app::bin_dir().to_string_lossy().into_owned());
-    for extra in [format!("{home}/.local/bin"), format!("{home}/.cargo/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into(), "/bin".into()] {
+    for (i, extra) in crate::agents::extra_path().into_iter().enumerate() {
+        dirs.insert(1 + i, extra.to_string_lossy().into_owned());
+    }
+    // Where people's own installs live when OctoSense was opened from the
+    // Dock (no shell profile ran): Node (nvm's newest, Volta) for pi, pnpm's.
+    let node = newest_nvm_node(&home).into_iter().chain([format!("{home}/.volta/bin"), format!("{home}/Library/pnpm")]);
+    for extra in [format!("{home}/.local/bin"), format!("{home}/.cargo/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into(), "/usr/bin".into(), "/bin".into()].into_iter().chain(node) {
         if !dirs.contains(&extra) {
             dirs.push(extra);
         }
@@ -213,11 +220,24 @@ pub fn search_path() -> String {
     dirs.join(":")
 }
 
-/// `OCTOBUDDY_<NAME>_BIN`, else the first `name` on the search path, else the
+/// `~/.nvm/versions/node/<newest>/bin`, if nvm keeps any Node.
+fn newest_nvm_node(home: &str) -> Option<String> {
+    let version = |name: &str| -> Vec<u32> { name.trim_start_matches('v').split('.').map(|n| n.parse().unwrap_or(0)).collect() };
+    let dir = Path::new(home).join(".nvm/versions/node");
+    let newest = std::fs::read_dir(&dir).ok()?.flatten().map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| dir.join(n).join("bin").is_dir()).max_by_key(|n| version(n))?;
+    Some(dir.join(newest).join("bin").to_string_lossy().into_owned())
+}
+
+/// `OCTOBUDDY_<NAME>_BIN`, else OctoBuddy's own copy of an agent's program
+/// (`agents::chosen`), else the first `name` on the search path, else the
 /// bare name (so the spawn error names it).
 pub fn find_bin(name: &str) -> PathBuf {
     if let Some(path) = std::env::var_os(format!("OCTOBUDDY_{}_BIN", name.to_uppercase())) {
         return PathBuf::from(path);
+    }
+    if let Some(path) = crate::agents::chosen(name) {
+        return path;
     }
     search_path().split(':').map(|d| Path::new(d).join(name)).find(|p| p.is_file()).unwrap_or_else(|| PathBuf::from(name))
 }

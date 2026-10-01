@@ -1,0 +1,8 @@
+{
+  "name": "octobuddy-pi",
+  "private": true,
+  "description": "The pi OctoBuddy keeps itself: installed with npm ci from this lockfile.",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.99.2"
+  }
+}

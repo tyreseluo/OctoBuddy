@@ -3,7 +3,7 @@
 //! and Settings › Tools (what OctoBuddy runs on, its versions), and the
 //! outer loop's `octobuddy_plugin` calls. The plugins themselves: `plugins.rs`.
 use crate::events::{self, LoopEvent};
-use crate::{i18n, plugins, tapped, tools_info, OctoBuddyView};
+use crate::{agents, i18n, plugins, tapped, tools_info, OctoBuddyView};
 use makepad_widgets::*;
 use serde_json::Value;
 use std::sync::mpsc;
@@ -96,19 +96,43 @@ impl OctoBuddyView {
             format!("What a kind of project adds to OctoBuddy: buttons over the conversation, tools for the agents, rules for the outer loop. A plugin is at work where it applies (and the plugins it needs are on). Built-in ones come with OctoBuddy; others are a folder with a plugin.json in {}.", dir.display()),
             format!("某类项目给 OctoBuddy 增加的东西：对话上方的按钮、给 agent 的工具、外环的规则。插件只在适用的项目里生效（它依赖的插件也要开着）。内置插件随 OctoBuddy 提供；外部插件是 {} 下带 plugin.json 的文件夹。", dir.display())));
         self.view.label(cx, ids!(tools_hint)).set_text(cx, i18n::t(
-            "What OctoBuddy runs on, the versions found on this machine, and where each comes from.",
-            "OctoBuddy 依赖的工具：本机找到的版本，以及各自的来源。"));
+            "What OctoBuddy runs on, the versions found on this machine, and where each comes from. Claude Code, Codex, pi and octos: OctoBuddy keeps its own copy of each, at the version it was tested with (installed the first time it is needed, checked against its publisher's digest), or runs yours. A change applies to the agents started after it.",
+            "OctoBuddy 依赖的工具：本机找到的版本，以及各自的来源。Claude Code、Codex、pi 和 octos 可以用 OctoBuddy 自带的版本（测试过的版本，第一次用到时安装，并按发布方的摘要校验），也可以用你自己装的。切换只影响之后启动的 agent。"));
         self.view.portal_list(cx, ids!(plugin_list)).redraw(cx);
         self.sync_tool_grid(cx);
     }
 
     pub(crate) fn probe_tools(&mut self) {
-        let inbox = self.rt.inbox.clone();
-        std::thread::spawn(move || events::post(&inbox, LoopEvent::ToolsProbed(tools_info::probe())));
+        let (inbox, lang) = (self.rt.inbox.clone(), i18n::lang());
+        std::thread::spawn(move || {
+            i18n::set(lang);
+            events::post(&inbox, LoopEvent::ToolsProbed(tools_info::probe()));
+        });
     }
 
     pub(crate) fn tools_probed(&mut self, tools: Vec<tools_info::ToolInfo>) {
         self.tool_rows = Some(tools);
+    }
+
+    /// OctoBuddy's copy of an agent's program is in (or could not be): the
+    /// open session hears it when it was waiting for it, and Tools shows it.
+    pub(crate) fn agent_installed(&mut self, name: &str, result: Result<String, String>, awaited: bool) {
+        let pin = agents::pin(name);
+        let (label, version) = (pin.map(|p| p.label).unwrap_or(name), pin.map(|p| p.version).unwrap_or(""));
+        match &result {
+            Ok(path) => log!("octobuddy: installed {label} {version}: {path}"),
+            Err(err) => log!("octobuddy: could not install {label} {version}: {err}"),
+        }
+        if let Some(at) = self.selected.filter(|at| awaited && self.store.session(*at).is_some()) {
+            let text = match &result {
+                Ok(_) => i18n::pick(format!("{label} {version} is installed (OctoBuddy's copy): send again to start it."),
+                    format!("{label} {version} 已安装（OctoBuddy 自带的）：再发一次就会启动。")),
+                Err(err) => i18n::pick(format!("{label} could not be installed: {err}. Settings › Tools can try again, or install it yourself."),
+                    format!("{label} 安装失败：{err}。可以在 设置 › 工具 里重试，或者自己安装。")),
+            };
+            self.system(at, &text);
+        }
+        self.probe_tools();
     }
 
     pub(crate) fn draw_plugin_list(&mut self, cx: &mut Cx2d, list: &mut PortalList) {
@@ -158,6 +182,25 @@ impl OctoBuddyView {
             let Some(t) = rows.get(i) else { continue };
             card.label(cx, ids!(name)).set_text(cx, &t.name);
             card.label(cx, ids!(version)).set_text(cx, &t.version);
+            card.label(cx, ids!(source)).set_visible(cx, !t.source.is_empty());
+            card.label(cx, ids!(source)).set_text(cx, &t.source);
+            card.view(cx, ids!(agent_row)).set_visible(cx, t.agent.as_deref().is_some_and(agents::installable));
+            if let Some(name) = t.agent.as_deref() {
+                let own = agents::prefers_own(name);
+                for (id, show) in [(ids!(use_kept_on), !own), (ids!(use_kept), own), (ids!(use_own_on), own), (ids!(use_own), !own)] {
+                    card.button(cx, id).set_visible(cx, show);
+                }
+                for id in [ids!(use_kept_on), ids!(use_kept)] {
+                    card.button(cx, id).set_text(cx, i18n::t("OctoBuddy's", "自带的"));
+                }
+                for id in [ids!(use_own_on), ids!(use_own)] {
+                    card.button(cx, id).set_text(cx, i18n::t("Yours", "你自己的"));
+                }
+                let can_install = !own && agents::kept(name).is_none() && agents::job(name) != Some(agents::Job::Installing);
+                let retry = matches!(agents::job(name), Some(agents::Job::Failed(_)));
+                card.button(cx, ids!(install)).set_visible(cx, can_install);
+                card.button(cx, ids!(install)).set_text(cx, if retry { i18n::t("Try again", "重试") } else { i18n::t("Install", "安装") });
+            }
             card.label(cx, ids!(what)).set_text(cx, &t.what);
             card.label(cx, ids!(repo)).set_text(cx, &t.repo);
             card.label(cx, ids!(path)).set_text(cx, &t.path);
@@ -211,6 +254,30 @@ impl OctoBuddyView {
         }
         if self.view.button(cx, ids!(reload_plugins)).clicked(actions) {
             self.relayout(cx);
+        }
+        // An agent's card: which copy runs, OctoBuddy's installed.
+        let rows = self.tool_rows.clone().unwrap_or_default();
+        for (slot, t) in TOOL_CARDS.iter().zip(&rows) {
+            let Some(name) = t.agent.as_deref() else { continue };
+            let card = self.view.view(cx, &[*slot]);
+            let own = if card.button(cx, ids!(use_own)).clicked(actions) {
+                Some(true)
+            } else if card.button(cx, ids!(use_kept)).clicked(actions) {
+                Some(false)
+            } else {
+                None
+            };
+            if let Some(own) = own {
+                agents::set_prefers_own(name, own);
+            }
+            let install = card.button(cx, ids!(install)).clicked(actions) || (own == Some(false) && agents::kept(name).is_none());
+            if install {
+                agents::install_in_background(&self.rt.inbox, name, false);
+            }
+            if own.is_some() || install {
+                self.probe_tools();
+                self.relayout(cx);
+            }
         }
         if self.view.button(cx, ids!(reload_tools)).clicked(actions) {
             self.tool_rows = None;

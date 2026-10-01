@@ -1,5 +1,6 @@
 //! What OctoBuddy runs on, for Settings › Tools: each tool, what it is for,
-//! the version found on this machine, where it comes from and where it is.
+//! the version found on this machine, where it comes from and where it is;
+//! for the agents' programs OctoBuddy keeps, which copy runs (`agents`).
 //! Versions are probed off the UI thread (`probe`), when the page opens.
 use crate::i18n;
 use crate::workspace::find_bin;
@@ -13,6 +14,34 @@ pub struct ToolInfo {
     pub version: String,
     pub repo: String,
     pub path: String,
+    /// An agent's program OctoBuddy may keep (its name in `agents`), and
+    /// which copy runs.
+    pub agent: Option<String>,
+    pub source: String,
+}
+
+/// Which copy of `name` runs, for its card.
+fn agent_source(name: &str, found: Option<&str>) -> String {
+    let Some(pin) = crate::agents::pin(name) else { return String::new() };
+    let (label, version) = (pin.label, pin.version);
+    if !crate::agents::installable(name) {
+        return i18n::pick(format!("OctoBuddy has no copy of {label} for this platform: yours runs."), format!("OctoBuddy 没有适合这台机器的 {label}：运行的是你自己的。"));
+    }
+    if crate::agents::prefers_own(name) {
+        return match found {
+            Some(_) => i18n::pick(format!("Runs yours. OctoBuddy keeps {version} too."), format!("运行你自己的。OctoBuddy 也自带 {version}。")),
+            None => i18n::pick(format!("Yours is not on this machine: choose OctoBuddy's ({version}) to install it."), format!("本机没有你自己的：可选 OctoBuddy 自带的（{version}），会自动安装。")),
+        };
+    }
+    if crate::agents::kept(name).is_some() {
+        return i18n::pick(format!("Runs OctoBuddy's copy ({version}, checked against its publisher's digest)."), format!("运行 OctoBuddy 自带的版本（{version}，已按发布方的摘要校验）。"));
+    }
+    match (crate::agents::job(name), found) {
+        (Some(crate::agents::Job::Installing), _) => i18n::pick(format!("Installing OctoBuddy's copy ({version})…"), format!("正在安装 OctoBuddy 自带的版本（{version}）…")),
+        (Some(crate::agents::Job::Failed(err)), _) => i18n::pick(format!("OctoBuddy's copy ({version}) could not be installed: {err}"), format!("OctoBuddy 自带的版本（{version}）安装失败：{err}")),
+        (None, Some(_)) => i18n::pick(format!("OctoBuddy's copy ({version}) is not installed yet: yours runs until it is."), format!("OctoBuddy 自带的版本（{version}）还没装：装好前运行你自己的。")),
+        (None, None) => i18n::pick(format!("Not installed: OctoBuddy installs its copy ({version}) the first time it is needed."), format!("未安装：第一次用到时 OctoBuddy 会安装自带的版本（{version}）。")),
+    }
 }
 
 /// The first line of `<bin> <args>`, if it runs.
@@ -57,7 +86,9 @@ pub fn probe() -> Vec<ToolInfo> {
     let mut bin = |name: &str, bin: &str, what: String, repo: &str, version: VersionOf| {
         let path = located(bin);
         let version = path.as_deref().and_then(&version).unwrap_or_else(|| if path.is_some() { t("installed", "已安装") } else { missing() });
-        out.push(ToolInfo { name: name.into(), what, version, repo: repo.into(), path: path.unwrap_or_default() });
+        let agent = crate::agents::pin(bin).map(|p| p.name.to_string());
+        let source = agent_source(bin, path.as_deref());
+        out.push(ToolInfo { name: name.into(), what, version, repo: repo.into(), path: path.unwrap_or_default(), agent, source });
     };
     bin("Claude Code", "claude", t("Anthropic's coding agent CLI: the outer loop, and inner loops on Claude Code (stream-json).", "Anthropic 的编程 agent CLI：外环，以及跑在 Claude Code 上的 inner（stream-json）。"),
         "https://github.com/anthropics/claude-code", Box::new(|p| first_line(p, &["--version"])));
@@ -81,6 +112,7 @@ pub fn probe() -> Vec<ToolInfo> {
         version: if commit.is_empty() { t("bundled", "内置") } else { format!("{} ({commit})", t("bundled", "内置")) },
         repo: "https://github.com/tyreseluo/agent-estimation".into(),
         path: estimation.display().to_string(),
+        ..Default::default()
     });
     let flow = crate::app::tools().ok();
     out.push(ToolInfo {
@@ -89,6 +121,7 @@ pub fn probe() -> Vec<ToolInfo> {
         version: flow.as_ref().and_then(|f| git_version(&f.flow)).unwrap_or_else(missing),
         repo: "https://github.com/OctoSense-org/OctoScript-App-Design-Flow".into(),
         path: flow.as_ref().map(|f| f.flow.display().to_string()).unwrap_or_default(),
+        ..Default::default()
     });
     let hub = flow.as_ref().and_then(|f| f.app_hub.clone());
     out.push(ToolInfo {
@@ -97,6 +130,7 @@ pub fn probe() -> Vec<ToolInfo> {
         version: hub.as_deref().and_then(git_version).unwrap_or_else(missing),
         repo: "https://github.com/OctoSense-org/OctoSense-App-Hub".into(),
         path: hub.map(|h| h.display().to_string()).unwrap_or_default(),
+        ..Default::default()
     });
     out
 }

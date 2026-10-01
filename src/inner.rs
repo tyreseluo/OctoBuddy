@@ -90,6 +90,7 @@ impl Serve {
     /// Starts `octos serve --stdio` on `data_dir` (its `profiles/_main.json`
     /// is the model sessions run with). Its log goes to `data_dir/serve.log`.
     pub fn spawn(inbox: &Inbox, data_dir: &Path) -> Result<Serve, String> {
+        crate::agents::ready(inbox, "octos")?;
         std::fs::create_dir_all(data_dir).map_err(|err| format!("could not create {}: {err}", data_dir.display()))?;
         let log = std::fs::File::create(data_dir.join("serve.log")).map_err(|err| format!("could not write the octos log: {err}"))?;
         let mut child = Command::new(find_bin("octos"))

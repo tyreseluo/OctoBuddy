@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 OctoBuddy is OctoSense's native coding app with two loops. An **outer loop** turns a request into a plan of slices and reviews what comes back. **Inner loops** work on the slices in parallel, in the project's folder (or its git worktree). A plain **chat** talks to one agent, with no loops.
 
-It runs inside OctoSense as a native app, and on its own in a window of its own. OctoSense registers it in its `native-apps.json` as the app `octobuddy`, pinned to a revision of this repository, the way it takes Rinx. Desktop shells build it by default; phone shells leave it out. That registration is ready on the branch [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) of a fork of OctoSense (it pins `fad8480`). **Pending:** its pull request to OctoSense is not made yet.
+It runs inside OctoSense as a native app, and on its own in a window of its own. OctoSense registers it in its `native-apps.json` as the app `octobuddy`, pinned to a revision of this repository, the way it takes Rinx. Desktop shells build it by default; phone shells leave it out. That registration is ready on the branch [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) of a fork of OctoSense (it pins a recent revision of `main`). **Pending:** its pull request to OctoSense is not made yet.
 
 It was called OctoLoop until 2026-10-02.
 
@@ -24,6 +24,29 @@ It was called OctoLoop until 2026-10-02.
   - Switching to another model of the same agent keeps the conversation (Codex resumes its thread, pi its session file).
   - Switching to another agent starts a new conversation.
   - Changing the effort restarts the agent on the same conversation. If a turn is under way, that happens when it ends.
+
+## Its own agents
+
+Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version it was tested with. The protocols it drives change between releases, so the same OctoBuddy behaves the same on every machine.
+
+| Program | Version | Where it comes from | Checked against |
+| --- | --- | --- | --- |
+| Claude Code | 2.1.286 | npm, `@anthropic-ai/claude-code-<platform>` | npm's sha512 integrity |
+| Codex | 0.152.0 | npm, `@openai/codex@0.152.0-<platform>` | npm's sha512 integrity |
+| pi | 0.99.2 | npm, `npm ci` from `resources/agents/pi/package-lock.json` | npm's integrity of every package |
+| octos | 2.0.3-rc.12 | the bundle of octos's GitHub release | GitHub's sha256 digest |
+
+- **When.** A copy is installed the first time it is needed. If a loop or a chat cannot start because the program is not on this machine, OctoBuddy starts installing it and says so in the conversation; send again once it is ready. Settings › Tools can also install one ahead of time.
+- **Where.** In `<data>/agents/<name>/<version>/`. A version's folder appears only after its download matched the pinned digest and was unpacked. No install script runs (pi installs with `--ignore-scripts`).
+- **Yours instead.** Each agent's card in Settings › Tools chooses **OctoBuddy's** (the default) or **Yours** (the first one on `PATH`). The choice is kept in `<data>/agents.json`. Until OctoBuddy's copy is installed, yours runs. A change applies to the agents started after it.
+- **Logins.** They stay yours: OctoBuddy's Claude Code still reads `~/.claude`. It runs with `DISABLE_AUTOUPDATER=1`, so it stays at its version.
+- **Not covered.**
+  - pi needs Node.js and npm.
+  - That octos release has no Intel Mac bundle, so on an Intel Mac yours runs.
+  - There are no copies for Windows.
+- **Size.** About 900 MB for all four on Apple silicon.
+- **Moving a version.** Change its pin in `src/agents.rs` (for pi, also `resources/agents/pi/`).
+- **Verified** on macOS (Apple silicon) on 2026-10-02. `installs_every_agent_this_machine_has_a_copy_of` (ignored by default) downloads all four into a scratch `OCTOBUDDY_HOME`, installs each one and checks its `--version`. In OctoSense, a chat on pi, on a machine with no pi, installed it at its first message and answered at the next; chats on Codex and Claude Code ran on OctoBuddy's copies (Claude Code on the person's own login). The inner loops on OctoBuddy's octos were not run yet. **Unverified** on Linux.
 
 ## In a conversation
 
@@ -52,10 +75,10 @@ cargo clippy --locked --all-targets --no-deps -- -D warnings
 cargo run            # OctoBuddy in a window of its own, outside OctoSense
 ```
 
-The live tests are ignored by default. They need the agents' CLIs, their providers in AI providers, and the shell's octos home:
+The live tests are ignored by default. They need the agents' programs (OctoBuddy's copies or yours), their providers in AI providers, and the shell's octos home:
 
 ```sh
-OCTOS_APP_CORE_DIR=<OctoSense home>/octos-home/.octos OCTOBUDDY_PI_BIN=<pi> \
+OCTOS_APP_CORE_DIR=<OctoSense home>/octos-home/.octos \
   cargo test --lib -- --ignored --nocapture <test>
 ```
 
@@ -93,7 +116,7 @@ Run on its own, the divider beside the sidebar draws as a dark bar; inside OctoS
 | Variable | Use |
 | --- | --- |
 | `OCTOBUDDY_HOME` | Its data directory: projects, chats, plugins (default `~/.octobuddy`) |
-| `OCTOBUDDY_PI_BIN` | Where pi is, when it is not on `PATH` |
+| `OCTOBUDDY_<NAME>_BIN` | The program to run for `claude`, `codex`, `pi`, `octos` (and the other tools), over OctoBuddy's copy and yours |
 | `OCTOBUDDY_DEBUG_EVENTS=1` | Prints every loop event on stderr |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | Appends each Codex bridge call that failed (its status, request and answer; never the key) |
 

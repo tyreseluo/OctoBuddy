@@ -29,4 +29,8 @@ octosense-app-peers = { git = "https://github.com/OctoSense-org/OctoSense.git", 
 octosense-app-policy = { git = "https://github.com/OctoSense-org/OctoSense-App-Hub", rev = "58c3c8aed8fc811a16d67c5f784a8a44214ff876", features = ["splash"] }
 # The octos server's JSON-RPC frames: deep and version-dependent, read by field.
 serde_json = "1"
+# The agents' programs OctoBuddy keeps: checked against their publishers'
+# digests (npm's sha512 integrity, GitHub's sha256).
+sha2 = "0.10"
+base64 = "0.22"
 

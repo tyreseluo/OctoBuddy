@@ -18,6 +18,9 @@ pub enum LoopEvent {
     PackReady { session: String, message: String, pack: Option<String> },
     /// Settings › Tools: the versions found on this machine.
     ToolsProbed(Vec<crate::tools_info::ToolInfo>),
+    /// OctoBuddy's copy of an agent's program is installed (its path), or
+    /// why not. `awaited`: something could not start without it.
+    AgentInstalled { name: String, result: Result<String, String>, awaited: bool },
     /// An external plugin's button ran: what it said, for the session.
     PluginSaid { session: String, plugin: String, result: Result<String, String> },
     /// A piece of the lead's reply as it is written.
