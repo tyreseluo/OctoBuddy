@@ -5139,6 +5139,10 @@ impl Widget for OctoBuddyView {
 pub struct OctoBuddyModule;
 pub static OCTOBUDDY_MODULE: OctoBuddyModule = OctoBuddyModule;
 
+/// Its launcher art (64×64 SVG): the shell's dock and home draw it as they
+/// draw App Hub's (`octosense_app_hub_app::APP_ICON_SVG`).
+pub const APP_ICON_SVG: &str = include_str!("../resources/app-icon.svg");
+
 impl AppModule for OctoBuddyModule {
     fn id(&self) -> &'static str { "octobuddy" }
     fn label(&self) -> &'static str { "OctoBuddy" }
