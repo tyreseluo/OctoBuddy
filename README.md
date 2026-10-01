@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md)
 
 OctoBuddy is OctoSense's native coding app with two loops. An **outer loop** turns a request into a plan of slices and reviews what comes back. **Inner loops** work on the slices in parallel, in the project's folder (or its git worktree). A plain **chat** talks to one agent, with no loops.
 
-It runs inside OctoSense as a native app, and on its own in a window of its own. OctoSense registers it in its `native-apps.json` as the app `octobuddy`, pinned to a revision of this repository, the way it takes Rinx. Desktop shells build it by default; phone shells leave it out. **Pending:** that registration is a pull request to OctoSense not yet made.
+It runs inside OctoSense as a native app, and on its own in a window of its own. OctoSense registers it in its `native-apps.json` as the app `octobuddy`, pinned to a revision of this repository, the way it takes Rinx. Desktop shells build it by default; phone shells leave it out. That registration is ready on the branch [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) of a fork of OctoSense (it pins `fad8480`). **Pending:** its pull request to OctoSense is not made yet.
 
 It was called OctoLoop until 2026-10-02.
 
@@ -60,6 +60,20 @@ OCTOS_APP_CORE_DIR=<OctoSense home>/octos-home/.octos OCTOBUDDY_PI_BIN=<pi> \
 | `codex_lead_on_glm`, `pi_lead_on_glm`, `codex_chat_reaches_the_network` | Each agent answers on GLM; Codex in a chat reaches the network |
 
 All of these were run on macOS (Apple silicon) on 2026-10-01 and 2026-10-02, as part of OctoSense, before the move to this repository and the rename. They are **unverified** on Linux and Windows.
+
+### In OctoSense
+
+Until that pull request is merged, the branch above is how to run OctoBuddy in an OctoSense shell. From a checkout of OctoSense on that branch:
+
+```sh
+python3 tools/setup.py --update
+cargo build --locked --release -p octosense
+MAKEPAD_WM_TEST_APP=octobuddy ./target/release/octosense
+```
+
+That is how it was run on 2026-10-02 (macOS, Rust 1.97.1; the shell's matrix-sdk needs 1.95 or newer). Cargo fetches OctoBuddy at the pinned revision; a newer one means moving the pin in OctoSense's `native-apps.json` and running `python3 tools/native_apps.py`.
+
+The first time it starts there, OctoSense asks whether OctoBuddy's agent may start (its octos services). OctoBuddy's own engines run either way.
 
 ### Its pinned revisions
 

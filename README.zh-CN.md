@@ -7,7 +7,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **内环**在项目目录（或它的 git worktree）里并行做这些切片；
 - **对话**只和一个 agent 交谈，不跑循环。
 
-它既能作为原生应用跑在 OctoSense 里，也能单独开一个自己的窗口运行。OctoSense 会像引入 Rinx 那样，在自己的 `native-apps.json` 里把它登记为应用 `octobuddy`，钉在本仓库的某个 revision 上。桌面 shell 默认编进去，手机 shell 不带。**待完成：**这项登记要向 OctoSense 提 PR，目前还没提。
+它既能作为原生应用跑在 OctoSense 里，也能单独开一个自己的窗口运行。OctoSense 会像引入 Rinx 那样，在自己的 `native-apps.json` 里把它登记为应用 `octobuddy`，钉在本仓库的某个 revision 上。桌面 shell 默认编进去，手机 shell 不带。这项登记已经在 OctoSense 的一个 fork 上的分支 [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) 里准备好了（钉的是 `fad8480`）。**待完成：**还没有向 OctoSense 提 PR。
 
 2026-10-02 之前它叫 OctoLoop。
 
@@ -63,6 +63,20 @@ OCTOS_APP_CORE_DIR=<OctoSense home>/octos-home/.octos OCTOBUDDY_PI_BIN=<pi> \
 | `codex_lead_on_glm`、`pi_lead_on_glm`、`codex_chat_reaches_the_network` | 各 agent 在 GLM 上都能回答；Codex 在对话里能访问网络 |
 
 以上测试都在 macOS（Apple 芯片）上运行过，时间是 2026-10-01 和 2026-10-02。当时代码还在 OctoSense 仓库里，也还没改名。在 Linux 和 Windows 上**未验证**。
+
+### 在 OctoSense 里运行
+
+在那个 PR 合入之前，可以用上面这个分支在 OctoSense 的 shell 里运行 OctoBuddy。在 OctoSense 的检出里切到该分支后：
+
+```sh
+python3 tools/setup.py --update
+cargo build --locked --release -p octosense
+MAKEPAD_WM_TEST_APP=octobuddy ./target/release/octosense
+```
+
+2026-10-02 就是这样跑起来的（macOS，Rust 1.97.1；shell 依赖的 matrix-sdk 需要 1.95 或更新）。Cargo 会按钉住的 revision 拉取 OctoBuddy；要用更新的版本，需要改 OctoSense `native-apps.json` 里的钉，再运行 `python3 tools/native_apps.py`。
+
+第一次在 OctoSense 里启动时，OctoSense 会询问是否允许 OctoBuddy 的 agent 启动（即它的 octos 服务）。不管选哪个，OctoBuddy 自己的引擎都能照常运行。
 
 ### 钉住的版本
 
