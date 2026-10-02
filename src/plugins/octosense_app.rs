@@ -28,7 +28,8 @@ sandbox, so do not look for them or install them: OctoBuddy runs the app for you
 `octobuddy_app_look` runs the app headless now and gives you its script errors, a screenshot (a PNG under \
 .octobuddy/shots/, which you can read) and the widgets on screen (type, id, text: what a test finds them by). \
 `octobuddy_check` runs your slice's own check command, the one OctoBuddy runs when you finish, and gives you its \
-output. Use them as you work: after each meaningful change, look; before you report, run your check until it \
+output. `octobuddy_app_probe` runs a few lines of Splash of your own (a whole small main.splash) and gives you its \
+errors and widgets: when unsure how Splash behaves, try it there, in seconds, rather than guess or read sources. Use them as you work: after each meaningful change, look; before you report, run your check until it \
 passes. Start with .octobuddy/docs/SPLASH-COOKBOOK.md: OctoBuddy's verified patterns for what an app needs (pages, \
 lists, forms, storage, dates, money, bars, gotchas and the errors they give). Read .octobuddy/docs/SCRIPT-API.md \
 only for what it lacks, and other apps' sources not at all unless both lack it.";
@@ -40,13 +41,39 @@ pub const CHECK: &str = "octobuddy-app-check";
 /// errors, a screenshot under `<project>/.octobuddy/shots/`, and the widgets
 /// on screen, compact. Blocks (seconds): call it off the UI thread.
 pub fn look(project: &str) -> Result<String, String> {
+    look_at(project, &bundle(project), "")
+}
+
+/// A few lines of Splash tried at once: `source` as the app's main.splash
+/// (in a copy of its bundle, with its manifest), run headless the way
+/// `look` runs the app: its script errors and widgets, in seconds. How
+/// Splash behaves is answered by trying it, not by reading the runtime.
+pub fn probe(project: &str, source: &str) -> Result<String, String> {
+    if source.trim().is_empty() {
+        return Err("give the program to try in `source` (a whole main.splash)".into());
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let work = std::env::temp_dir().join(format!("octobuddy-probe-{stamp}"));
+    let copy = work.join("bundle");
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    let copied = Command::new("cp").arg("-R").arg(bundle(project)).arg(&copy).status().map_err(|e| e.to_string())?;
+    if !copied.success() {
+        let _ = std::fs::remove_dir_all(&work);
+        return Err("could not copy the app's bundle".into());
+    }
+    let out = std::fs::write(copy.join("main.splash"), source).map_err(|e| e.to_string()).and_then(|_| look_at(project, &copy, "probe-"));
+    let _ = std::fs::remove_dir_all(&work);
+    out
+}
+
+fn look_at(project: &str, bundle: &Path, prefix: &str) -> Result<String, String> {
     let tools = tools()?;
     let shots = Path::new(project).join(".octobuddy/shots");
     std::fs::create_dir_all(&shots).map_err(|e| e.to_string())?;
     let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let shot = shots.join(format!("{stamp}.png"));
+    let shot = shots.join(format!("{prefix}{stamp}.png"));
     let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(LOOK_SCRIPT).arg("octobuddy-app-look").arg(bundle(project)).arg(tools.octo()).arg(&shot)
+    cmd.arg("-c").arg(LOOK_SCRIPT).arg("octobuddy-app-look").arg(bundle).arg(tools.octo()).arg(&shot)
         .env("PATH", crate::workspace::search_path());
     if let Some(hub) = &tools.app_hub {
         cmd.env("OCTOSENSE_APP_HUB", hub);
@@ -86,8 +113,7 @@ except Exception as e:
 skip = {"View", "SolidView", "RoundedView", "Window", "KeyboardView", "ScrollYView", "ScrollXView", "Splash"}
 n = 0
 for w in nodes:
-    t = (w.get("t") or "").replace("
-", " ")
+    t = (w.get("t") or "").replace(chr(10), " ")
     if w.get("ty") in skip and not t:
         continue
     if w.get("ty") == "Splash":
@@ -333,6 +359,9 @@ hits and an index of those copies, each heading with its line number. Read only 
 planning time is the person's waiting time.{examples} Point each brief at the sections it needs (file and \
 heading), and quote the gotchas that matter.\n\
 - Never invent an API: only what those docs show or a system app uses (name it in the brief).\n\
+- Try, don't read: never read the runtime's source (makepad, App Hub) to learn how Splash behaves, yourself or \
+through a subagent: it takes tens of minutes. Look it up in the cookbook, or try it: octobuddy_app_probe runs a \
+few lines of Splash headless (errors and widgets back in seconds). Tell inner loops to do the same.\n\
 - main.splash is one file: one inner loop owns it at a time. A later change to it goes to the same inner \
 loop (message it) or to a later wave. The listing (listing.json, every placeholder) and the icon \
 (assets/icon.svg) can be a slice of their own.\n\
@@ -395,5 +424,22 @@ mod tests {
         assert!(script.contains("octo='/flow/tools/octo'"));
         assert!(script.starts_with("#!/bin/sh"));
         assert!(outer_rules(&tools).contains(CHECK));
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    /// A real headless run (card-host, the design flow): ignored by default;
+    /// `OCTOBUDDY_PROBE_PROJECT=<an app project>` names the app.
+    #[test]
+    #[ignore]
+    fn a_probe_answers_in_seconds() {
+        let project = std::env::var("OCTOBUDDY_PROBE_PROJECT").expect("an app project");
+        let started = std::time::Instant::now();
+        let out = super::probe(&project, "fn boot(){ ui.missing.set_text(\"x\") }\nstart_timeout(0.05, || boot())\nView{ height: Fit label := Label{text: \"hi\" draw_text.color: #x1c1c1e} }\n").unwrap();
+        eprintln!("{out}\n({:?})", started.elapsed());
+        assert!(out.contains("missing"), "its error comes back: {out}");
+        assert!(out.contains("hi"), "and its widgets: {out}");
+        assert!(started.elapsed().as_secs() < 30);
     }
 }

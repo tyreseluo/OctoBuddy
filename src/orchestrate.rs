@@ -980,6 +980,36 @@ impl OctoBuddyView {
         }
     }
 
+    /// ⇧⌘↵ (or its button): the outer loop's running turn is cut off, its
+    /// subagents with it, and the person's message is its next turn, first
+    /// in line. Steering waits for the agent's next step, which a long tool
+    /// call (a subagent at work) holds back; this does not. The inner loops
+    /// go on. Not at work: sent the usual way.
+    pub(crate) fn interrupt_and_send(&mut self, cx: &mut Cx) {
+        let Some(at) = self.selected else { return };
+        let Some(id) = self.store.session(at).map(|s| s.id.clone()) else { return };
+        if !self.lead_busy(&id) || !self.rt.leads.contains_key(&id) {
+            return self.send(cx);
+        }
+        let before = self.rt.outer_queue.get(&id).map(|q| q.len()).unwrap_or(0);
+        self.send(cx);
+        // What `send` queued (last) goes first.
+        if let Some(q) = self.rt.outer_queue.get_mut(&id).filter(|q| q.len() > before) {
+            if let Some(item) = q.pop_back() {
+                q.push_front(item);
+            }
+        } else {
+            return;
+        }
+        match self.rt.leads[&id].interrupt() {
+            Ok(()) => self.system(at, i18n::t("You interrupted the outer loop's turn (its subagents with it): your message is its next turn. The inner loops go on.",
+                "你打断了外环这一轮（它的子 agent 也一起停了）：你的消息作为它的下一轮。inner 照常工作。")),
+            Err(err) => self.system(at, &i18n::pick(format!("Could not interrupt it ({err}): your message waits for its turn."), format!("没能打断（{err}）：消息排在这一轮之后。"))),
+        }
+        self.save();
+        self.sync(cx);
+    }
+
     /// A message of the person's waiting in the outer queue, steered into
     /// the running turn instead (its row's 插话).
     pub(crate) fn steer_queued(&mut self, cx: &mut Cx, item: &str) {
@@ -1826,9 +1856,25 @@ It works for you now: message it, review its work, or close it.)\n"));
                     }
                 }
             }
-            LoopEvent::McpCall { session, name, reply, .. } if session.starts_with("inner:") => {
+            // The outer loop tries Splash: off the UI thread (a headless run takes seconds).
+            LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_app_probe" && !session.starts_with("inner:") => {
+                let Some(dir) = self.store.find_session(&session).map(|at| self.store.projects[at.0].path.clone()) else {
+                    let _ = reply.send(Err("no such session".into()));
+                    return;
+                };
+                let source = args.get("source").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                std::thread::spawn(move || {
+                    let answer = if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) {
+                        crate::plugins::octosense_app::probe(&dir, &source)
+                    } else {
+                        Err("this project is not an OctoSense app".into())
+                    };
+                    let _ = reply.send(answer);
+                });
+            }
+            LoopEvent::McpCall { session, name, args, reply } if session.starts_with("inner:") => {
                 let peer = session.trim_start_matches("inner:").to_string();
-                self.inner_mcp_call(&peer, &name, reply);
+                self.inner_mcp_call(&peer, &name, &args, reply);
             }
             // A plugin's program may take its time: off the UI thread.
             LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_plugin" => {
@@ -1997,7 +2043,11 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
                 if !ok {
                     let why = error.unwrap_or_default();
-                    if why != "interrupted" && !stopped {
+                    // Cut off for the person's message (not stopped): that goes to it now.
+                    if (why == "interrupted" || why.contains("interrupted")) && !stopped {
+                        self.drain_outer(at);
+                    }
+                    if why != "interrupted" && !why.contains("interrupted") && !stopped {
                         // A provider's rate limit: what to do about it, too.
                         let hint = if why.contains("429") || why.to_lowercase().contains("too many requests") {
                             i18n::t(" — the model's provider is rate-limiting this key: try again in a minute, or pick another model.", "——模型的 provider 在限流：等一分钟再试，或换个模型。")
