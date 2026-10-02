@@ -164,12 +164,25 @@ impl OctoBuddyView {
         }
     }
 
-    /// The outer loop of the session shown, in its own CLI.
+    /// The outer loop of the session shown, in its own CLI; while it is at
+    /// work, its live view (read-only) instead.
     pub(crate) fn open_outer_tui(&mut self, cx: &mut Cx) -> Result<(), String> {
         let at = self.selected.ok_or("no session")?;
         let session = self.store.session(at).cloned().ok_or("no session")?;
         if self.lead_busy(&session.id) {
-            return Err(i18n::t("The outer loop is at work: open its terminal when this turn is done.", "外环正在工作：等这一轮结束再打开它的终端。").into());
+            self.open_live(cx, &format!("s:{}", session.id));
+            return Ok(());
+        }
+        self.open_outer_cli(cx)
+    }
+
+    /// The outer loop in its own CLI (the conversation is the CLI's while it is open).
+    fn open_outer_cli(&mut self, cx: &mut Cx) -> Result<(), String> {
+        let at = self.selected.ok_or("no session")?;
+        let session = self.store.session(at).cloned().ok_or("no session")?;
+        if self.lead_busy(&session.id) {
+            return Err(i18n::t("The outer loop is at work: take its terminal over when this turn is done (its live view shows it meanwhile).",
+                "外环正在工作：等这一轮结束再接管它的终端（这期间可以看它的实时视图）。").into());
         }
         let engine = session.engine().to_string();
         let plain = self.store.is_plain(at);
@@ -185,16 +198,61 @@ impl OctoBuddyView {
         Ok(())
     }
 
-    /// An inner loop in its own CLI, in its panel.
+    /// A loop's live view: its live log followed in the terminal, read-only
+    /// (`s:<session>` the outer loop, in the stage; `p:<peer>` an inner one, in
+    /// its panel). Nothing of the loop is taken over: it goes on working.
+    fn open_live(&mut self, cx: &mut Cx, which: &str) {
+        let (key, term, cwd) = match which.strip_prefix("p:") {
+            Some(peer) => (crate::live::inner_key(peer), ids!(inner_term), self.store.find_peer(peer).and_then(|at| self.store.session(at))
+                .and_then(|s| s.peers().iter().find(|p| p.id == peer).map(|p| p.dir.clone())).unwrap_or_default()),
+            None => {
+                let sid = which.trim_start_matches("s:");
+                let cwd = self.store.find_session(sid).map(|at| self.store.projects[at.0].path.clone()).unwrap_or_default();
+                (crate::live::outer_key(sid), ids!(cli_term), cwd)
+            }
+        };
+        let path = crate::live::path(&key);
+        if !path.exists() {
+            self.rt.live.note(&key, i18n::t("Its live log starts here: what it does from now on.", "实时日志从这里开始：之后它做的事都会显示在这里。"));
+        }
+        // No echo (what is typed stays out of it), no cursor: a view, not a prompt.
+        let line = format!("stty -echo -icanon 2>/dev/null; printf '\\033[?25l'; exec tail -n 3000 -F {}", quote(&path.to_string_lossy()));
+        self.tui = Some(format!("live:{which}"));
+        if which.starts_with("s:") {
+            self.stage = Stage::Tui;
+        }
+        self.start_term(cx, term, if cwd.is_empty() { "/" } else { &cwd }, line);
+    }
+
+    /// The live view open, and which loop's (`s:…`, `p:…`).
+    fn live_of(&self) -> Option<&str> {
+        self.tui.as_deref().and_then(|k| k.strip_prefix("live:"))
+    }
+
+    /// An inner loop in its own CLI, in its panel; while it is at work (or
+    /// when it runs on octos, which has no terminal UI here), its live view.
     pub(crate) fn open_inner_tui(&mut self, cx: &mut Cx, peer: &str) -> Result<(), String> {
         let at = self.store.find_peer(peer).ok_or("no such inner loop")?;
         let session = self.store.session(at).cloned().ok_or("no session")?;
         let p = session.peers().iter().find(|p| p.id == peer).cloned().ok_or("no such inner loop")?;
+        if p.is_active() || !self.on_claude(peer) {
+            self.open_live(cx, &format!("p:{peer}"));
+            return Ok(());
+        }
+        self.open_inner_cli(cx, peer)
+    }
+
+    fn open_inner_cli(&mut self, cx: &mut Cx, peer: &str) -> Result<(), String> {
+        let at = self.store.find_peer(peer).ok_or("no such inner loop")?;
+        let session = self.store.session(at).cloned().ok_or("no session")?;
+        let p = session.peers().iter().find(|p| p.id == peer).cloned().ok_or("no such inner loop")?;
         if p.is_active() {
-            return Err(i18n::t("It is at work: open its terminal when this turn is done.", "它正在工作：等这一轮结束再打开它的终端。").into());
+            return Err(i18n::t("It is at work: take its terminal over when this turn is done (its live view shows it meanwhile).",
+                "它正在工作：等这一轮结束再接管它的终端（这期间可以看它的实时视图）。").into());
         }
         if !self.on_claude(peer) {
-            return Err(i18n::t("An inner loop on octos has no terminal UI here.", "跑在 octos 上的 inner 在这里没有终端界面。").into());
+            return Err(i18n::t("An inner loop on octos has no terminal UI to take over: its live view shows what it does.",
+                "跑在 octos 上的 inner 没有可接管的终端界面：它的实时视图会显示它做的事。").into());
         }
         let engine = p.agent().to_string();
         let label = p.model_pick.clone().or(session.inner_model().map(String::from));
@@ -224,6 +282,10 @@ impl OctoBuddyView {
         }
         if self.stage == Stage::Tui {
             self.stage = Stage::Chat;
+        }
+        // A live view took nothing over: nothing waits to go on.
+        if key.starts_with("live:") {
+            return true;
         }
         if let Some(sid) = key.strip_prefix("s:") {
             if let Some(at) = self.store.find_session(sid) {
@@ -265,6 +327,23 @@ impl OctoBuddyView {
         if self.view.button(cx, ids!(inner_tui_on)).clicked(actions) {
             self.close_tui(cx);
         }
+        // The live view, taken over: its CLI (when its turn is done).
+        let take = (self.view.button(cx, ids!(tui_restart)).clicked(actions) || self.view.button(cx, ids!(inner_take)).clicked(actions))
+            .then(|| self.live_of().map(String::from)).flatten();
+        if let Some(which) = take {
+            self.close_tui(cx);
+            let opened = match which.strip_prefix("p:") {
+                Some(peer) => self.open_inner_cli(cx, peer),
+                None => self.open_outer_cli(cx),
+            };
+            if let Err(err) = opened {
+                self.say(cx, &err);
+                // Still at work: back to watching it.
+                self.open_live(cx, &which);
+            }
+            self.relayout(cx);
+            return;
+        }
         if self.view.button(cx, ids!(tui_restart)).clicked(actions) && self.tui.is_some() {
             let key = self.tui.clone().unwrap_or_default();
             self.close_tui(cx);
@@ -287,12 +366,13 @@ impl OctoBuddyView {
     pub(crate) fn sync_tui(&mut self, cx: &mut Cx) {
         let on = plugins::enabled(plugins::NATIVE_TUI);
         // The plugin off, or another view picked at the top left: back to OctoBuddy's.
-        let left = self.stage != Stage::Tui && self.tui.as_deref().is_some_and(|k| k.starts_with("s:"));
+        let left = self.stage != Stage::Tui && self.tui.as_deref().is_some_and(|k| k.starts_with("s:") || k.starts_with("live:s:"));
         if (!on && self.tui.is_some()) || left {
             self.release_tui(cx);
         }
         let shown = self.selected.is_some_and(|at| self.store.session(at).is_some());
-        let outer = self.stage == Stage::Tui && self.tui.as_deref().is_some_and(|k| k.starts_with("s:"));
+        let outer = self.stage == Stage::Tui && self.tui.as_deref().is_some_and(|k| k.starts_with("s:") || k.starts_with("live:s:"));
+        let live = self.live_of().map(String::from);
         self.view.view(cx, ids!(view_tui)).set_visible(cx, on && shown && !outer);
         self.view.view(cx, ids!(view_tui_on)).set_visible(cx, on && shown && outer);
         for id in [ids!(view_tui), ids!(view_tui_on)] {
@@ -313,16 +393,35 @@ impl OctoBuddyView {
                     i18n::t("What waits for the outer loop goes on when you come back (the terminal button at the top left again, or exit the CLI). Its octobuddy tools work here too.",
                         "再点一次左上角的终端按钮或退出 CLI 后，外环在 OctoBuddy 里继续，排队的内容那时再发给它。它的 octobuddy 工具在这里也能用。").to_string())
             };
+            let (title, note) = match live.as_deref().and_then(|l| l.strip_prefix("s:")) {
+                Some(sid) => {
+                    let busy = self.lead_busy(sid);
+                    (i18n::pick(format!("The outer loop, live ({name}): read-only"), format!("外环实时视图（{name}）：只读")),
+                        if busy { i18n::t("What it does as it does it: its words, each tool call, its subagents. It goes on working: nothing here is taken over. Scroll up for earlier turns.",
+                            "它正在做的事，原样显示：它写的话、每次工具调用、子代理。它照常工作，这里不接管任何东西。往上滚可以看之前的轮次。").to_string() }
+                        else { i18n::t("Its turn is done: Take over opens its own terminal on this conversation.", "这一轮已结束：点「接管终端」打开它自己的终端，接着这个会话。").to_string() })
+                }
+                None => (title, note),
+            };
             self.view.label(cx, ids!(tui_title)).set_text(cx, &title);
             self.view.label(cx, ids!(tui_note)).set_text(cx, &note);
-            self.view.button(cx, ids!(tui_restart)).set_text(cx, i18n::t("Reconnect", "重新连接"));
+            self.view.button(cx, ids!(tui_restart)).set_text(cx, if live.is_some() { i18n::t("Take over", "接管终端") } else { i18n::t("Reconnect", "重新连接") });
         }
         // The inner panel: its CLI or its messages.
         let peer = self.selected.and_then(|at| self.shown_peer(at)).map(|p| p.id.clone());
-        let inner = peer.as_deref().is_some_and(|p| self.tui_holds_peer(p));
-        let lead_backed = peer.as_deref().is_some_and(|p| self.on_claude(p));
-        self.view.button(cx, ids!(inner_tui)).set_visible(cx, on && lead_backed && !inner);
+        let inner_live = peer.as_deref().is_some_and(|p| live.as_deref() == Some(&format!("p:{p}")));
+        let inner = peer.as_deref().is_some_and(|p| self.tui_holds_peer(p)) || inner_live;
+        // Every inner loop has its live view; one on Claude Code, Codex or pi its CLI too.
+        self.view.button(cx, ids!(inner_tui)).set_visible(cx, on && peer.is_some() && !inner);
         self.view.button(cx, ids!(inner_tui_on)).set_visible(cx, on && inner);
+        self.view.view(cx, ids!(inner_live_bar)).set_visible(cx, inner_live);
+        if let Some(p) = peer.as_deref().filter(|_| inner_live) {
+            let at_work = self.store.find_peer(p).and_then(|at| self.store.session(at)).and_then(|s| s.peers().iter().find(|q| q.id == p).map(|q| q.is_active())).unwrap_or(false);
+            let title = if at_work { i18n::t("Live, read-only: it goes on working", "实时视图（只读）：它照常工作") } else { i18n::t("Live, read-only: its turn is done", "实时视图（只读）：这一轮已结束") };
+            self.view.label(cx, ids!(inner_live_title)).set_text(cx, title);
+            self.view.button(cx, ids!(inner_take)).set_text(cx, i18n::t("Take over", "接管终端"));
+            self.view.button(cx, ids!(inner_take)).set_visible(cx, !at_work && self.on_claude(p));
+        }
         self.view.view(cx, ids!(inner_term_pane)).set_visible(cx, inner);
         self.view.view(cx, ids!(peer_messages_pane)).set_visible(cx, !inner);
     }
