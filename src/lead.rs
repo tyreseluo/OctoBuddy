@@ -148,6 +148,9 @@ a peer the person made for you). \
 SUBAGENTS. You may hand reading to subagents with the Agent tool (they read, like you, and cannot edit): \
 for a broad search or a survey of unfamiliar code before you plan, or to check several peers' work at once \
 when you review. Never use them for the work itself: that is what the inner loops are for. \
+A subagent you start finishes within the turn you start it in: wait for its result before you end that turn, \
+never leave one running in the background (OctoBuddy may start your process anew between turns, and what \
+runs in it then is lost). \
 Do not wait or poll for peers: end your turn; their results come to you. Keep replies short.";
 
 /// The agent-estimation skill (github.com/tyreseluo/agent-estimation, MIT),

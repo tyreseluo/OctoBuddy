@@ -85,6 +85,8 @@ pub struct Runtime {
     pub outer_queue: HashMap<String, std::collections::VecDeque<OuterItem>>,
     /// Peers of a later wave, held until the earlier waves are accepted: their directory.
     pub(crate) held: HashMap<String, String>,
+    /// Reports the lead was reminded of, still without a verdict (`peer:exchanges`).
+    pub(crate) verdict_nudged: HashSet<String>,
     /// Sessions told their review budget is used up (said once).
     budget_said: HashSet<String>,
     /// Sessions whose work moved on (a check passed, or a commit went in)
@@ -1308,6 +1310,39 @@ What the person says to you after it stays between you and them.");
         self.review_now(at);
     }
 
+    /// A turn over, and a later wave still held by slices that reported and
+    /// have no verdict (the subagents it sent to check them lost with its
+    /// process, say): the lead is reminded, once per report, and the person
+    /// sees it was.
+    fn verdict_nudge(&mut self, at: SessionRef) {
+        let Some(session) = self.store.session(at).cloned() else { return };
+        let queued = self.rt.outer_queue.get(&session.id).is_some_and(|q| !q.is_empty());
+        let unsent = self.rt.unreported.get(&session.id).is_some_and(|v| !v.is_empty());
+        if self.lead_busy(&session.id) || queued || unsent || self.halted.contains(&session.id) {
+            return;
+        }
+        let held: Vec<&Peer> = session.peers().iter().filter(|p| self.rt.held.contains_key(&p.id)).collect();
+        let Some(wave) = held.iter().map(|p| p.wave.unwrap_or(2)).min() else { return };
+        let undecided: Vec<&Peer> = session.peers().iter().filter(|p| {
+            p.wave.unwrap_or(1) < wave && p.status != "closed" && !p.is_active() && p.review.is_none()
+                && p.log().last().is_some_and(|e| e.outcome.is_some())
+        }).collect();
+        let fresh: Vec<String> = undecided.iter()
+            .filter(|p| self.rt.verdict_nudged.insert(format!("{}:{}", p.id, p.log().len())))
+            .map(|p| p.slug.clone()).collect();
+        if fresh.is_empty() {
+            return;
+        }
+        let waiting: Vec<String> = held.iter().map(|p| p.slug.clone()).collect();
+        self.system(at, &i18n::pick(
+            format!("OctoBuddy reminds the outer loop: {} reported and wait for its verdict; wave {wave} ({}) is held until then.", fresh.join(", "), waiting.join(", ")),
+            format!("OctoBuddy 提醒外环：{} 已汇报，还在等它的结论；wave {wave}（{}）要等到那时才开始。", fresh.join("、"), waiting.join("、"))));
+        self.tell_lead(at, format!("WAITING ON YOUR VERDICT: {} reported and have no verdict yet; wave {wave} ({}) is held until you give one \
+with octobuddy_review (accept, revise or reject). If you sent subagents to check them, their results will not come back in a later turn \
+(OctoBuddy may start your process anew between turns): check now, in this turn, waiting for any subagent you start, then give the verdict.",
+            fresh.join(", "), waiting.join(", ")));
+    }
+
     /// Sends the ready reports to the lead now; says whether it sent any.
     fn review_now(&mut self, at: SessionRef) -> bool {
         let Some(session) = self.store.session(at).cloned() else { return false };
@@ -1772,6 +1807,7 @@ It works for you now: message it, review its work, or close it.)\n"));
                 self.drain_outer(at);
                 if !self.store.is_plain(at) {
                     self.maybe_review(at);
+                    self.verdict_nudge(at);
                 }
             }
             LoopEvent::LeadSteerTaken { session } => {
