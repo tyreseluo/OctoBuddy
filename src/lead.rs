@@ -184,7 +184,9 @@ pub enum Mode {
 /// OctoBuddy's rules for inner loops, comes as its first message).
 pub const INNER_RULES: &str = "You are an inner loop of OctoBuddy: one slice of a larger plan, in a folder you share \
 with other inner loops and the outer loop (the lead). Do your slice only; change only the files it is about. Do not \
-run `git commit` (OctoBuddy commits your files from your `Commit:` line). Follow the rules in your first message.";
+run `git commit` (OctoBuddy commits your files from your `Commit:` line). Follow the rules in your first message. \
+Work fast: read only the ranges you need (offset and limit), prefer the Read, Grep and Glob tools to a shell's cat \
+and grep, and look a thing up in your skills (octosense-app for an OctoSense app) before searching anywhere else.";
 
 /// A plain chat's system note: no project, no loops.
 pub const PLAIN_CHAT: &str = "You are chatting with the person in OctoBuddy, an app on OctoSense. This chat belongs to \
@@ -299,19 +301,28 @@ impl Lead {
             Mode::Plain => ("Read,Glob,Grep,WebSearch,WebFetch", format!("{PLAIN_CHAT}{extra}")),
             // Agent: the lead may hand reading and research to subagents
             // (they get the same read-only tools).
-            Mode::Outer => ("Read,Glob,Grep,Agent", format!("{}{extra}", lead_prompt())),
-            Mode::Inner => ("Read,Edit,Write,MultiEdit,Glob,Grep,Bash,TodoWrite,Agent", format!("{INNER_RULES}{extra}")),
+            Mode::Outer => ("Read,Glob,Grep,Agent,Skill", format!("{}{extra}", lead_prompt())),
+            Mode::Inner => ("Read,Edit,Write,MultiEdit,Glob,Grep,Bash,TodoWrite,Agent,Skill", format!("{INNER_RULES}{extra}")),
         };
         if mode == Mode::Inner {
             // Edits without asking, commands in Claude Code's sandbox (never
             // outside it): what octos's sandbox gives an inner loop.
-            cmd.args(["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,MultiEdit,Glob,Grep,Bash,TodoWrite,Agent"])
+            cmd.args(["--permission-mode", "acceptEdits", "--allowedTools", "Read,Edit,Write,MultiEdit,Glob,Grep,Bash,TodoWrite,Agent,Skill"])
                 .arg("--settings").arg(r#"{"sandbox":{"enabled":true,"autoAllowBashIfSandboxed":true,"allowUnsandboxedCommands":false}}"#);
         }
         if mode == Mode::Outer {
             // Its reviewer, on a cheaper model (INDEPENDENT REVIEW).
             cmd.arg("--agents").arg(crate::review::reviewer_agent());
         }
+        // OctoBuddy's skills (octosense-app), for this session only.
+        if mode != Mode::Plain {
+            if let Some(dir) = crate::plugins::octosense_app::agent_plugin() {
+                cmd.arg("--plugin-dir").arg(dir);
+            }
+        }
+        // No telemetry from the agents OctoBuddy runs; a slow provider's long
+        // answer is not cut off (as Cindy runs them).
+        cmd.env("DISABLE_TELEMETRY", "1").env("DISABLE_ERROR_REPORTING", "1").env("API_TIMEOUT_MS", "900000");
         if !env.is_empty() {
             for name in crate::claude_proxy::SCRUB {
                 cmd.env_remove(name);
