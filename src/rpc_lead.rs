@@ -649,6 +649,12 @@ pub fn spawn_pi(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, r
         // The outer loop reads; it changes nothing.
         cmd.args(["--tools", "read,grep,find,ls"]);
     }
+    // OctoBuddy's skills (octosense-app).
+    if mode != Mode::Plain {
+        if let Some(dir) = crate::plugins::octosense_app::agent_plugin() {
+            cmd.arg("--skill").arg(dir.join("skills/octosense-app"));
+        }
+    }
     for name in crate::claude_proxy::SCRUB {
         cmd.env_remove(name);
     }

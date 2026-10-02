@@ -90,6 +90,35 @@ report. Start with .octobuddy/docs/SPLASH-COOKBOOK.md (verified patterns and got
 lacks. When the project has app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated \
 from them (never edit it).";
 
+/// OctoBuddy's skills for the agents it runs, as a Claude Code plugin
+/// (`--plugin-dir`; pi loads the skill folder with `--skill`): what an agent
+/// needs to build an OctoSense app — the cookbook, the lessons of earlier
+/// runs, how to work with parts and OctoBuddy's tools — loaded when it is
+/// needed rather than read again from the docs. Rewritten as it changes.
+pub fn agent_plugin() -> Option<PathBuf> {
+    let dir = crate::model::data_dir().join("agent-plugin/octobuddy");
+    let skill = dir.join("skills/octosense-app");
+    std::fs::create_dir_all(dir.join(".claude-plugin")).ok()?;
+    std::fs::create_dir_all(&skill).ok()?;
+    let manifest = serde_json::json!({"name": "octobuddy", "version": env!("CARGO_PKG_VERSION"), "author": {"name": "OctoBuddy"},
+        "description": "OctoBuddy's skills for the agents it runs: building OctoSense apps."}).to_string();
+    let learned = crate::lessons::section("splash", "## Learned in OctoBuddy's own runs (verified with its probe; newest last)");
+    let body = format!("---\nname: octosense-app\ndescription: Build, fix or verify an OctoSense app (bundle/main.splash in Makepad Splash, or its app/parts/*.splash): \
+verified Splash patterns, the gotchas and the errors they give, lessons from earlier runs, and OctoBuddy's tools to look at, drive, probe \
+and check the app. Use it before writing or fixing any Splash.\n---\n\n# OctoSense app, with OctoBuddy\n\n\
+## How to work\n\n\
+- With app/parts/: edit only the parts your task gives you; bundle/main.splash is generated from them (never edit it).\n\
+- See it: octobuddy_app_look (errors, screenshot, widgets). Verify a flow by doing it: octobuddy_app_drive (click by id or text, \
+type, key, wait, look). Unsure how Splash behaves: try a few lines with octobuddy_app_probe, in seconds. Before you report: \
+octobuddy_check until it passes. From a shell (an agent with no MCP): octobuddy-app look | drive <steps.json> | probe <file> | check.\n\
+- Never read the runtime's source (makepad, App Hub) to learn Splash: this skill, then SCRIPT-API.md, then try it.\n\n\
+{COOKBOOK}{learned}");
+    let write = |path: PathBuf, text: &str| if std::fs::read_to_string(&path).ok().as_deref() != Some(text) { std::fs::write(&path, text).ok() } else { Some(()) };
+    write(dir.join(".claude-plugin/plugin.json"), &manifest)?;
+    write(skill.join("SKILL.md"), &body)?;
+    Some(dir)
+}
+
 /// The command a slice of an app is checked with.
 pub const CHECK: &str = "octobuddy-app-check";
 
@@ -672,6 +701,16 @@ mod probe_tests {
         assert!(out.contains("missing"), "its error comes back: {out}");
         assert!(out.contains("hi"), "and its widgets: {out}");
         assert!(started.elapsed().as_secs() < 30);
+    }
+
+    /// The agents' plugin is written where OctoBuddy keeps it, with its skill.
+    #[test]
+    #[ignore]
+    fn the_agents_plugin_is_written() {
+        let dir = super::agent_plugin().unwrap();
+        eprintln!("{}", dir.display());
+        let skill = std::fs::read_to_string(dir.join("skills/octosense-app/SKILL.md")).unwrap();
+        assert!(skill.starts_with("---\nname: octosense-app\n") && skill.contains("## 1. Program shape"));
     }
 
     /// The new app driven: two taps on Add, its count says so.
