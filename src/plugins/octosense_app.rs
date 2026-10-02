@@ -13,18 +13,29 @@ use crate::workspace::search_path;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// What every inner loop is told about the design flow's rules around the
+/// Splash (`design_flow_digest.md`, copied into the project).
+macro_rules! design_note {
+    () => {
+        "For what the app must do beyond the Splash (its empty, error and restart states, what each action \
+means, the manifest and listing rules, what a capability gives today, the common mistakes): \
+.octobuddy/docs/DESIGN-FLOW.md, OctoBuddy's digest of OctoScript App Design Flow (§2 design checklist, \
+§3 manifest and listing, §7 capabilities, §8 mistakes); open a line it cites only for the exact text."
+    };
+}
+
 /// What an app project's inner loop is told: the app runs outside its sandbox.
-pub const INNER_NOTE: &str = "\nThis project is an OctoSense app. You cannot run it: its hosts (card-host, the shell) are \
+pub const INNER_NOTE: &str = concat!("\nThis project is an OctoSense app. You cannot run it: its hosts (card-host, the shell) are \
 not in your sandbox, so do not look for them, install them, or spawn helpers to test it. Start with \
 .octobuddy/docs/SPLASH-COOKBOOK.md: OctoBuddy's verified patterns for what an app needs (pages, lists, forms, \
 storage, dates, money, bars, gotchas and the errors they give). Read .octobuddy/docs/SCRIPT-API.md only for what \
-it lacks, and other apps' sources not at all unless both lack it. When the project has app/parts/, edit only \
+it lacks, and other apps' sources not at all unless both lack it. ", design_note!(), " When the project has app/parts/, edit only \
 the parts your brief gives you: bundle/main.splash is generated from them (never edit it). When you finish, OctoBuddy runs the app headless and App Hub's \
-gate (octobuddy-app-check) and shows it running in its preview; the result comes back to you if it fails.";
+gate (octobuddy-app-check) and shows it running in its preview; the result comes back to you if it fails.");
 
 /// The same for an inner loop on Claude Code, which has OctoBuddy's tools to
 /// run the app itself (`octobuddy_check`, `octobuddy_app_look`).
-pub const INNER_NOTE_TOOLS: &str = "\nThis project is an OctoSense app. Its hosts (card-host, the shell) cannot run in your \
+pub const INNER_NOTE_TOOLS: &str = concat!("\nThis project is an OctoSense app. Its hosts (card-host, the shell) cannot run in your \
 sandbox, so do not look for them or install them: OctoBuddy runs the app for you, outside it, through two tools. \
 `octobuddy_app_look` runs the app headless now and gives you its script errors, a screenshot (a PNG under \
 .octobuddy/shots/, which you can read) and the widgets on screen (type, id, text: what a test finds them by). \
@@ -35,8 +46,8 @@ errors and widgets: when unsure how Splash behaves, try it there, in seconds, ra
 look): verify a flow by doing it (add an entry, delete it, switch a tab) instead of writing a test script for it. Use them as you work: after each meaningful change, look; before you report, run your check until it \
 passes. Start with .octobuddy/docs/SPLASH-COOKBOOK.md: OctoBuddy's verified patterns for what an app needs (pages, \
 lists, forms, storage, dates, money, bars, gotchas and the errors they give). Read .octobuddy/docs/SCRIPT-API.md \
-only for what it lacks, and other apps' sources not at all unless both lack it. When the project has \
-app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated from them (never edit it).";
+only for what it lacks, and other apps' sources not at all unless both lack it. ", design_note!(), " When the project has \
+app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated from them (never edit it).");
 
 /// OctoBuddy's tools from a shell, for an agent with no MCP (pi): `look`,
 /// `check`, `probe <file>`, to the endpoint `OCTOBUDDY_MCP_URL` names.
@@ -77,7 +88,7 @@ pub fn ensure_app_cli() -> Option<PathBuf> {
 }
 
 /// The same note for an inner loop with no MCP (pi): the tools as commands.
-pub const INNER_NOTE_CLI: &str = "\nThis project is an OctoSense app. Its hosts (card-host, the shell) cannot run in your \
+pub const INNER_NOTE_CLI: &str = concat!("\nThis project is an OctoSense app. Its hosts (card-host, the shell) cannot run in your \
 shell, so do not look for them or install them: OctoBuddy runs the app for you, outside, through a command. \
 `octobuddy-app look` runs the app headless now and prints its script errors, a screenshot (a PNG under \
 .octobuddy/shots/, which you can read) and the widgets on screen. `octobuddy-app check` runs your slice's own check, \
@@ -87,8 +98,8 @@ behaves, try it there, in seconds. `octobuddy-app drive <steps.json>` runs the a
 (a JSON list of {\"click\": \"<widget id or text>\"}, {\"type\": \"<text>\"}, {\"key\": \"Return\"}, {\"wait\": 1}, {\"look\": true}): \
 verify a flow by doing it, then read what each step did and what is on screen. Look after each meaningful change; run your check until it passes before you \
 report. Start with .octobuddy/docs/SPLASH-COOKBOOK.md (verified patterns and gotchas); SCRIPT-API.md only for what it \
-lacks. When the project has app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated \
-from them (never edit it).";
+lacks. ", design_note!(), " When the project has app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated \
+from them (never edit it).");
 
 /// OctoBuddy's skills for the agents it runs, as a Claude Code plugin
 /// (`--plugin-dir`; pi loads the skill folder with `--skill`): what an agent
@@ -111,11 +122,16 @@ and check the app. Use it before writing or fixing any Splash.\n---\n\n# OctoSen
 - See it: octobuddy_app_look (errors, screenshot, widgets). Verify a flow by doing it: octobuddy_app_drive (click by id or text, \
 type, key, wait, look). Unsure how Splash behaves: try a few lines with octobuddy_app_probe, in seconds. Before you report: \
 octobuddy_check until it passes. From a shell (an agent with no MCP): octobuddy-app look | drive <steps.json> | probe <file> | check.\n\
-- Never read the runtime's source (makepad, App Hub) to learn Splash: this skill, then SCRIPT-API.md, then try it.\n\n\
-{COOKBOOK}{learned}");
+- Never read the runtime's source (makepad, App Hub) to learn Splash: this skill, then SCRIPT-API.md, then try it.\n\
+- Beyond the Splash (the app's empty, error and restart states, what each action means, the manifest and listing, \
+what a capability gives on today's devices, where a person must decide): {design}, OctoBuddy's digest of OctoScript App \
+Design Flow. Before you report, go through its §2 checklist and §8 mistakes for what your task touched.\n\n\
+{COOKBOOK}{learned}", design = skill.join("DESIGN-FLOW.md").display());
     let write = |path: PathBuf, text: &str| if std::fs::read_to_string(&path).ok().as_deref() != Some(text) { std::fs::write(&path, text).ok() } else { Some(()) };
     write(dir.join(".claude-plugin/plugin.json"), &manifest)?;
     write(skill.join("SKILL.md"), &body)?;
+    let flow = tools().map(|t| t.flow).unwrap_or_default();
+    write(skill.join("DESIGN-FLOW.md"), &design_flow(&flow))?;
     Some(dir)
 }
 
@@ -444,12 +460,27 @@ pub fn repair_digest(project: &str) {
 
 /// The reference the inner loops read, copied into the project (they may not
 /// read outside it): what the design flow says an app is made of.
-const DOCS: &[&str] = &["AGENTS.md", "flows/script-app/FLOW.md", "docs/SCRIPT-API.md", "docs/CAPABILITIES.md", "docs/HOST-SERVICES.md"];
+const DOCS: &[&str] = &["AGENTS.md", "flows/script-app/FLOW.md", "docs/SCRIPT-API.md", "docs/CAPABILITIES.md", "docs/HOST-SERVICES.md", "docs/PUBLISHING.md"];
 
 /// OctoBuddy's own reference, verified against card-host: the patterns an app
 /// needs and the gotchas, short, so no inner loop learns them again from the
 /// docs and other apps' sources (`splash_cookbook.md`).
 pub const COOKBOOK: &str = include_str!("splash_cookbook.md");
+
+/// OctoBuddy's digest of the design flow itself (`design_flow_digest.md`):
+/// its steps and what passes each, where a person decides, the design
+/// checklist, the manifest and listing rules, what each capability gives
+/// today and the common mistakes, each citing the line it comes from. What
+/// the cookbook is for the Splash, this is for everything around it.
+pub const DESIGN_FLOW: &str = include_str!("design_flow_digest.md");
+
+/// The digest, with where the lines it cites are (`flow`: the design flow's checkout).
+fn design_flow(flow: &Path) -> String {
+    let copied: Vec<&str> = DOCS.iter().map(|d| d.rsplit('/').next().unwrap_or(d)).collect();
+    let at = if flow.as_os_str().is_empty() { "github.com/OctoSense-org/OctoScript-App-Design-Flow".to_string() } else { flow.display().to_string() };
+    format!("> The repo it cites is at {at}. Copies in an app project's .octobuddy/docs: {} (FL is FLOW.md); \
+the others only there.\n\n{DESIGN_FLOW}", copied.join(", "))
+}
 
 /// Refreshes `.octobuddy/docs` and OctoBuddy's check script; the outer loop's
 /// rules for this app, or why the design flow cannot be used.
@@ -466,6 +497,7 @@ pub fn prepare(project: &str) -> Result<String, String> {
     // With what OctoBuddy learned in its own runs since (`lessons`).
     let learned = crate::lessons::section("splash", "## Learned in OctoBuddy's own runs (verified with its probe; newest last)");
     let _ = std::fs::write(docs.join("SPLASH-COOKBOOK.md"), format!("{COOKBOOK}{learned}"));
+    let _ = std::fs::write(docs.join("DESIGN-FLOW.md"), design_flow(&tools.flow));
     write_check(&tools)?;
     Ok(outer_rules(&tools))
 }
@@ -561,11 +593,14 @@ fn outer_rules(tools: &Tools) -> String {
         .unwrap_or_default();
     format!("\n\nOCTOSENSE APP. This project is an OctoSense script app: `bundle/` holds it (manifest.json, listing.json, \
 main.splash, assets/), in OctoScript App Design Flow's format. The person says what they want; you plan it and \
-your inner loops build it. The docs you plan with are {flow}/AGENTS.md, {flow}/flows/script-app/FLOW.md and \
-{flow}/docs/SCRIPT-API.md (CAPABILITIES.md or HOST-SERVICES.md when the app needs more than storage), with \
-copies in .octobuddy/docs/ that the inner loops read, and OctoBuddy's own .octobuddy/docs/SPLASH-COOKBOOK.md: \
-verified patterns and gotchas (pages, lists, forms, storage, dates, money, bars, the errors mistakes give). Point \
-briefs at its sections instead of restating them, and at SCRIPT-API.md only for what it lacks. Your first message carries OctoBuddy's CONTEXT: memory \
+your inner loops build it. The docs you plan with are OctoBuddy's two digests in .octobuddy/docs/, which \
+the inner loops read too: DESIGN-FLOW.md, the whole of OctoScript App Design Flow ({flow}) in one place (its \
+steps and what passes each, where a person decides, the design checklist, the manifest and listing rules, what \
+each capability gives on today's devices, the common mistakes, each citing its source line): read it instead \
+of AGENTS.md and FLOW.md; and SPLASH-COOKBOOK.md: verified patterns and gotchas (pages, lists, forms, storage, \
+dates, money, bars, the errors mistakes give). The flow's own docs are copied beside them (AGENTS.md, FLOW.md, \
+SCRIPT-API.md, CAPABILITIES.md, HOST-SERVICES.md, PUBLISHING.md): open one only at a line a digest cites, or \
+SCRIPT-API.md for what the cookbook lacks. Point briefs at the digests' sections instead of restating them. Your first message carries OctoBuddy's CONTEXT: memory \
 hits and an index of those copies, each heading with its line number. Read only the sections your plan needs \
 (Read with offset and limit), not whole docs, and do not search memory again for what the CONTEXT has: \
 planning time is the person's waiting time.{examples} Point each brief at the sections it needs (file and \
@@ -585,13 +620,25 @@ few lines of Splash headless (errors and widgets back in seconds). Tell inner lo
 - main.splash is one file: one inner loop owns it at a time. A later change to it goes to the same inner \
 loop (message it) or to a later wave. The listing (listing.json, every placeholder) and the icon \
 (assets/icon.svg) can be a slice of their own.\n\
-- The manifest asks only for the capabilities a screen uses; every https host is declared (network.hosts), \
+- Design (DESIGN-FLOW.md §2): plan each screen with its empty and error states and what survives a restart, \
+and say in each brief which of them its slice owns; an action's label says what it does (save, delete, cancel: \
+different actions), and a delete leaves no empty shell. The end-to-end test covers the empty state and a restart.\n\
+- Where the design flow stops for a person (DESIGN-FLOW.md §1): a request you cannot read one way (ask \
+before you plan), the publisher's name, support contact and privacy-policy URL, a publisher key or signature, \
+and a real App Hub submission. Never fill these in or claim them, yourself or through a slice: leave each a \
+placeholder that says the person fills it, and list it in your report under what waits on them. The listing's \
+platforms are only where a run tested it (card-host on a Mac: macos), never the template's android. \
+Publishing to OctoBuddy's local App Hub is a rehearsal.\n\
+- The manifest asks only for the capabilities a screen uses (each a line the person reads before installing; \
+DESIGN-FLOW.md §7 says what each gives on today's devices: no `llm`, `model`, `glance`, `news` or `octos` for \
+a store app); every https host is declared (network.hosts), \
 never http://; no password, PIN, code or login field; no key or token in the bundle. Leave `integrity` alone.\n\
 - Every slice's `check` is `{CHECK}`: a headless run of a copy of the bundle that fails on any script error, \
 then App Hub's gate.\n\
 - An inner loop cannot run the app: its sandbox has no card-host, no window and no GPU, and its shell \
 writes only inside the project (not /tmp). OctoBuddy runs the app for it, outside the sandbox: the check above, and for \
-an inner loop on Claude Code `octobuddy_app_look` (script errors, a screenshot, the widgets). So plan no slice \
+every inner loop its tools (`octobuddy_app_look`: script errors, a screenshot, the widgets; drive, probe; pi \
+has them as the command `octobuddy-app`). So plan no slice \
 that runs card-host or a probe script itself, and take a passing check as the run's evidence.\n\
 - OctoBuddy runs the app in its Preview panel and reloads it when its files change: the person tries it \
 there. Store screenshots and publishing come later, from the person.\n\
@@ -711,6 +758,20 @@ mod probe_tests {
         eprintln!("{}", dir.display());
         let skill = std::fs::read_to_string(dir.join("skills/octosense-app/SKILL.md")).unwrap();
         assert!(skill.starts_with("---\nname: octosense-app\n") && skill.contains("## 1. Program shape"));
+        assert!(skill.contains("DESIGN-FLOW.md") && dir.join("skills/octosense-app/DESIGN-FLOW.md").is_file());
+    }
+
+    /// Every inner loop, whatever its agent, is pointed at the design flow's
+    /// digest, which says where the lines it cites are.
+    #[test]
+    fn every_inner_loop_reads_the_design_flow_digest() {
+        for note in [super::INNER_NOTE, super::INNER_NOTE_TOOLS, super::INNER_NOTE_CLI] {
+            assert!(note.contains(".octobuddy/docs/DESIGN-FLOW.md") && note.contains("SPLASH-COOKBOOK.md"), "{note}");
+        }
+        let text = super::design_flow(std::path::Path::new("/p/flow"));
+        assert!(text.starts_with("> The repo it cites is at /p/flow.") && text.contains("PUBLISHING.md"));
+        assert!(text.contains("## 1. The script-app flow, in order") && text.contains("## 8. Most common mistakes"));
+        assert!(super::design_flow(std::path::Path::new("")).contains("github.com/OctoSense-org/OctoScript-App-Design-Flow"));
     }
 
     /// The new app driven: two taps on Add, its count says so.
