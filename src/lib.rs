@@ -1508,6 +1508,17 @@ script_mod! {
                                     }
                                     draw_text +: {color: th_danger color_hover: th_danger color_down: th_danger color_focus: th_danger}
                                 }
+                                // At work, something typed: its turn (and its subagents) cut off,
+                                // the message its next turn; the inner loops go on.
+                                interrupt_send := ButtonFlat{
+                                    text: "Interrupt & send" width: Fit height: 30 visible: false
+                                    padding: Inset{left: 12 right: 12}
+                                    draw_bg +: {
+                                        color: th_warning_bg color_hover: th_hover color_down: th_line color_focus: th_warning_bg
+                                        border_size: 0.0 border_radius: 6.0
+                                    }
+                                    draw_text +: {color: th_warning color_hover: th_warning color_down: th_warning color_focus: th_warning}
+                                }
                                 // After a stop: what waited, or the turn cut off, goes on.
                                 go_on := ButtonFlat{
                                     text: "Go on" width: Fit height: 30 visible: false
@@ -2592,6 +2603,10 @@ impl OctoBuddyView {
             let typed = !self.view.text_input(cx, ids!(composer)).text().trim().is_empty();
             self.view.button(cx, ids!(stop)).set_visible(cx, busy);
             self.view.button(cx, ids!(send)).set_visible(cx, !busy || typed);
+            let interruptible = busy && typed && self.rt.leads.contains_key(&session.id) && !self.tui_holds_outer(&session.id);
+            let interrupt = self.view.button(cx, ids!(interrupt_send));
+            interrupt.set_visible(cx, interruptible);
+            interrupt.set_text(cx, i18n::t("Interrupt & send", "打断并发送"));
             self.view.button(cx, ids!(go_on)).set_visible(cx, !busy && self.resumable.contains(&session.id));
             let worktree = self.view.check_box(cx, ids!(use_worktree));
             worktree.set_active(cx, session.worktree(), Animate::No);
@@ -2671,9 +2686,9 @@ impl OctoBuddyView {
         let steerable = selected.and_then(|at| self.store.session(at)).is_some_and(|s| self.steerable(&s.id).is_ok());
         let hint = if steerable {
             if cfg!(target_os = "macos") {
-                i18n::t("At work: Enter sends after this turn, ⌘Enter steers it now (its work goes on)", "运行中：Enter 排在这一轮之后，⌘Enter 插话（不打断它）")
+                i18n::t("At work: Enter sends after this turn, ⌘Enter steers it (taken up at its next step), ⇧⌘Enter interrupts it and sends", "运行中：Enter 排在这一轮之后 · ⌘Enter 插话（它下一步才读到）· ⇧⌘Enter 打断并发送")
             } else {
-                i18n::t("At work: Enter sends after this turn, Ctrl+Enter steers it now (its work goes on)", "运行中：Enter 排在这一轮之后，Ctrl+Enter 插话（不打断它）")
+                i18n::t("At work: Enter sends after this turn, Ctrl+Enter steers it (taken up at its next step), ⇧Ctrl+Enter interrupts it and sends", "运行中：Enter 排在这一轮之后 · Ctrl+Enter 插话（它下一步才读到）· ⇧Ctrl+Enter 打断并发送")
             }
         } else if is_app {
             i18n::t("Describe the app you want: what it is for, its screens, its data  (Enter to send)", "描述你想要的应用：做什么用、有哪些界面、用什么数据（Enter 发送）")
@@ -4186,7 +4201,11 @@ impl OctoBuddyView {
         // submit); a conversation keeps it, so the next line can follow.
         // ⌘Enter (Ctrl+Enter elsewhere) while it works: steered into its turn.
         let returned = self.view.text_input(cx, ids!(composer)).returned(actions);
-        if returned.as_ref().is_some_and(|(_, m)| m.logo || m.control) {
+        // ⇧⌘Enter (⇧Ctrl+Enter elsewhere), or its button: the turn cut off, the message next.
+        if self.view.button(cx, ids!(interrupt_send)).clicked(actions) || returned.as_ref().is_some_and(|(_, m)| (m.logo || m.control) && m.shift) {
+            self.interrupt_and_send(cx);
+            self.view.text_input(cx, ids!(composer)).set_key_focus(cx);
+        } else if returned.as_ref().is_some_and(|(_, m)| m.logo || m.control) {
             self.steer(cx);
             self.view.text_input(cx, ids!(composer)).set_key_focus(cx);
         } else if self.view.button(cx, ids!(send)).clicked(actions) || returned.is_some() {
