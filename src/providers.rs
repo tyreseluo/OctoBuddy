@@ -348,8 +348,7 @@ for line in sys.stdin:
         except Exception:
             pass
     if body.strip():
-        sys.stdout.write(body.strip() + "
-")
+        sys.stdout.write(body.strip() + chr(10))
         sys.stdout.flush()
 "#;
 

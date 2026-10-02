@@ -627,7 +627,7 @@ pub fn spawn_codex(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>
 
 /// Starts pi for `session` in `cwd` on `route`, resuming its session file `resume`.
 #[allow(clippy::too_many_arguments)]
-pub fn spawn_pi(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, rules: &str, route: &Route, mode: Mode) -> Result<Lead, String> {
+pub fn spawn_pi(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, rules: &str, route: &Route, mode: Mode, tools: Option<&str>) -> Result<Lead, String> {
     crate::agents::ready(inbox, "pi")?;
     // Its own agent directory: the one provider, pointed at OctoBuddy's proxy.
     let safe: String = session.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
@@ -652,7 +652,15 @@ pub fn spawn_pi(inbox: &Inbox, session: &str, cwd: &str, resume: Option<&str>, r
     for name in crate::claude_proxy::SCRUB {
         cmd.env_remove(name);
     }
-    cmd.env("PI_CODING_AGENT_DIR", &home).env("PI_OFFLINE", "1").current_dir(cwd).env("PATH", search_path())
+    // Its tools (an inner loop): `octobuddy-app`, on its PATH, to its own endpoint.
+    let path = match tools.filter(|_| mode == Mode::Inner).and(crate::plugins::octosense_app::ensure_app_cli()) {
+        Some(_) => format!("{}:{}", crate::plugins::octosense_app::bin_dir().display(), search_path()),
+        None => search_path(),
+    };
+    if let Some(url) = tools.filter(|_| mode == Mode::Inner) {
+        cmd.env("OCTOBUDDY_MCP_URL", url);
+    }
+    cmd.env("PI_CODING_AGENT_DIR", &home).env("PI_OFFLINE", "1").current_dir(cwd).env("PATH", path)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     crate::lead::own_group(&mut cmd);
     let mut child = cmd.spawn().map_err(|e| format!("could not start pi: {e}"))?;
@@ -700,7 +708,12 @@ impl crate::OctoBuddyView {
         };
         match engine {
             CODEX => spawn_codex(&self.rt.inbox, session, cwd, resume, rules, route.as_ref(), mcp, mode),
-            _ => spawn_pi(&self.rt.inbox, session, cwd, resume, rules, route.as_ref().ok_or("pi runs on one of your AI providers: pick “pi · <provider>”")?, mode),
+            _ => {
+                // No MCP in pi: OctoBuddy's tools as a command, to its endpoint.
+                let tools = mcp.iter().find_map(|(_, c)| serde_json::from_str::<serde_json::Value>(c).ok()
+                    .and_then(|v| v["mcpServers"]["octobuddy"]["url"].as_str().map(String::from)));
+                spawn_pi(&self.rt.inbox, session, cwd, resume, rules, route.as_ref().ok_or("pi runs on one of your AI providers: pick “pi · <provider>”")?, mode, tools.as_deref())
+            }
         }
     }
 }
@@ -777,7 +790,7 @@ mod tests {
                 spawn_codex(&inbox, "steer", &dir.to_string_lossy(), None, "Be brief.", Some(&route), &[], Mode::Inner).unwrap()
             } else {
                 let route = Route { model: r.model.clone(), base: proxy.anthropic_base(&r), effort: None };
-                spawn_pi(&inbox, "steer", &dir.to_string_lossy(), None, "Be brief.", &route, Mode::Inner).unwrap()
+                spawn_pi(&inbox, "steer", &dir.to_string_lossy(), None, "Be brief.", &route, Mode::Inner, None).unwrap()
             };
             crate::lead::steered_turn(&lead, &inbox, engine);
         }
@@ -800,7 +813,7 @@ mod tests {
                 spawn_codex(&inbox, "steer", &dir.to_string_lossy(), None, "Be brief.", Some(&route), &[], Mode::Plain).unwrap()
             } else {
                 let route = Route { model: r.model.clone(), base: proxy.anthropic_base(&r), effort: None };
-                spawn_pi(&inbox, "steer", &dir.to_string_lossy(), None, "Be brief.", &route, Mode::Plain).unwrap()
+                spawn_pi(&inbox, "steer", &dir.to_string_lossy(), None, "Be brief.", &route, Mode::Plain, None).unwrap()
             };
             lead.send("Write a 200-word story about a lighthouse keeper. Use no tools.").unwrap();
             let started = std::time::Instant::now();
@@ -925,7 +938,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("octobuddy-pi-lead-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let inbox = Inbox::default();
-        let lead = spawn_pi(&inbox, "pi-test", &dir.to_string_lossy(), None, "Answer in one word.", &route, Mode::Outer).unwrap();
+        let lead = spawn_pi(&inbox, "pi-test", &dir.to_string_lossy(), None, "Answer in one word.", &route, Mode::Outer, None).unwrap();
         lead.send("Reply with exactly the word: pineapple").unwrap();
         let started = std::time::Instant::now();
         let mut deltas = String::new();
@@ -966,7 +979,7 @@ mod tests {
             let r = crate::providers::claude_route(label).expect("in AI providers");
             let route = Route { model: r.model.clone(), base: proxy.anthropic_base(&r), effort: None };
             let inbox = Inbox::default();
-            let lead = spawn_pi(&inbox, "pi-switch", &dir.to_string_lossy(), resume.as_deref(), "Answer in one short sentence.", &route, Mode::Plain).unwrap();
+            let lead = spawn_pi(&inbox, "pi-switch", &dir.to_string_lossy(), resume.as_deref(), "Answer in one short sentence.", &route, Mode::Plain, None).unwrap();
             lead.send(ask).unwrap();
             let started = std::time::Instant::now();
             let mut seen = Vec::new();
