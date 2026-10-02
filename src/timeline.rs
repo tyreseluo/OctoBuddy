@@ -75,6 +75,8 @@ pub struct Span {
     pub message: Option<usize>,
     /// Its work was done again later (or thrown away): drawn as history.
     pub redone: bool,
+    /// When what it answered was sent to it (its wait before it began is a `Wait`).
+    pub asked: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -129,6 +131,34 @@ pub struct Timeline {
     pub origin: u64,
     pub end: f64,
     pub rework: Vec<Rework>,
+    /// Where a loop waited, and why (no one was idle by mistake).
+    pub waits: Vec<Wait>,
+}
+
+/// A stretch a loop waited, and why: for finding where the time goes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Wait {
+    pub lane: usize,
+    pub from: f64,
+    pub to: f64,
+    /// `start` (an agent starting, its model's first answer), `wave` (an
+    /// earlier wave to be accepted), `queue` (behind its own turn, or a free
+    /// slot), `check` (OctoBuddy checking and committing), `person` (the
+    /// person's next message), `restart` (OctoBuddy restarted, or stopped).
+    pub kind: &'static str,
+}
+
+impl Wait {
+    pub fn why(&self) -> &'static str {
+        match self.kind {
+            "start" => i18n::t("starting: the agent, its model's first answer", "启动中：拉起 agent、等模型的第一个回应"),
+            "wave" => i18n::t("waits for the earlier wave to be accepted", "等前一个 wave 验收"),
+            "queue" => i18n::t("queued: behind its own turn, or for a free slot", "排队：等它上一轮做完，或等空位"),
+            "check" => i18n::t("OctoBuddy checks and commits its work", "OctoBuddy 在检查和提交"),
+            "person" => i18n::t("waits for you: the outer loop answered", "等你：外环答完了，在等你的下一条消息"),
+            _ => i18n::t("OctoBuddy restarted, or was stopped", "OctoBuddy 重启或被停止"),
+        }
+    }
 }
 
 fn first_line(text: &str, n: usize) -> String {
@@ -172,7 +202,8 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
         let mut n = 0;
         // `cut`: the turn ended there without finishing (OctoBuddy restarted,
         // the person stopped it): drawn up to then, as interrupted.
-        let mut close = |tl: &mut Timeline, turn: &mut Vec<usize>, cause: Option<usize>, open: bool, cut: Option<f64>| {
+        // `asked`: when the message it took up was sent (the latest before it began).
+        let mut close = |tl: &mut Timeline, turn: &mut Vec<usize>, cause: Option<usize>, asked: Option<f64>, open: bool, cut: Option<f64>| {
             let (Some(&a), Some(&z)) = (turn.first(), turn.last()) else { return };
             n += 1;
             let last = &msgs[z];
@@ -196,26 +227,31 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
                 lane: 0, start, end: end.max(start + 1.0), open: open && cut.is_none(), turn: n, from: from.into(),
                 outcome: if cut.is_some() && last.took.is_none() { "interrupted".into() } else { String::new() },
                 steps: steps.len(), failed: steps.iter().filter(|s| s.status == "failed").count(), cost: last.cost,
-                input, reply, message: Some(z), redone: false,
+                input, reply, message: Some(z), redone: false, asked,
             });
             turn.clear();
         };
+        // The latest message sent to it, and when its turn under way was asked for.
+        let (mut last_in, mut asked): (Option<f64>, Option<f64>) = (None, None);
         for (i, m) in msgs.iter().enumerate() {
             match m.role() {
                 Role::Lead => {
                     if turn.is_empty() {
                         cause = pending_cause.take();
+                        asked = last_in.take();
                     }
                     turn.push(i);
                     if m.took.is_some() {
-                        close(&mut tl, &mut turn, cause, false, None);
+                        close(&mut tl, &mut turn, cause, asked, false, None);
                     }
                 }
                 Role::User => {
+                    last_in = Some(rel(m.at));
                     pending_cause = Some(i);
                     tl.marks.push(Mark { lane: 0, to: None, at: rel(m.at), kind: MarkKind::Person, text: first_line(&m.text, 120), until: None });
                 }
                 Role::Peer => {
+                    last_in = Some(rel(m.at));
                     pending_cause = pending_cause.or(Some(i));
                     if let Some(lane) = lane_of(&m.author) {
                         tl.marks.push(Mark { lane, to: Some(0), at: rel(m.at), kind: MarkKind::Report, text: first_line(&m.text, 120), until: None });
@@ -223,14 +259,17 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
                 }
                 // A restart or a stop ends the turn under way there.
                 Role::System if cut_off(&m.text) && !turn.is_empty() => {
-                    close(&mut tl, &mut turn, cause, false, Some(rel(m.at)));
+                    close(&mut tl, &mut turn, cause, asked, false, Some(rel(m.at)));
                 }
-                Role::System => pending_cause = pending_cause.or(Some(i)),
+                Role::System => {
+                    last_in = Some(rel(m.at));
+                    pending_cause = pending_cause.or(Some(i));
+                }
                 _ => {}
             }
         }
         if !turn.is_empty() {
-            close(&mut tl, &mut turn, cause, outer_busy, None);
+            close(&mut tl, &mut turn, cause, asked, outer_busy, None);
         }
     }
 
@@ -272,6 +311,8 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
                 lane, start, end: end.max(start + 1.0), open, turn: k + 1, from: from.into(), outcome: e.outcome.clone().unwrap_or_default(),
                 steps: steps.len(), failed: steps.iter().filter(|s| s.status == "failed").count(), cost,
                 input: e.input.chars().take(400).collect(), reply: reply.chars().take(400).collect(), message: None, redone: false,
+                // Its first: asked when the slice was made (a later wave waits from then).
+                asked: Some(if k == 0 && p.started_at > 0 && p.started_at < e.at { rel(p.started_at) } else { rel(e.at) }),
             });
         }
     }
@@ -293,10 +334,93 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
         join_marks(&mut tl);
     }
     rework(&mut tl, &peers, base, &rel);
+    let running = tl.spans.iter().any(|s| s.open);
+    tl.waits = waits(&tl, session, &peers, base, &rel, if running || outer_busy { None } else { Some(now_rel) });
     tl.marks.sort_by(|a, b| a.at.total_cmp(&b.at));
     let open = tl.spans.iter().any(|s| s.open);
     tl.end = tl.spans.iter().map(|s| s.end).chain(tl.marks.iter().map(|m| m.at)).fold(if open { now_rel } else { 0.0 }, f64::max).max(1.0);
     tl
+}
+
+/// Where each loop waited, and why (`Wait`): what an idle stretch was for.
+fn waits(tl: &Timeline, session: &Session, peers: &[&Peer], base: usize, rel: &dyn Fn(u64) -> f64, idle_now: Option<f64>) -> Vec<Wait> {
+    const MIN: f64 = 3.0;
+    let mut out = Vec::new();
+    let lane_spans = |lane: usize| -> Vec<&Span> { let mut v: Vec<&Span> = tl.spans.iter().filter(|s| s.lane == lane).collect(); v.sort_by(|a, b| a.start.total_cmp(&b.start)); v };
+    // Each turn's start: from when it was asked (or its lane was free again).
+    for lane in 0..tl.lanes.len() {
+        let spans = lane_spans(lane);
+        let peer = (lane >= base).then(|| peers.get(lane - base)).flatten();
+        let first_wave = peer.map(|p| peers.iter().filter(|o| o.round == p.round).filter_map(|o| o.wave).min().unwrap_or(1));
+        // A later wave's slice was made with its round (OctoBuddy said so: "Round
+        // N: …"): its first turn of that round waited from then. An inner loop
+        // used again keeps its earlier rounds' turns before it.
+        let planned = peer.filter(|p| p.wave.unwrap_or(1) > first_wave.unwrap_or(1)).and_then(|p| {
+            let (en, zh) = (format!("Round {}:", p.round), format!("第 {} 轮：", p.round));
+            session.messages.iter().filter(|m| m.role() == Role::System && (m.text.starts_with(&en) || m.text.starts_with(&zh)))
+                .map(|m| rel(m.at)).reduce(f64::max)
+        });
+        let wave_turn = planned.and_then(|t| spans.iter().position(|s| s.start >= t - 1.0));
+        for (k, s) in spans.iter().enumerate() {
+            let Some(mut asked) = s.asked else { continue };
+            if Some(k) == wave_turn {
+                asked = asked.min(planned.unwrap_or(asked));
+            }
+            let free = k.checked_sub(1).map(|i| spans[i].end).unwrap_or(f64::MIN);
+            let from = asked.max(free);
+            if s.start - from < MIN {
+                continue;
+            }
+            let kind = match peer {
+                Some(_) if Some(k) == wave_turn => "wave",
+                Some(_) if free > asked => "start",
+                Some(_) if k > 0 => "queue",
+                _ => "start",
+            };
+            out.push(Wait { lane, from, to: s.start, kind });
+        }
+    }
+    // A report: its inner loop's turn ended, OctoBuddy checked it, then it was said.
+    for m in session.messages.iter().filter(|m| m.role() == Role::Peer) {
+        let Some(j) = peers.iter().position(|p| p.slug == m.author) else { continue };
+        let said = rel(m.at);
+        let wrote = lane_spans(base + j).iter().filter(|s| s.end <= said + 1.0).map(|s| s.end).fold(f64::MIN, f64::max);
+        if wrote > f64::MIN && said - wrote >= MIN {
+            out.push(Wait { lane: base + j, from: wrote, to: said, kind: "check" });
+        }
+    }
+    // No one at work: why, by what came next.
+    let mut iv: Vec<(f64, f64)> = tl.spans.iter().map(|s| (s.start, s.end)).collect();
+    iv.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut until = iv.first().map(|i| i.0).unwrap_or(0.0);
+    for (a, b) in iv {
+        if a - until >= 15.0 {
+            // Why, by what ended it: you spoke, or (a short one) OctoBuddy came
+            // back from a restart; a long stretch with nothing asked waited for you.
+            let inside: Vec<&crate::model::Message> = session.messages.iter().filter(|m| rel(m.at) >= until && rel(m.at) <= a + 1.0).collect();
+            let you = inside.iter().any(|m| m.role() == Role::User);
+            let restarted = inside.iter().any(|m| m.role() == Role::System && cut_off(&m.text));
+            let kind = if you || a - until > 600.0 { "person" } else if restarted { "restart" } else { "" };
+            if !kind.is_empty() {
+                // Up to where the next turn was asked (its own start is a wait of its own).
+                let asked = tl.spans.iter().filter(|s| (s.start - a).abs() < 0.5).filter_map(|s| s.asked).fold(a, f64::min).max(until);
+                if asked - until >= MIN {
+                    out.push(Wait { lane: 0, from: until, to: asked, kind });
+                }
+            }
+        }
+        until = until.max(b);
+    }
+    // After the last turn: you were asked to go on (up to your message, or now).
+    if let Some(now) = idle_now {
+        let next = session.messages.iter().filter(|m| m.role() == Role::User).map(|m| rel(m.at)).find(|t| *t >= until);
+        let to = next.unwrap_or(now);
+        if to - until >= 15.0 {
+            out.push(Wait { lane: 0, from: until, to, kind: "person" });
+        }
+    }
+    out.sort_by(|a, b| a.from.total_cmp(&b.from));
+    out
 }
 
 /// A message that says the outer loop's turn was cut off there.
@@ -871,6 +995,9 @@ impl TimelineCanvas {
         if s.redone {
             lines.push(i18n::t("Done again later: see Rework below", "这段工作后来重做了：见下方「返工」").to_string());
         }
+        if let Some(w) = self.tl.waits.iter().find(|w| w.lane == s.lane && (w.to - s.start).abs() < 0.5) {
+            lines.push(i18n::pick(format!("Before it: {} ({})", w.why(), span_len(w.to - w.from)), format!("开始前：{}（{}）", w.why(), span_len(w.to - w.from))));
+        }
         lines
     }
 }
@@ -1096,6 +1223,38 @@ impl Widget for TimelineCanvas {
                 texts.push((dvec2(r.pos.x + 3.0, r.pos.y + (r.size.y - 10.0) * 0.5), short, 7.5, ink));
             }
         }
+        // Waits: a dotted line along the lane, with why (when there is room).
+        for w in self.tl.waits.clone() {
+            if !self.lane_visible(w.lane) {
+                continue;
+            }
+            let (xa, xb) = (self.x(self.axis.vis(w.from)).max(x0), self.x(self.axis.vis(w.to)).min(x1));
+            if xb - xa < 2.0 {
+                continue;
+            }
+            let y = self.lane_y(w.lane) + lane_h * 0.5;
+            let color = if w.kind == "person" { crate::theme::hex("warning") } else { crate::theme::hex("muted") };
+            let mut x = xa;
+            while x < xb {
+                self.draw_vector.set_color_hex(color, if w.from <= now { 0.7 } else { 0.2 });
+                self.draw_vector.rect(x as f32, (y - 0.6) as f32, (3.0f64).min(xb - x) as f32, 1.2);
+                self.draw_vector.fill();
+                x += 6.0;
+            }
+            if xb - xa > 70.0 {
+                // Within its own stretch, measured: the next one's label starts after it.
+                let full = format!("{} · {}", w.why(), span_len(w.to - w.from));
+                let room = xb - xa - 8.0;
+                let mut label = full.clone();
+                while label.chars().count() > 3 && self.text_w(cx, &label, 7.0) > room {
+                    let keep = label.chars().count() - 2;
+                    label = format!("{}…", full.chars().take(keep.saturating_sub(1)).collect::<String>());
+                }
+                if self.text_w(cx, &label, 7.0) <= room {
+                    texts.push((dvec2(xa + 4.0, y - 12.0), label, 7.0, rgb(color, 0.95)));
+                }
+            }
+        }
         // Between the lanes: work down, reports up; the person; commits.
         for m in self.tl.marks.clone() {
             let x = self.x(self.axis.vis(m.at));
@@ -1284,6 +1443,15 @@ impl Widget for TimelineCanvas {
             tip = Some((r, lines));
         }
         self.draw_vector.end(cx);
+        // The texts in a draw call of their own, after the shapes: else Makepad
+        // may append them to an earlier text call, under the shapes (a redraw
+        // while playing did: the names and the axis went under the gutter).
+        self.draw_text.new_draw_call(cx);
+        // And in front of every shape in depth, not only in order: each shape
+        // lifts the next one's depth a little (1e-6) and a later call is only
+        // 0.001 in front, so past a thousand shapes (a whole run, its hatching)
+        // the gutter and the axis band, drawn last, hid the names and the axis.
+        self.draw_text.draw_depth = self.draw_vector.draw_depth + self.draw_vector.cur_zbias;
 
         // The texts: lane names, then the bars', axis', marks' — none under the tooltip.
         for i in 0..lanes {
@@ -1508,7 +1676,7 @@ mod tests {
 
     #[test]
     fn lines_join_the_turns_at_both_their_ends() {
-        let span = |lane: usize, start: f64, end: f64| Span { lane, start, end, open: false, turn: 1, from: String::new(), outcome: String::new(), steps: 0, failed: 0, cost: None, input: String::new(), reply: String::new(), message: None, redone: false };
+        let span = |lane: usize, start: f64, end: f64| Span { lane, start, end, open: false, turn: 1, from: String::new(), outcome: String::new(), steps: 0, failed: 0, cost: None, input: String::new(), reply: String::new(), message: None, redone: false, asked: None };
         let mut tl = Timeline {
             lanes: Vec::new(),
             // The outer loop: 0–60 (it plans), 300–330 (it reviews).
@@ -1527,6 +1695,46 @@ mod tests {
         assert_eq!((tl.marks[0].at, tl.marks[0].until), (50.0, Some(90.0)), "from the turn that sent it to the turn that took it up");
         assert_eq!((tl.marks[1].at, tl.marks[1].until), (200.0, Some(300.0)), "from the end of the turn that wrote it to the turn that read it");
         assert_eq!(tl.marks[2].until, None, "not read yet: it waits");
+    }
+
+    #[test]
+    fn every_wait_says_why() {
+        let mut store = Store::default();
+        let dir = std::env::temp_dir();
+        let pi = store.add_project(&dir.to_string_lossy()).unwrap();
+        let at = store.add_session(pi).unwrap();
+        let s = store.session_mut(at).unwrap();
+        // You ask at 1000; the outer loop's turn begins at 1008 (its agent starting) and plans till 1030.
+        s.messages.push(msg("user", "make it", 1000, None));
+        s.messages.push(Message { started: Some(1008), ..msg("lead", "plan", 1030, Some(22)) });
+        s.messages.push(msg("system", "Round 1: 2 slice(s) (core, stats), here, on octos.", 1040, None));
+        // Wave 1 (core) runs 1040–1100; wave 2 (stats), made with it, is held: it
+        // is sent at 1145, after the accept, and begins at 1150 (its start then).
+        let mut core = crate::chat::tests::peer(Vec::new());
+        core.slug = "core".into();
+        core.wave = Some(1);
+        core.log_mut().push(Exchange { from: "lead".into(), input: "spec: task core".into(), reply: Some("done".into()), outcome: Some("completed".into()), at: 1040, steps: None, took: Some(60), cost_total: None, began: Some(1040) });
+        let mut stats = crate::chat::tests::peer(Vec::new());
+        stats.id = "w2".into();
+        stats.slug = "stats".into();
+        stats.wave = Some(2);
+        stats.started_at = 1150;
+        stats.log_mut().push(Exchange { from: "lead".into(), input: "spec: task stats".into(), reply: Some("done".into()), outcome: Some("completed".into()), at: 1145, steps: None, took: Some(30), cost_total: None, began: Some(1150) });
+        s.peers_mut().push(core);
+        s.peers_mut().push(stats);
+        // core's report is said at 1120 (OctoBuddy checked it from 1100); the outer reads it 1130–1140.
+        s.messages.push(Message { author: "core".into(), ..msg("peer", "report", 1120, None) });
+        s.messages.push(Message { started: Some(1130), ..msg("lead", "accept", 1140, Some(10)) });
+        // Then nothing until you speak again at 1400.
+        s.messages.push(msg("user", "more", 1400, None));
+        let tl = build(store.session(at).unwrap(), 1500, false, &|p| p.map(|p| p.slug.clone()).unwrap_or_default());
+        let kinds: Vec<(&str, usize)> = tl.waits.iter().map(|w| (w.kind, w.lane)).collect();
+        assert!(kinds.contains(&("start", 0)), "the outer loop starting: {kinds:?}");
+        assert!(kinds.contains(&("wave", 2)), "stats waits for wave 1: {kinds:?}");
+        assert!(kinds.contains(&("check", 1)), "OctoBuddy checks core: {kinds:?}");
+        assert!(kinds.contains(&("person", 0)), "then it waits for you: {kinds:?}");
+        let wave = tl.waits.iter().find(|w| w.kind == "wave").unwrap();
+        assert_eq!((wave.from, wave.to), (40.0, 150.0));
     }
 
     #[test]

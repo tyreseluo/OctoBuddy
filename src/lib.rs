@@ -1312,7 +1312,7 @@ script_mod! {
                                 Filler{}
                                 time_clock := Label{text: "" padding: 0 draw_text.color: th_danger draw_text.text_style: theme.font_code{font_size: 9}}
                             }
-                            time_summary := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 9}
+                            time_summary := Label{width: Fill text: "" max_lines: 2 padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 9}
                             RoundedView{
                                 width: Fill height: Fill new_batch: true padding: 1
                                 draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
