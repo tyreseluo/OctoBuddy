@@ -67,6 +67,7 @@ use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};
 use orchestrate::Runtime;
 use plugins::card_loop::Loops as CardLoops;
+use plugins::app_factory::Factory as AppFactory;
 use providers::Providers;
 
 /// The outer-loop CLIs the picker offers, each with its selected and
@@ -774,6 +775,25 @@ script_mod! {
         }
     }
 
+    // The Apps page: an app asked for from outside, waiting for the person.
+    let RequestCard = RoundedView{
+        width: Fill height: Fit new_batch: true flow: Down spacing: 6 visible: false
+        margin: Inset{bottom: 10}
+        padding: Inset{left: 16 right: 16 top: 12 bottom: 12}
+        draw_bg.color: th_accent_soft draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_accent_line
+        who := Label{width: Fill text: "" draw_text.color: th_accent_ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+        what := Label{width: Fill text: "" draw_text.color: ink draw_text.wrap: Words draw_text.text_style.font_size: 11}
+        details := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+        View{
+            width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 6 align: Align{y: 0.5}
+            build := SegOn{text: "Build"}
+            decline := SegOff{text: "Decline"}
+            open := SegOff{text: "Session"}
+            publish := SegOn{text: "Publish"}
+            dismiss := SegOff{text: "Dismiss"}
+        }
+    }
+
     let ProviderRowView = View{
         width: Fill height: Fit padding: Inset{top: 4 bottom: 4}
         card := RoundedView{
@@ -1009,6 +1029,13 @@ script_mod! {
                         visible: false
                         icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
                             Path{d: "M3 12h4l2.5-6 5 12 2.5-6h4" fill: false stroke: th_danger stroke_width: 2.0 stroke_linecap: "round" stroke_linejoin: "round"}
+                        }
+                    }
+                    // An app asked for, waiting for the person.
+                    live_button_request := IconButton{
+                        visible: false
+                        icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+                            Path{d: "M3 12h4l2.5-6 5 12 2.5-6h4" fill: false stroke: th_accent stroke_width: 2.0 stroke_linecap: "round" stroke_linejoin: "round"}
                         }
                     }
                 }
@@ -1674,6 +1701,9 @@ script_mod! {
                 width: Fill height: Fill flow: Down
                 padding: Inset{left: 28 right: 28 top: 18 bottom: 22}
                 live_hint := Label{width: Fill text: "" margin: Inset{bottom: 14} draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                live_requests_title := Label{text: "" visible: false margin: Inset{bottom: 8} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
+                rq0 := RequestCard{} rq1 := RequestCard{} rq2 := RequestCard{} rq3 := RequestCard{}
+                live_apps_title := Label{text: "" margin: Inset{top: 4 bottom: 8} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
                 live_empty := Label{width: Fill text: "" visible: false draw_text.color: muted draw_text.text_style.font_size: 10}
                 lc0 := LiveCard{} lc1 := LiveCard{} lc2 := LiveCard{} lc3 := LiveCard{}
                 lc4 := LiveCard{} lc5 := LiveCard{} lc6 := LiveCard{} lc7 := LiveCard{}
@@ -2084,6 +2114,9 @@ pub struct OctoBuddyView {
     // The production loop's watches (`plugins::card_loop`).
     #[rust]
     card_loop: CardLoops,
+    // Apps asked for from outside (`plugins::app_factory`).
+    #[rust]
+    factory: AppFactory,
     // The projects the side menu's "move to" rows stand for, by name.
     #[rust]
     side_moves: Vec<String>,
@@ -5179,6 +5212,7 @@ impl Widget for OctoBuddyView {
                     self.apply_event(e);
                 }
                 self.card_loop_pending(cx);
+                self.factory_pending(cx);
                 if let Some((_, Err(err))) = &self.data_added {
                     let note = self.view.label(cx, ids!(data_note));
                     note.set_text(cx, &i18n::pick(format!("Could not add it: {err}"), format!("没能添加：{err}")));

@@ -35,6 +35,7 @@
 //! }
 //! ```
 pub mod app_data;
+pub mod app_factory;
 pub mod app_preview;
 pub mod app_publish;
 pub mod card_loop;
@@ -59,6 +60,8 @@ pub const APP_PUBLISH: &str = APP_STUDIO;
 pub const APP_DATA: &str = "app-data";
 /// The production loop: the published app watched, its breakage said.
 pub const CARD_LOOP: &str = "card-loop";
+/// Apps asked for from outside (`octobuddy.request`), built once the person says.
+pub const APP_FACTORY: &str = "app-factory";
 /// An agent's own terminal UI in place of OctoBuddy's messages (off until
 /// the person turns it on: some prefer the CLI they know).
 pub const NATIVE_TUI: &str = "native-tui";
@@ -156,6 +159,13 @@ pub fn builtins() -> Vec<Plugin> {
             tools: Vec::new(),
             buttons: vec![Button { id: "data".into(), name: tr("Data", "数据"), sub: tr("add", "添加") }],
             external: None, broken: None,
+        },
+        Plugin {
+            id: APP_FACTORY.into(), name: tr("App factory", "应用工厂"), version: version.clone(),
+            description: tr("Apps asked for from outside OctoBuddy: the OctoSense assistant's octobuddy.request, or another app's agent granted it. Each waits on the Apps page (the sidebar's) until you press Build; then OctoBuddy makes the app project, reads its data and hands the request to a new session's outer loop. Published, its live watch starts.",
+                "OctoBuddy 之外请求做的应用：系统 agent 的 octobuddy.request，或被授权的其他应用的 agent。每个请求都在侧栏的「应用」页等你点「开始做」；之后 OctoBuddy 建项目、读取数据，并交给一个新会话的外环。发布后自动开启巡检。"),
+            when_to_use: String::new(), applies_to: Vec::new(), requires: vec![OCTOSENSE_APP.into()],
+            tools: Vec::new(), buttons: Vec::new(), external: None, broken: None,
         },
         Plugin {
             id: CARD_LOOP.into(), name: tr("Production loop", "生产回路"), version,

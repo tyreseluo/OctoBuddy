@@ -56,9 +56,23 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
   - The agent takes it up at its next step. If it arrives just after the turn ends, it goes first in the queue instead.
   - Below the message, a receipt says whether it was taken up.
 - **Views.** Chat, the flow graph of the outer and inner loops, a timeline to replay the session, and (with the native TUI plugin) the agent's own terminal UI.
-- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, the production loop (below), and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
+- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, the app factory and the production loop (below), and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
 
-## Production loop
+## App factory
+
+The plugin `app-factory` builds OctoSense apps asked for from outside OctoBuddy. It follows GOSIM 2026's "software factory" bounty: task progress, agent status, acceptance, handover.
+
+- **Asked.** Through `octobuddy.request {what, for, acceptance, data, name}`, called by the OctoSense system agent or another app's agent granted it. The call is answered at once with the request's id.
+- **Waits for you.** The request appears on the Apps page (the pulse button beside Settings, in the accent colour while a request waits), with who asked, what for, when it is done and its data. Nothing is made, and no model is paid for, until you press **Build**. **Decline** turns it down.
+- **Built.** Build makes the app project from the design flow's template under `<data>/apps/`, and reads the data API it names. It then hands the request, with that data's shape, to a new session's outer loop as your message, and opens that session.
+- **Published.** **Publish** on its card publishes it to the local App Hub once its outer loop has stopped. Its live watch then starts.
+- **Followed.** `octobuddy.status` lists the requests under `requests`, each with its status: waiting for the person, declined, preparing, building (and whether an outer loop works on it), published (the version), or failed.
+- **Kept** in `<data>/requests.json`.
+- **Verified** in OctoSense on 2026-10-02 with a Shanghai weather card on Open-Meteo's API:
+  - Asked in the system agent's chat, the system agent passed it to OctoBuddy's agent, which called `octobuddy.request` with the acceptance criteria it drew from the fx-board incident.
+  - The card showed on the Apps page, with the sidebar button marked.
+  - Build made the project, read the API's shape, opened a session and sent the brief to its outer loop. That turn was stopped there, so the app was not built.
+
 
 The plugin `card-loop` keeps watch over the apps after they are published. It follows GOSIM 2026's "production-loop agent" bounty: read the app's runtime signals, find a failing card, repair it, publish it again.
 

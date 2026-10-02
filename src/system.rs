@@ -5,9 +5,10 @@
 //! (`peer_send_input`), and its model reaches OctoBuddy through two tools
 //! (`native-apps.json`): `octobuddy.status` (what runs now, and how its
 //! published apps are: the Live page), `octobuddy.send` (a message to a
-//! session's outer loop) and `octobuddy.report` (a problem with one of its
-//! apps: the production loop runs it and says what it found), the last two
-//! approved by the host. OctoBuddy answers them on the UI thread, where its
+//! session's outer loop), `octobuddy.report` (a problem with one of its
+//! apps: the production loop runs it and says what it found) and
+//! `octobuddy.request` (an app asked for: it waits for the person, then an
+//! outer loop builds it), the last three approved by the host. OctoBuddy answers them on the UI thread, where its
 //! state lives.
 //!
 //! The inner loops that write code do not run on this kernel yet: an app's
@@ -84,6 +85,6 @@ struct Tools {
 
 impl ToolExecutor for Tools {
     fn execute(&self, call: HostToolCall, reply: ToolReply) {
-        post(&self.inbox, LoopEvent::ToolCall { name: call.name, args: call.args, reply });
+        post(&self.inbox, LoopEvent::ToolCall { name: call.name, args: call.args, caller: call.calling_app, client: call.client, reply });
     }
 }

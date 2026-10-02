@@ -549,7 +549,7 @@ impl OctoBuddyView {
             }))
             .collect();
         // Its published apps as the Live page has them.
-        json!({"projects": projects, "live": self.card_loop_status()})
+        json!({"projects": projects, "live": self.card_loop_status(), "requests": self.factory_status()})
     }
 
     /// `octobuddy.send`: the system agent writes to a session's outer loop,
@@ -1540,6 +1540,8 @@ It works for you now: message it, review its work, or close it.)\n"));
                 // The production loop runs a version published anew.
                 let project = self.store.projects[at.0].path.clone();
                 self.card_loop_published(&project, result.as_ref().ok().map(|p| p.version.clone()));
+                // A requested app published: done, and watched.
+                self.factory_published(&project, result.as_ref().ok().map(|p| p.version.clone()));
                 match result {
                     Ok(p) => {
                         let bumped = p.bumped.map(|c| i18n::pick(format!(" (version raised, commit {c})"), format!("（版本已提升，提交 {c}）"))).unwrap_or_default();
@@ -1594,6 +1596,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
             LoopEvent::AgentInstalled { name, result, awaited } => self.agent_installed(&name, result, awaited),
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),
+            LoopEvent::FactoryReady { id, result } => self.factory_ready(id, result),
             LoopEvent::PackReady { session, message, pack } => self.pack_ready(&session, message, pack),
             LoopEvent::PluginSaid { session, plugin, result } => self.plugin_said(&session, &plugin, result),
             LoopEvent::ServeRetry => {
@@ -1845,8 +1848,10 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
             }
             // A problem with one of its apps: answered once a run checked it.
-            LoopEvent::ToolCall { name, args, reply } if name == "octobuddy.report" => self.card_loop_report(&args, reply),
-            LoopEvent::ToolCall { name, args, reply } => {
+            LoopEvent::ToolCall { name, args, reply, .. } if name == "octobuddy.report" => self.card_loop_report(&args, reply),
+            // An app asked for: it waits for the person (answered at once).
+            LoopEvent::ToolCall { name, args, caller, client, reply } if name == "octobuddy.request" => self.factory_request(&args, &caller, client.as_deref(), reply),
+            LoopEvent::ToolCall { name, args, reply, .. } => {
                 use octosense_app_peers::host_tools::ToolOutcome;
                 let outcome = match name.as_str() {
                     "octobuddy.status" => ToolOutcome::Ok(self.tool_status(args.get("project").and_then(|v| v.as_str()))),

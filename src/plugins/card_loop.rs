@@ -605,17 +605,21 @@ impl OctoBuddyView {
     pub(crate) fn sync_live_button(&mut self, cx: &mut Cx) {
         self.card_loop_load();
         let alarm = self.card_loop.alarm();
-        self.view.view(cx, ids!(live_button)).set_visible(cx, !alarm);
+        // A request waiting for the person marks it too (in the accent), less than an app not well.
+        let asked = !alarm && self.factory_waiting();
+        self.view.view(cx, ids!(live_button)).set_visible(cx, !alarm && !asked);
         self.view.view(cx, ids!(live_button_alert)).set_visible(cx, alarm);
+        self.view.view(cx, ids!(live_button_request)).set_visible(cx, asked);
     }
 
     /// The Live page: a card per app, its health, its runs, what to do.
     pub(crate) fn sync_live_page(&mut self, cx: &mut Cx) {
         self.card_loop_load();
-        self.view.label(cx, ids!(live_title)).set_text(cx, i18n::t("Live", "巡检"));
+        self.view.label(cx, ids!(live_title)).set_text(cx, i18n::t("Apps", "应用"));
         self.view.label(cx, ids!(live_hint)).set_text(cx, i18n::t(
-            "The apps OctoBuddy published to the local App Hub, as people run them. A watched app is run headless every few minutes on live data and judged against its first healthy run; when it breaks, its session hears it, and Repair hands it to that session's outer loop. The fixed version is published from here.",
-            "OctoBuddy 发布到本地 App Hub 的应用，也就是大家实际在用的版本。开启巡检后，每隔几分钟用实时数据 headless 运行一次，并和它第一次正常运行时的样子对比；出问题时会在它的会话里说，点「修复」就交给那个会话的外环去修，修好后在这里发布修复版。"));
+            "Apps asked for from outside OctoBuddy wait here for you, and the apps OctoBuddy published to the local App Hub are watched here, as people run them. A watched app is run headless every few minutes on live data and judged against its first healthy run; when it breaks, its session hears it, and Repair hands it to that session's outer loop. The fixed version is published from here.",
+            "系统 agent 或其他应用请求做的应用在这里等你决定；OctoBuddy 发布到本地 App Hub 的应用（也就是大家实际在用的版本）在这里巡检。开启巡检后，每隔几分钟用实时数据 headless 运行一次，并和它第一次正常运行时的样子对比；出问题时会在它的会话里说，点「修复」就交给那个会话的外环去修，修好后在这里发布修复版。"));
+        self.sync_requests(cx);
         let apps = self.live_apps();
         self.view.label(cx, ids!(live_empty)).set_visible(cx, apps.is_empty());
         self.view.label(cx, ids!(live_empty)).set_text(cx, i18n::t("No OctoSense app project yet (or the Production loop plugin is off in Settings › Plugins).",
@@ -735,7 +739,8 @@ impl OctoBuddyView {
 
     /// The Live page's buttons, and the sidebar's.
     pub(crate) fn live_page_actions(&mut self, cx: &mut Cx, actions: &Actions) {
-        if tapped(&self.view.view(cx, ids!(live_button)), actions) || tapped(&self.view.view(cx, ids!(live_button_alert)), actions) {
+        let opened = [ids!(live_button), ids!(live_button_alert), ids!(live_button_request)].into_iter().any(|id| tapped(&self.view.view(cx, id), actions));
+        if opened {
             self.page = crate::Page::Live;
             self.relayout(cx);
             return;
@@ -745,7 +750,7 @@ impl OctoBuddyView {
             self.relayout(cx);
             return;
         }
-        if self.page != crate::Page::Live {
+        if self.page != crate::Page::Live || self.requests_actions(cx, actions) {
             return;
         }
         for (slot, (pi, project)) in CARDS.iter().zip(self.live_apps()) {
@@ -790,7 +795,7 @@ impl OctoBuddyView {
     }
 
     /// A watch turned on (it runs at once) or off.
-    fn card_loop_watch(&mut self, pi: usize, project: &str, on: bool) {
+    pub(crate) fn card_loop_watch(&mut self, pi: usize, project: &str, on: bool) {
         let mut w = Watch::read(project).unwrap_or_default();
         let at = self.live_session(pi, project);
         let name = Watch::app_name(project);
@@ -857,7 +862,7 @@ impl OctoBuddyView {
 
     /// The fixed version published to the local App Hub (as the session's
     /// Publish does); `card_loop_published` hears how it went.
-    fn card_loop_publish(&mut self, cx: &mut Cx, pi: usize, project: &str) {
+    pub(crate) fn card_loop_publish(&mut self, cx: &mut Cx, pi: usize, project: &str) {
         if self.publishing.is_some() {
             return;
         }

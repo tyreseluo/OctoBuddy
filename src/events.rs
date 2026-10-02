@@ -21,6 +21,8 @@ pub enum LoopEvent {
     /// OctoBuddy's copy of an agent's program is installed (its path), or
     /// why not. `awaited`: something could not start without it.
     AgentInstalled { name: String, result: Result<String, String>, awaited: bool },
+    /// A requested app's project made, its data read (`app_factory`), or why not.
+    FactoryReady { id: String, result: crate::plugins::app_factory::Made },
     /// The production loop ran a published app (`card_loop::probe`).
     CardLoopProbed { project: String, result: Result<crate::plugins::card_loop::Probe, String> },
     /// An external plugin's button ran: what it said, for the session.
@@ -95,7 +97,9 @@ pub enum LoopEvent {
     PeerApproval { peer: String, approval_id: String, title: String, body: String },
     /// The system octos (OctoSense's kernel) called one of OctoBuddy's tools;
     /// answer through `reply`, once.
-    ToolCall { name: String, args: serde_json::Value, reply: octosense_app_peers::host_tools::ToolReply },
+    /// `caller`: the calling app as the shell stamped it (`system`: the
+    /// system agent); `client`: its request context's client (a Rinx mini app).
+    ToolCall { name: String, args: serde_json::Value, caller: String, client: Option<String>, reply: octosense_app_peers::host_tools::ToolReply },
     /// A tool call of a session's outer loop over MCP; the answer goes back on `reply`.
     McpCall { session: String, name: String, args: serde_json::Value, reply: std::sync::mpsc::Sender<Result<String, String>> },
     /// OctoBuddy's peer on the system octos is ready, or why not.
