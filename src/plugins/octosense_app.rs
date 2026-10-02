@@ -15,8 +15,10 @@ use std::process::Command;
 
 /// What an app project's inner loop is told: the app runs outside its sandbox.
 pub const INNER_NOTE: &str = "\nThis project is an OctoSense app. You cannot run it: its hosts (card-host, the shell) are \
-not in your sandbox, so do not look for them, install them, or spawn helpers to test it. Read the API in \
-.octobuddy/docs/SCRIPT-API.md and follow it exactly. When you finish, OctoBuddy runs the app headless and App Hub's \
+not in your sandbox, so do not look for them, install them, or spawn helpers to test it. Start with \
+.octobuddy/docs/SPLASH-COOKBOOK.md: OctoBuddy's verified patterns for what an app needs (pages, lists, forms, \
+storage, dates, money, bars, gotchas and the errors they give). Read .octobuddy/docs/SCRIPT-API.md only for what \
+it lacks, and other apps' sources not at all unless both lack it. When you finish, OctoBuddy runs the app headless and App Hub's \
 gate (octobuddy-app-check) and shows it running in its preview; the result comes back to you if it fails.";
 
 /// The same for an inner loop on Claude Code, which has OctoBuddy's tools to
@@ -27,7 +29,9 @@ sandbox, so do not look for them or install them: OctoBuddy runs the app for you
 .octobuddy/shots/, which you can read) and the widgets on screen (type, id, text: what a test finds them by). \
 `octobuddy_check` runs your slice's own check command, the one OctoBuddy runs when you finish, and gives you its \
 output. Use them as you work: after each meaningful change, look; before you report, run your check until it \
-passes. Read the API in .octobuddy/docs/SCRIPT-API.md and follow it exactly.";
+passes. Start with .octobuddy/docs/SPLASH-COOKBOOK.md: OctoBuddy's verified patterns for what an app needs (pages, \
+lists, forms, storage, dates, money, bars, gotchas and the errors they give). Read .octobuddy/docs/SCRIPT-API.md \
+only for what it lacks, and other apps' sources not at all unless both lack it.";
 
 /// The command a slice of an app is checked with.
 pub const CHECK: &str = "octobuddy-app-check";
@@ -206,6 +210,11 @@ pub fn repair_digest(project: &str) {
 /// read outside it): what the design flow says an app is made of.
 const DOCS: &[&str] = &["AGENTS.md", "flows/script-app/FLOW.md", "docs/SCRIPT-API.md", "docs/CAPABILITIES.md", "docs/HOST-SERVICES.md"];
 
+/// OctoBuddy's own reference, verified against card-host: the patterns an app
+/// needs and the gotchas, short, so no inner loop learns them again from the
+/// docs and other apps' sources (`splash_cookbook.md`).
+pub const COOKBOOK: &str = include_str!("splash_cookbook.md");
+
 /// Refreshes `.octobuddy/docs` and OctoBuddy's check script; the outer loop's
 /// rules for this app, or why the design flow cannot be used.
 pub fn prepare(project: &str) -> Result<String, String> {
@@ -218,6 +227,7 @@ pub fn prepare(project: &str) -> Result<String, String> {
         }
         let _ = std::fs::copy(&from, &to);
     }
+    let _ = std::fs::write(docs.join("SPLASH-COOKBOOK.md"), COOKBOOK);
     write_check(&tools)?;
     Ok(outer_rules(&tools))
 }
@@ -309,13 +319,15 @@ fn outer_rules(tools: &Tools) -> String {
     // OctoSense's system apps, when its checkout is at hand.
     let examples = octosense_checkout().map(|dir| dir.join("apps")).filter(|apps| apps.join("camera/bundle").is_dir())
         .and_then(|apps| apps.canonicalize().ok())
-        .map(|apps| format!(" Working apps to learn from: {}/*/bundle/main.splash (camera, maps, news, photos).", apps.display()))
+        .map(|apps| format!(" Working apps, only for what the cookbook lacks (it lists what not to copy from them): {}/*/bundle/main.splash (camera, maps, news, photos).", apps.display()))
         .unwrap_or_default();
     format!("\n\nOCTOSENSE APP. This project is an OctoSense script app: `bundle/` holds it (manifest.json, listing.json, \
 main.splash, assets/), in OctoScript App Design Flow's format. The person says what they want; you plan it and \
 your inner loops build it. The docs you plan with are {flow}/AGENTS.md, {flow}/flows/script-app/FLOW.md and \
 {flow}/docs/SCRIPT-API.md (CAPABILITIES.md or HOST-SERVICES.md when the app needs more than storage), with \
-copies in .octobuddy/docs/ that the inner loops read. Your first message carries OctoBuddy's CONTEXT: memory \
+copies in .octobuddy/docs/ that the inner loops read, and OctoBuddy's own .octobuddy/docs/SPLASH-COOKBOOK.md: \
+verified patterns and gotchas (pages, lists, forms, storage, dates, money, bars, the errors mistakes give). Point \
+briefs at its sections instead of restating them, and at SCRIPT-API.md only for what it lacks. Your first message carries OctoBuddy's CONTEXT: memory \
 hits and an index of those copies, each heading with its line number. Read only the sections your plan needs \
 (Read with offset and limit), not whole docs, and do not search memory again for what the CONTEXT has: \
 planning time is the person's waiting time.{examples} Point each brief at the sections it needs (file and \
