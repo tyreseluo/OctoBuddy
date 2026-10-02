@@ -64,7 +64,8 @@ if ! python3 "$octo" run "$work/bundle" --port "$port" --hidden --detach --timeo
   grep -E '\[E\]|splash:[0-9]+:|refused|did not' "$work/run.txt" | head -20
   exit 1
 fi
-sleep 1
+# Its first data comes in (a fetch, a timer) before it is looked at.
+sleep 4
 python3 "$octo" shot "$port" "$shot" > /dev/null 2>&1
 curl -s -m 5 "http://127.0.0.1:$port/snap" > "$work/snap.json"
 curl -s -m 5 "http://127.0.0.1:$port/quit" > /dev/null 2>&1
@@ -274,6 +275,9 @@ if ! python3 "$octo" run "$work/bundle" --port "$port" --hidden --detach --timeo
   echo "the app did not start"
   exit 1
 fi
+# Its first data comes in (a fetch, a timer): errors in what runs then count
+# too, as the live watch sees them once it is published.
+sleep 5
 python3 - "$work/bundle" > "$work/missing.txt" <<'PY'
 import json, os, sys
 listing = json.load(open(os.path.join(sys.argv[1], "listing.json")))

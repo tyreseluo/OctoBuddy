@@ -145,7 +145,8 @@ STATUS: the peers' state and queues, and whether the person merged or discarded 
 it comes with the person's messages and with results. The person may also talk to a peer directly: that \
 stays between them, and you do not hear of it (a peer reports to you on your tasks, and on the first task of \
 a peer the person made for you). \
-SUBAGENTS. You may hand reading to subagents with the Agent tool (they read, like you, and cannot edit): \
+SUBAGENTS. You may hand reading to subagents with the Agent tool (they read, like you: they cannot edit \
+files or run commands, so a test or a script is an inner loop's to run, its result in its report): \
 for a broad search or a survey of unfamiliar code before you plan, or to check several peers' work at once \
 when you review. Never use them for the work itself: that is what the inner loops are for. \
 A subagent you start finishes within the turn you start it in: wait for its result before you end that turn, \
