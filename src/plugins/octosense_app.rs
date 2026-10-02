@@ -394,7 +394,9 @@ pub fn prepare(project: &str) -> Result<String, String> {
         }
         let _ = std::fs::copy(&from, &to);
     }
-    let _ = std::fs::write(docs.join("SPLASH-COOKBOOK.md"), COOKBOOK);
+    // With what OctoBuddy learned in its own runs since (`lessons`).
+    let learned = crate::lessons::section("splash", "## Learned in OctoBuddy's own runs (verified with its probe; newest last)");
+    let _ = std::fs::write(docs.join("SPLASH-COOKBOOK.md"), format!("{COOKBOOK}{learned}"));
     write_check(&tools)?;
     Ok(outer_rules(&tools))
 }

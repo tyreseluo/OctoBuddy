@@ -184,7 +184,10 @@ fn tools() -> Value {
             "plugin": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}}},
         {"name": "octobuddy_status", "description": "What each inner loop of this session does now, what waits for it, its estimate against the steps it took, the models.",
          "inputSchema": {"type": "object", "properties": {}}},
-        probe_tool()
+        probe_tool(),
+        {"name": "octobuddy_learn", "description": "Keep a lesson OctoBuddy's later runs start from (every project): topic splash for how Splash and the app runtime behave (verify it with octobuddy_app_probe first), orchestration for how to plan, split and pick agents and models. Say it as a rule an agent can follow; evidence is what showed it.",
+         "inputSchema": {"type": "object", "required": ["topic", "lesson", "evidence"], "properties": {
+            "topic": {"type": "string", "enum": ["splash", "orchestration"]}, "lesson": {"type": "string"}, "evidence": {"type": "string"}}}}
     ])
 }
 
@@ -229,6 +232,13 @@ impl OctoBuddyView {
         let at = self.store.find_session(session).ok_or("no such session")?;
         match name {
             "octobuddy_status" => Ok(self.status_block(at).unwrap_or_else(|| "STATUS\n(no inner loops yet)".into())),
+            "octobuddy_learn" => {
+                let get = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                let said = crate::lessons::add(&get("topic"), &get("lesson"), &get("evidence"), &self.store.projects[at.0].path)?;
+                self.system(at, &crate::i18n::pick(format!("The outer loop kept a lesson for later runs ({}): {}", get("topic"), get("lesson")),
+                    format!("外环沉淀了一条经验（{}），之后的运行都会用到：{}", get("topic"), get("lesson"))));
+                Ok(said)
+            }
             "octobuddy_plan" => {
                 let reply = plan::split_reply(&format!("```octobuddy-plan\n{args}\n```"));
                 if let Some(err) = reply.plan_error {
@@ -297,7 +307,7 @@ mod tests {
         assert!(answer(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}), "s", &inbox).is_none(), "a notification gets no answer");
         let tools = answer(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}), "s", &inbox).unwrap();
         let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe"]);
+        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_learn"]);
 
         let server = Server::start(&inbox).unwrap();
         let config: Value = serde_json::from_str(&server.config("s1")).unwrap();

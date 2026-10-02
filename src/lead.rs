@@ -196,7 +196,9 @@ their language. You may read files and look things up on the web; you cannot cha
 pub fn lead_prompt() -> String {
     // The skill's front matter is for skill loaders, not for the model.
     let method = ESTIMATION.splitn(3, "---").nth(2).unwrap_or(ESTIMATION).trim();
-    format!("{LEAD_RULES}\n\nAGENT-ESTIMATION (the method to estimate every plan with):\n\n{method}\n\n{}", CALIBRATION.trim())
+    // What earlier runs taught (`lessons`): planning, splitting, agents and models.
+    let learned = crate::lessons::section("orchestration", "LESSONS FROM EARLIER RUNS (OctoBuddy's own, kept with octobuddy_learn; follow them unless this request says otherwise):");
+    format!("{LEAD_RULES}\n\nAGENT-ESTIMATION (the method to estimate every plan with):\n\n{method}\n\n{}{learned}", CALIBRATION.trim())
 }
 
 /// Claude Code's own model and effort settings for a project: the user's
