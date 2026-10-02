@@ -12,7 +12,7 @@ const MODELS: [LiveId; 8] = [live_id!(pm0), live_id!(pm1), live_id!(pm2), live_i
 /// The effort chips: the agent's own setting, then its levels.
 const EFFORTS: [LiveId; 8] = [live_id!(pe0), live_id!(pe1), live_id!(pe2), live_id!(pe3), live_id!(pe4), live_id!(pe5), live_id!(pe6), live_id!(pe7)];
 
-fn installed(agent: &str) -> bool {
+pub(crate) fn installed(agent: &str) -> bool {
     match agent {
         "claude" | "octos" => true,
         // Not here yet, OctoBuddy installs its copy when first started.
@@ -57,7 +57,7 @@ impl OctoBuddyView {
         }
     }
 
-    fn agent_name(agent: &str) -> &str {
+    pub(crate) fn agent_name(agent: &str) -> &str {
         match agent {
             "claude" => "Claude Code",
             rpc_lead::CODEX => "Codex",

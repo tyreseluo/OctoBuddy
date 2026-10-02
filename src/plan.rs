@@ -62,6 +62,22 @@ struct QueueOpItem {
     message: Option<String>,
 }
 
+/// The lead runs a slice again from its brief, on another agent or model
+/// (its agent failed): none of them named, the one it had.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rerun {
+    pub to: String,
+    pub agent: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(DeJson)]
+struct RerunItem {
+    to: String,
+    agent: Option<String>,
+    model: Option<String>,
+}
+
 /// A message the lead sends to a peer it started: `mode` is `queue` or `interrupt`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Send {
@@ -83,6 +99,7 @@ struct SendDoc {
     queue_ops: Option<Vec<QueueOpItem>>,
     /// Peers the lead is done with: closed, they take no more work.
     close: Option<Vec<String>>,
+    rerun: Option<Vec<RerunItem>>,
 }
 
 #[derive(Clone, Debug, PartialEq, DeJson)]
@@ -102,7 +119,11 @@ pub struct Slice {
     pub reviews: Option<u32>,
     /// The model it runs on (`family/model`, one of STATUS's MODELS): none,
     /// the default one.
-    pub model: Option<String>,    /// A fresh read-only reviewer looks at its work before the lead does.
+    pub model: Option<String>,
+    /// The agent it runs on (`octos`, `codex`, `pi`, `claude`: one of
+    /// STATUS's AGENTS): none, the session's.
+    pub agent: Option<String>,
+    /// A fresh read-only reviewer looks at its work before the lead does.
     pub independent_review: Option<bool>,
 }
 
@@ -139,6 +160,8 @@ pub struct Reply {
     pub estimate: Option<Estimate>,
     /// Peers to close, by slug.
     pub close: Vec<String>,
+    /// Slices to run again on another agent or model.
+    pub reruns: Vec<Rerun>,
     /// The plan's part every slice shares, given to each with its brief.
     pub shared: Option<String>,
 }
@@ -147,7 +170,7 @@ pub fn split_reply(reply: &str) -> Reply {
     let (text, plan) = take_block(reply, FENCE);
     let (text, send) = take_block(&text, SEND_FENCE);
     let (text, review) = take_block(&text, REVIEW_FENCE);
-    let mut out = Reply { text, slices: Vec::new(), plan_error: None, sends: Vec::new(), queue_ops: Vec::new(), send_error: None, reviews: Vec::new(), estimate: None, close: Vec::new(), shared: None };
+    let mut out = Reply { text, slices: Vec::new(), plan_error: None, sends: Vec::new(), queue_ops: Vec::new(), send_error: None, reviews: Vec::new(), estimate: None, close: Vec::new(), reruns: Vec::new(), shared: None };
     // A review that cannot be read only loses the recommendation: the text says it too.
     if let Some(Ok(doc)) = review.map(|b| ReviewDoc::deserialize_json_lenient(b.trim())) {
         out.reviews = doc.branches.into_iter()
@@ -177,7 +200,8 @@ pub fn split_reply(reply: &str) -> Reply {
                         seen.push(slug.clone());
                         let role = s.role.map(|r| slugify(&r)).filter(|r| !r.is_empty());
                         let check = s.check.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-                        Slice { slug, role, brief: s.brief.trim().to_string(), check, rounds: s.rounds, wave: s.wave, reviews: s.reviews, model: s.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()), independent_review: s.independent_review }
+                        Slice { slug, role, brief: s.brief.trim().to_string(), check, rounds: s.rounds, wave: s.wave, reviews: s.reviews, model: s.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+                            agent: s.agent.map(|a| a.trim().to_ascii_lowercase()).filter(|a| !a.is_empty()), independent_review: s.independent_review }
                     })
                     .collect();
             }
@@ -192,6 +216,11 @@ pub fn split_reply(reply: &str) -> Reply {
                     .map(|m| Send { to: slugify(&m.to), mode: m.mode.unwrap_or_default(), message: m.message.trim().to_string() })
                     .collect();
                 out.close = doc.close.unwrap_or_default().iter().map(|s| slugify(s)).filter(|s| !s.is_empty()).collect();
+                let given = |v: Option<String>| v.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+                out.reruns = doc.rerun.unwrap_or_default().into_iter()
+                    .map(|r| Rerun { to: slugify(&r.to), agent: given(r.agent).map(|a| a.to_ascii_lowercase()), model: given(r.model) })
+                    .filter(|r| !r.to.is_empty())
+                    .collect();
                 out.queue_ops = doc.queue_ops.unwrap_or_default().into_iter()
                     .map(|o| QueueOp {
                         op: o.op.to_ascii_lowercase(), to: slugify(&o.to),
@@ -268,6 +297,23 @@ mod tests {
         let slugs: Vec<_> = r.slices.iter().map(|s| s.slug.as_str()).collect();
         assert_eq!(slugs, ["cli-flag", "cli-flag-2"], "unknown fields are ignored, empty briefs dropped, slugs unique");
         assert_eq!((r.slices[0].role.as_deref(), r.slices[1].role.as_deref()), (Some("developer"), None));
+    }
+
+    #[test]
+    fn the_lead_may_run_a_slice_again_elsewhere() {
+        let r = split_reply("```octobuddy-send\n{\"rerun\":[{\"to\":\"App Core\",\"agent\":\"Codex\",\"model\":\" minimax/MiniMax-M3 \"},{\"to\":\"x\"}]}\n```");
+        assert_eq!(r.send_error, None);
+        assert_eq!(r.reruns, [
+            Rerun { to: "app-core".into(), agent: Some("codex".into()), model: Some("minimax/MiniMax-M3".into()) },
+            Rerun { to: "x".into(), agent: None, model: None },
+        ]);
+    }
+
+    #[test]
+    fn a_slice_may_name_its_agent() {
+        let r = split_reply("```octobuddy-plan\n{\"slices\":[{\"slug\":\"core\",\"brief\":\"build it\",\"agent\":\" Codex \",\"model\":\"minimax/MiniMax-M3\"},{\"slug\":\"copy\",\"brief\":\"write it\",\"agent\":\"\"}]}\n```");
+        assert_eq!(r.slices[0].agent.as_deref(), Some("codex"), "trimmed, lower case");
+        assert_eq!(r.slices[1].agent, None, "an empty agent is the session's");
     }
 
     #[test]

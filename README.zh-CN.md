@@ -27,6 +27,10 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - 同一个 agent 换模型会保留对话（Codex 恢复原线程，pi 恢复原会话文件）。
   - 换 agent 则从新对话开始。
   - 改思考强度会让 agent 接着原对话重启；如果这一轮还在运行，等它结束后再重启。
+- **每个切片可以用不同的 agent。**只要你没有亲自指定这个会话的 inner agent，外环就可以在计划里给每个切片指定 agent（`agent`：octos、codex、pi 或 claude）和模型。
+  - STATUS 会列出 AGENTS，以及每个 agent 能跑的模型。能跑哪些按接入点的协议推导，与 设置 › AI Providers 里显示的一致。
+  - 切片指定了 agent，之后会话的 inner agent 再怎么改，它都不变。
+- **agent 失败时。**如果切片的 agent 或模型在开始干活之前就失败了（没改任何文件），OctoBuddy 会单独报告这一点：对话里会出现一条提示，写明报错和这个切片还能换到哪些 agent 和模型上。外环收到同样的说明，可以用 octobuddy-send 的 `rerun` 把切片换到别的 agent 或模型上，从任务重新开始，并在回复里告诉你换了什么、为什么。
 
 ## 自带的 agent
 

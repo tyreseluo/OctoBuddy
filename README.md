@@ -24,6 +24,10 @@ It was called OctoLoop until 2026-10-02.
   - Switching to another model of the same agent keeps the conversation (Codex resumes its thread, pi its session file).
   - Switching to another agent starts a new conversation.
   - Changing the effort restarts the agent on the same conversation. If a turn is under way, that happens when it ends.
+- **Each slice on its own agent.** Unless you picked the session's inner agent yourself, the outer loop may name each slice's agent (`agent`: octos, codex, pi or claude) and model in its plan.
+  - STATUS lists the AGENTS and, for each one, the models it can run on. These follow each endpoint's protocol, as Settings › AI Providers shows them.
+  - A slice keeps its agent whatever the session's inner agent becomes.
+- **When an agent fails.** A slice whose agent or model fails before doing any work (no file changed) is reported as that. You see a note in the conversation with the error and what else the slice can run on. The outer loop gets the same note and can run the slice again from its brief on another agent or model (`rerun` in octobuddy-send), and it tells you what it switched and why.
 
 ## Its own agents
 
