@@ -1421,6 +1421,10 @@ What the person says to you after it stays between you and them.");
         // Its slice's model: the profile octos keeps for it; with OctoBuddy's
         // tools in it, a profile of its own (a reviewer reads only).
         let base = p.model_pick.as_deref().map(providers::model_profile_id).unwrap_or_else(|| "_main".into());
+        // octos first: starting it clears the inner loops' old profiles, this one's too.
+        if !opened && !self.on_claude(peer) {
+            let _ = self.serve();
+        }
         let profile = match self.tools_profile(peer, &base, &p).filter(|_| !opened && !self.on_claude(peer)) {
             Some(id) => serde_json::json!({"profile_id": id}),
             None if p.model_pick.is_some() => serde_json::json!({"profile_id": base}),
