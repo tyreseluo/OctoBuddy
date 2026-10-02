@@ -1536,6 +1536,9 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::Published { session, result } => {
                 self.publishing = None;
                 let Some(at) = self.store.find_session(&session) else { return };
+                // The production loop runs a version published anew.
+                let project = self.store.projects[at.0].path.clone();
+                self.card_loop_published(&project, result.as_ref().ok().map(|p| p.version.clone()));
                 match result {
                     Ok(p) => {
                         let bumped = p.bumped.map(|c| i18n::pick(format!(" (version raised, commit {c})"), format!("（版本已提升，提交 {c}）"))).unwrap_or_default();

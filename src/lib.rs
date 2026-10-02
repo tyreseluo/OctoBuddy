@@ -90,6 +90,8 @@ enum Page {
     #[default]
     Chat,
     Settings,
+    /// The production loop's page: the published apps, watched.
+    Live,
 }
 
 /// The settings page's sections.
@@ -739,6 +741,39 @@ script_mod! {
         path := Label{width: Fill text: "" draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 7.5}}
     }
 
+    // The Live page: an app as people run it, its last runs, what to do.
+    let LiveRun = RoundedView{width: 8 height: 8 visible: false draw_bg.color: th_line_strong draw_bg.border_radius: 4.0}
+    let LiveCard = RoundedView{
+        width: Fill height: Fit new_batch: true flow: Down spacing: 7 visible: false
+        margin: Inset{bottom: 10}
+        padding: Inset{left: 16 right: 16 top: 12 bottom: 12}
+        draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+        View{
+            width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+            dot := RoundedView{width: 10 height: 10 draw_bg.color: th_line_strong draw_bg.border_radius: 5.0}
+            name := Label{text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 12}}
+            version := Label{text: "" draw_text.color: muted draw_text.text_style: theme.font_code{font_size: 9}}
+            Filler{}
+            state := Label{text: "" draw_text.color: th_ink2 draw_text.text_style.font_size: 9.5}
+        }
+        runs := View{
+            width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+            h0 := LiveRun{} h1 := LiveRun{} h2 := LiveRun{} h3 := LiveRun{} h4 := LiveRun{} h5 := LiveRun{}
+            h6 := LiveRun{} h7 := LiveRun{} h8 := LiveRun{} h9 := LiveRun{} h10 := LiveRun{} h11 := LiveRun{}
+        }
+        why := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+        View{
+            width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 6 align: Align{y: 0.5}
+            watch_on := SegOn{text: "Watching"} watch_off := SegOff{text: "Watch"}
+            run_now := SegOff{text: "Run now"}
+            drill_on := SegOn{text: "Drill"} drill_off := SegOff{text: "Drill"}
+            auto_on := SegOn{text: "Auto repair"} auto_off := SegOff{text: "Auto repair"}
+            open := SegOff{text: "Session"}
+            repair := SegOn{text: "Repair"}
+            publish_fix := SegOn{text: "Publish fix"}
+        }
+    }
+
     let ProviderRowView = View{
         width: Fill height: Fit padding: Inset{top: 4 bottom: 4}
         card := RoundedView{
@@ -814,11 +849,6 @@ script_mod! {
         Path{d: "M12 15V4M7 9l5-5 5 5M5 15v4h14v-4" fill: false stroke: th_accent stroke_width: 1.8 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let FloatPublish = FloatSquare{icon := PublishIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
-    // The production loop's watch over the published app.
-    let LiveIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
-        Path{d: "M3 12h4l2.5-6 5 12 2.5-6h4" fill: false stroke: th_success stroke_width: 1.8 stroke_linecap: "round" stroke_linejoin: "round"}
-    }
-    let FloatLive = FloatSquare{icon := LiveIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     // An external plugin's button (Settings › Plugins).
     let PluginIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
         Path{d: "M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4" fill: false stroke: th_muted_strong stroke_width: 1.7 stroke_linecap: "round" stroke_linejoin: "round"}
@@ -967,6 +997,18 @@ script_mod! {
                         icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
                             Path{d: "M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" fill: false stroke: th_muted_strong stroke_width: 1.7}
                             Path{d: "M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" fill: false stroke: th_muted_strong stroke_width: 1.5 stroke_linejoin: "round"}
+                        }
+                    }
+                    // Live: the published apps, watched (red while one is not well).
+                    live_button := IconButton{
+                        icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+                            Path{d: "M3 12h4l2.5-6 5 12 2.5-6h4" fill: false stroke: th_muted_strong stroke_width: 1.7 stroke_linecap: "round" stroke_linejoin: "round"}
+                        }
+                    }
+                    live_button_alert := IconButton{
+                        visible: false
+                        icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+                            Path{d: "M3 12h4l2.5-6 5 12 2.5-6h4" fill: false stroke: th_danger stroke_width: 2.0 stroke_linecap: "round" stroke_linejoin: "round"}
                         }
                     }
                 }
@@ -1258,9 +1300,6 @@ script_mod! {
                                 preview_btn := FloatApp{visible: false}
                                 preview_btn_on := FloatApp{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
                                 publish_btn := FloatPublish{visible: false}
-                                loop_btn := FloatLive{visible: false}
-                                loop_btn_ok := FloatLive{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
-                                loop_btn_bad := FloatLive{visible: false draw_bg.color: th_danger_bg draw_bg.border_color: th_danger draw_bg.border_size: 1.0}
                                 plug_btn0 := FloatPlugin{visible: false}
                                 plug_btn1 := FloatPlugin{visible: false}
                                 plug_btn2 := FloatPlugin{visible: false}
@@ -1616,6 +1655,28 @@ script_mod! {
                         }
                     }
                 }
+            }
+        }
+
+        live_page := SolidView{
+            width: Fill height: Fill flow: Down new_batch: true visible: false
+            draw_bg.color: pane_bg
+            View{
+                width: Fill height: Fit flow: Right spacing: 10 align: Align{y: 0.5}
+                padding: Inset{left: 10 right: 16 top: 10 bottom: 10}
+                live_back := IconButton{icon := Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+                    Path{d: "M15 5l-7 7 7 7" fill: false stroke: th_muted_strong stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
+                }}
+                live_title := Label{text: "Live" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
+            }
+            SolidView{width: Fill height: 1 draw_bg.color: line}
+            ScrollYView{
+                width: Fill height: Fill flow: Down
+                padding: Inset{left: 28 right: 28 top: 18 bottom: 22}
+                live_hint := Label{width: Fill text: "" margin: Inset{bottom: 14} draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                live_empty := Label{width: Fill text: "" visible: false draw_text.color: muted draw_text.text_style.font_size: 10}
+                lc0 := LiveCard{} lc1 := LiveCard{} lc2 := LiveCard{} lc3 := LiveCard{}
+                lc4 := LiveCard{} lc5 := LiveCard{} lc6 := LiveCard{} lc7 := LiveCard{}
             }
         }
 
@@ -2277,10 +2338,15 @@ impl OctoBuddyView {
         let selected = self.selected.filter(|at| self.store.session(*at).is_some());
         let chat = self.page == Page::Chat;
         self.view.view(cx, ids!(workspace)).set_visible(cx, chat);
-        self.view.view(cx, ids!(settings_page)).set_visible(cx, !chat);
+        self.view.view(cx, ids!(settings_page)).set_visible(cx, self.page == Page::Settings);
+        self.view.view(cx, ids!(live_page)).set_visible(cx, self.page == Page::Live);
+        self.sync_live_button(cx);
+        if self.page == Page::Live {
+            self.sync_live_page(cx);
+        }
         self.view.view(cx, ids!(chat)).set_visible(cx, chat && selected.is_some());
         self.view.view(cx, ids!(placeholder)).set_visible(cx, chat && selected.is_none());
-        if !chat {
+        if self.page == Page::Settings {
             self.sync_settings(cx);
         }
         let hint = if self.store.projects.iter().all(|p| p.is_chats()) {
@@ -2410,7 +2476,6 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(publish_btn.name)).set_text(cx, i18n::t("Publish", "发布"));
         let sub = if self.publishing.is_some() { i18n::t("publishing…", "发布中…") } else { "" };
         self.view.label(cx, ids!(publish_btn.sub)).set_text(cx, sub);
-        self.sync_card_loop(cx, selected.map(|_| project_path.as_str()));
         for id in [ids!(preview_btn), ids!(preview_btn_on)] {
             self.view.label(cx, &[id[0], live_id!(name)]).set_text(cx, i18n::t("App", "应用"));
             self.view.label(cx, &[id[0], live_id!(sub)]).set_text(cx, "");
@@ -2465,7 +2530,7 @@ impl OctoBuddyView {
             self.view.label(cx, &[id, live_id!(name)]).set_visible(cx, !compact);
         }
         let all = views.into_iter().chain([live_id!(outer_btn), live_id!(outer_btn_on), live_id!(inner_btn), live_id!(inner_btn_on), live_id!(new_peer_btn), live_id!(data_btn),
-            live_id!(preview_btn), live_id!(preview_btn_on), live_id!(publish_btn), live_id!(loop_btn), live_id!(loop_btn_ok), live_id!(loop_btn_bad), live_id!(plug_btn0), live_id!(plug_btn1), live_id!(plug_btn2)]);
+            live_id!(preview_btn), live_id!(preview_btn_on), live_id!(publish_btn), live_id!(plug_btn0), live_id!(plug_btn1), live_id!(plug_btn2)]);
         for id in all {
             let sub = self.view.label(cx, &[id, live_id!(sub)]);
             sub.set_visible(cx, !sub.text().is_empty());
@@ -4130,7 +4195,7 @@ impl OctoBuddyView {
         if tapped(&self.view.view(cx, ids!(publish_btn)), actions) {
             self.publish_app(cx);
         }
-        self.card_loop_actions(cx, actions);
+        self.live_page_actions(cx, actions);
         if tapped(&self.view.view(cx, ids!(data_btn)), actions) {
             self.show_data = !self.show_data;
             self.relayout(cx);
@@ -5113,6 +5178,7 @@ impl Widget for OctoBuddyView {
                 for e in events {
                     self.apply_event(e);
                 }
+                self.card_loop_pending(cx);
                 if let Some((_, Err(err))) = &self.data_added {
                     let note = self.view.label(cx, ids!(data_note));
                     note.set_text(cx, &i18n::pick(format!("Could not add it: {err}"), format!("没能添加：{err}")));
@@ -5134,9 +5200,12 @@ impl Widget for OctoBuddyView {
                 self.relayout(cx);
             }
         }
-        // The production loop's runs that are due.
+        // The production loop's runs that are due (and its page kept fresh).
         if self.clock.is_event(event).is_some() {
             self.card_loop_tick();
+            if self.page == Page::Live && now_secs().is_multiple_of(5) {
+                self.relayout(cx);
+            }
         }
         // An inner loop that stopped on the outer loop's task, unreported.
         if self.clock.is_event(event).is_some() && !self.rt.pending.is_empty() {

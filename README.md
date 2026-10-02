@@ -60,19 +60,65 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
 
 ## Production loop
 
-The plugin `card-loop` keeps watch over an app after it is published: GOSIM 2026's "production-loop agent" bounty (read its runtime signals, find a failing card, repair it, publish again). The watch part runs now; repairing and publishing again come next.
+The plugin `card-loop` keeps watch over the apps after they are published. It follows GOSIM 2026's "production-loop agent" bounty: read the app's runtime signals, find a failing card, repair it, publish it again.
 
-- **On.** The **Live** pill of an app project turns it on. It needs the app on the local App Hub, because it watches the version published there, not the project's working copy.
-- **A run.** Every 5 minutes it runs a copy of the published version headless, on live data, as the app check does. It reads whether the app started, its script errors, the widgets on screen and a screenshot.
-- **Judged.** The first healthy run of a version is its baseline. A later run is:
-  - **down** if it did not start;
-  - **broken** if it has script errors;
-  - **degraded** if 40% of its named widgets are gone, it shows text in less than half as many widgets, or it shows a failure it did not show in its baseline ("无法获取汇率…").
-- **Said.** A change of health is a message in the session the watch was turned on from, with the reasons and the screenshot. The pill says how it is (green, red) and when it last ran.
-- **Kept.** In `<project>/.octobuddy/card-loop/`: `watch.json` (on, pace, baseline, health), `health.jsonl` (one line per run), `shots/` (the last 20).
-- **Drill.** `"drill": "offline"` in `watch.json` runs the copy with its network hosts swapped for one that never answers, as if its API were down. `"every"` (seconds, 30 or more) sets the pace. Both apply from the next run. The published copy itself is never changed.
-- **Verified** on macOS on 2026-10-02 with the published 汇率看板 (fx-board) 0.1.0. The live test `probes_a_published_app_well_and_cut_off` (ignored by default) found it healthy (25 widgets, 5.7 s a run) and degraded with its API cut off. In OctoSense, the watch was turned on and took its baseline. The offline drill was reported 29 s later with the pill red, and the recovery 30 s after that. The watch was then turned off.
-- **Not seen by it.** Failures only the real host shows, such as a permission denied in OctoSense. The shell does not share installed cards' runtime errors with other apps yet.
+**The Live page.** The pulse button beside Settings at the bottom of the sidebar opens it; the button turns red while a watched app is not well. The page lists every OctoSense app project, each with:
+- its published version and its health;
+- a dot for each of its last 12 runs;
+- what is wrong now, and what was done about it;
+- the buttons Watch, Run now, Drill, Auto repair, Session, Repair and Publish fix.
+
+It watches the version published to the local App Hub, not the project's working copy.
+
+**A run.** Every 5 minutes, a copy of the published version runs headless on live data, as the app check does. The run reads:
+- whether the app started;
+- its script errors;
+- the widgets on screen;
+- a screenshot.
+
+The app's storage is kept between runs (`card-loop/state/`), as on a device. A version that keeps its last data can show it when its API is down.
+
+**Judged.** The first healthy run of a version is its baseline. A later run is:
+- **down** if it did not start;
+- **broken** if it has script errors;
+- **degraded** if:
+  - 40% of its named widgets are gone; or
+  - it shows text in less than half as many widgets; or
+  - it shows a failure its baseline did not, unless its content is kept (at least 80% of the widgets with text). An app that says it is offline and shows its last data is coping.
+
+A new version is judged by its content against the last version's baseline until it has a baseline of its own.
+
+**An incident** runs from the run that finds the app ill to the one that finds it well.
+- Its session hears both ends.
+- **Repair** hands it to that session's outer loop with a brief: what the run showed, the screenshot, and what a drill means. **Auto repair** does that at once.
+- **Publish fix** appears once the project's app differs from the published copy. It publishes the fixed version, and the next run checks it.
+- If a drill is on, that next run is made without the drill first, as a device online when it updated. The drilled runs that follow decide.
+- When it is well again, the session hears how long each step took.
+
+**Kept** in `<project>/.octobuddy/card-loop/`:
+- `watch.json`: on or off, pace, baseline, health, the incident;
+- `health.jsonl`: a line per run;
+- `shots/`: the last 20 screenshots;
+- `state/`: the app's storage.
+
+**Drills.** The published copy itself is never changed.
+- **Drill** (`offline`) cuts the app's API off in the watch's runs, on a device that used the app before.
+- `"drill": "offline-fresh"` in `watch.json` does it on a new device, with nothing kept.
+- `"every"` (seconds, 30 or more) sets the pace.
+
+**Verified** on macOS on 2026-10-02, with the published 汇率看板 (fx-board) 0.1.0:
+- The live test `probes_a_published_app_well_and_cut_off` (ignored by default):
+  - with its API up: healthy (26 widgets, 5.5 s a run);
+  - with its API cut off on a device that used it before: healthy, because it keeps its last rates and says so;
+  - with its API cut off on a new device: degraded.
+- In OctoSense, on the Live page:
+  - Watch took the baseline;
+  - Drill stayed healthy;
+  - the new-device drill opened an incident, reported in the session;
+  - Repair sent the brief to the session's outer loop and opened the session. That turn was stopped there.
+- **Not run end to end yet:** an outer loop's repair, Publish fix, and the run that closes the incident. fx-board already copes with a drill, so it has nothing to repair.
+
+**Not seen by the watch.** Failures only the real host shows, such as a permission denied in OctoSense. The shell does not share installed cards' runtime errors with other apps yet.
 
 ## Appearance
 

@@ -3,20 +3,31 @@
 //! says when it breaks (GOSIM 2026's "production-loop agent": read its own
 //! runtime signals, find a failing card, repair it, publish it again).
 //!
-//! What runs now: the watch. Every few minutes (`watch.json`'s `every`) it
-//! runs the published copy headless on live data, as the app check does,
-//! and reads what it showed: whether it started, its script errors, the
-//! widgets on screen, a screenshot. The first healthy run of a version is
-//! its baseline; a later run is judged against it ([`judge`]): it did not
-//! start (down), it has script errors (broken), its key widgets are gone or
+//! The watch: every few minutes (`watch.json`'s `every`) it runs the
+//! published copy headless on live data, as the app check does, and reads
+//! what it showed: whether it started, its script errors, the widgets on
+//! screen, a screenshot. The first healthy run of a version is its baseline;
+//! a later run is judged against it ([`judge`]): it did not start (down), it
+//! has script errors (broken), its key widgets are gone, its content shrank or
 //! it shows a failure it did not before (degraded). Each run is a line of
-//! `<project>/.octobuddy/card-loop/health.jsonl`; a change of health is a
-//! message in the session the watch was started from. Repairing it and
-//! publishing again come next.
+//! `<project>/.octobuddy/card-loop/health.jsonl`.
 //!
-//! A drill for the demo (`watch.json`'s `drill`): `offline` runs the copy
-//! with its network hosts swapped for one that never answers, as if its API
-//! were down. The published copy itself is never touched.
+//! An incident: from the run that found it ill to the one that finds it
+//! well. Its session hears both ends. The Live page (the sidebar's, every
+//! published app on it) hands it to that session's outer loop to repair
+//! (`repair_brief`; or at once, with Auto repair on), and publishes the
+//! fixed version once the project's app differs from the published one; the
+//! next run checks it, and the incident closes with its story (found,
+//! handed over, published, well again).
+//!
+//! A run keeps the app's storage (`card-loop/state/`), as a device does, so
+//! a fixed version that keeps its last data can show it when its API is
+//! down; a failure said with the content kept is judged coping, not broken.
+//!
+//! Drills for the demo: `offline` runs the copy with its network hosts
+//! swapped for one that never answers, as if its API were down;
+//! `offline-fresh` does it on a new device (no storage kept). The published
+//! copy itself is never touched.
 use crate::model::now_secs;
 use crate::{i18n, tapped, OctoBuddyView};
 use makepad_widgets::*;
@@ -33,8 +44,9 @@ const SHOTS_KEPT: usize = 20;
 const FAILURE_WORDS: &[&str] = &["失败", "错误", "出错", "无法", "不可用", "超时", "离线", "error", "failed", "unavailable", "timeout", "offline"];
 
 /// An app's health, worst last.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Health {
+    #[default]
     Healthy,
     Degraded,
     Broken,
@@ -135,8 +147,11 @@ pub fn judge(p: &Probe, baseline: Option<&Baseline>) -> (Health, Vec<String>) {
         return (Health::Broken, p.errors.iter().take(5).cloned().collect());
     }
     let mut why = Vec::new();
+    // A failure it says with its content kept (the last data, and that it is
+    // offline) is it coping, not failing.
+    let kept = baseline.is_some_and(|b| b.texts > 0 && texts(p) * 5 >= b.texts * 4);
     let new_failures: Vec<String> = failure_texts(p).into_iter()
-        .filter(|t| baseline.is_none_or(|b| !b.failure_texts.contains(t))).collect();
+        .filter(|t| !kept && baseline.is_none_or(|b| !b.failure_texts.contains(t))).collect();
     for t in new_failures.iter().take(3) {
         let t: String = t.chars().take(80).collect();
         why.push(i18n::pick(format!("it shows “{t}”"), format!("页面上显示「{t}」")));
@@ -205,6 +220,7 @@ pub fn probe(project: &str, drill: Option<&str>) -> Result<Probe, String> {
     let started = std::time::Instant::now();
     let mut cmd = Command::new("sh");
     cmd.arg("-c").arg(PROBE_SCRIPT).arg("octobuddy-card-loop").arg(&artifact).arg(tools.octo()).arg(&shot).arg(drill.unwrap_or(""))
+        .arg(loop_dir(project).join("state"))
         .env("PATH", crate::workspace::search_path());
     if let Some(hub) = &tools.app_hub {
         cmd.env("OCTOSENSE_APP_HUB", hub);
@@ -235,7 +251,7 @@ fn prune(shots: &Path) {
 }
 
 const PROBE_SCRIPT: &str = r#"
-bundle="$1"; octo="$2"; shot="$3"; drill="$4"
+bundle="$1"; octo="$2"; shot="$3"; drill="$4"; state="$5"
 work=$(mktemp -d "${TMPDIR:-/tmp}/octobuddy-card-loop.XXXXXX") || exit 2
 trap 'rm -rf "$work"' EXIT
 cp -R "$bundle" "$work/bundle" || exit 2
@@ -247,7 +263,7 @@ import json, os, sys
 b, drill = sys.argv[1], sys.argv[2]
 m = json.load(open(os.path.join(b, "manifest.json")))
 (m.get("integrity") or {}).pop("signature", None)
-if drill == "offline":
+if drill in ("offline", "offline-fresh"):
     hosts = (m.get("network") or {}).get("hosts") or []
     m.setdefault("network", {})["hosts"] = ["octobuddy-drill.invalid"]
     p = os.path.join(b, "main.splash")
@@ -258,8 +274,12 @@ if drill == "offline":
 json.dump(m, open(os.path.join(b, "manifest.json"), "w"), ensure_ascii=False, indent=2)
 PY
 port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+# Its storage stays between runs, as on a device (the last data it kept);
+# its log is this run's only. Drill `offline-fresh`: a new device, nothing kept.
+[ "$drill" = offline-fresh ] && state="$work/fresh-state"
+mkdir -p "$state" && rm -f "$state/card-host.log"
 started=1
-python3 "$octo" run "$work/bundle" --port "$port" --hidden --detach --timeout 30 > "$work/run.txt" 2>&1 || started=0
+python3 "$octo" run "$work/bundle" --port "$port" --hidden --detach --timeout 30 --app-data "$state" > "$work/run.txt" 2>&1 || started=0
 if [ $started = 1 ]; then
   # Its live data comes in.
   sleep 4
@@ -268,9 +288,9 @@ if [ $started = 1 ]; then
   curl -s -m 5 "http://127.0.0.1:$port/quit" > /dev/null 2>&1
   sleep 1
 fi
-python3 - "$work" "$started" <<'PY'
+python3 - "$work" "$started" "$state" <<'PY'
 import json, os, re, sys
-work, started = sys.argv[1], sys.argv[2] == "1"
+work, started, state = sys.argv[1], sys.argv[2] == "1", sys.argv[3]
 def lines(p):
     try:
         return open(p, errors="replace").read().splitlines()
@@ -278,7 +298,7 @@ def lines(p):
         return []
 script = re.compile(r'\[E\]|splash:[0-9]+:|on_render closure failed|callback error')
 if started:
-    errors = [l.strip() for l in lines(os.path.join(work, ".local-state/card-host.log")) if script.search(l)][:20]
+    errors = [l.strip() for l in lines(os.path.join(state, "card-host.log")) if script.search(l)][:20]
 else:
     run = lines(os.path.join(work, "run.txt"))
     errors = [l.strip() for l in run if script.search(l) or re.search(r'refused|did not', l)][:20] or [l.strip() for l in run[-5:]]
@@ -296,19 +316,69 @@ print(json.dumps({"started": started, "errors": errors, "widgets": widgets[:400]
 PY
 "#;
 
+/// A spell of ill health: from the run that saw it to the one that found the
+/// app well again, with what was done about it on the way.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Incident {
+    pub since: u64,
+    pub version: String,
+    pub health: Health,
+    pub why: Vec<String>,
+    pub shot: Option<String>,
+    /// Widgets with text when it began (its baseline had more).
+    pub texts: usize,
+    /// The drill it happened under, if one.
+    pub drill: Option<String>,
+    /// Handed to an outer loop to repair: its session, and when.
+    pub repair: Option<(String, u64)>,
+    /// The fixed version published, and when.
+    pub published: Option<(String, u64)>,
+}
+
+impl Incident {
+    fn to_json(&self) -> Value {
+        json!({
+            "since": self.since, "version": self.version, "health": self.health.key(), "why": self.why, "shot": self.shot,
+            "texts": self.texts, "drill": self.drill,
+            "repair": self.repair.as_ref().map(|(s, at)| json!({"session": s, "at": at})),
+            "published": self.published.as_ref().map(|(v, at)| json!({"version": v, "at": at})),
+        })
+    }
+
+    fn from_json(v: &Value) -> Option<Incident> {
+        Some(Incident {
+            since: v["since"].as_u64()?,
+            version: v["version"].as_str().unwrap_or("").to_string(),
+            health: v["health"].as_str().and_then(Health::parse).unwrap_or(Health::Degraded),
+            why: v["why"].as_array().map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect()).unwrap_or_default(),
+            shot: v["shot"].as_str().map(String::from),
+            texts: v["texts"].as_u64().unwrap_or(0) as usize,
+            drill: v["drill"].as_str().map(String::from),
+            repair: v["repair"]["session"].as_str().map(|s| (s.to_string(), v["repair"]["at"].as_u64().unwrap_or(0))),
+            published: v["published"]["version"].as_str().map(|s| (s.to_string(), v["published"]["at"].as_u64().unwrap_or(0))),
+        })
+    }
+}
+
 /// A watched app: `<project>/.octobuddy/card-loop/watch.json`.
 #[derive(Clone, Debug, Default)]
 pub struct Watch {
     pub watching: bool,
     pub every: u64,
-    /// The session told about it.
+    /// The session told about it (and its repairs go to).
     pub session: String,
     pub baseline: Option<Baseline>,
     pub health: Option<Health>,
-    /// Since when it has been as it is.
-    pub since: u64,
     pub last: u64,
+    /// Widgets with text at its last run.
+    pub texts: usize,
     pub drill: Option<String>,
+    /// An incident goes to the outer loop without asking.
+    pub auto_repair: bool,
+    /// A version just published runs once without the drill first, as a
+    /// device online when it updated (its storage filled by it).
+    pub warm: bool,
+    pub incident: Option<Incident>,
 }
 
 impl Watch {
@@ -320,9 +390,12 @@ impl Watch {
             session: v["session"].as_str().unwrap_or("").to_string(),
             baseline: Baseline::from_json(&v["baseline"]),
             health: v["health"].as_str().and_then(Health::parse),
-            since: v["since"].as_u64().unwrap_or(0),
             last: v["last"].as_u64().unwrap_or(0),
+            texts: v["texts"].as_u64().unwrap_or(0) as usize,
             drill: v["drill"].as_str().filter(|d| !d.is_empty()).map(String::from),
+            auto_repair: v["auto_repair"].as_bool().unwrap_or(false),
+            warm: v["warm"].as_bool().unwrap_or(false),
+            incident: Incident::from_json(&v["incident"]),
         })
     }
 
@@ -332,9 +405,17 @@ impl Watch {
         let v = json!({
             "watching": self.watching, "every": self.every, "session": self.session,
             "baseline": self.baseline.as_ref().map(Baseline::to_json), "health": self.health.map(Health::key),
-            "since": self.since, "last": self.last, "drill": self.drill,
+            "last": self.last, "texts": self.texts, "drill": self.drill, "auto_repair": self.auto_repair, "warm": self.warm,
+            "incident": self.incident.as_ref().map(Incident::to_json),
         });
         let _ = std::fs::write(dir.join("watch.json"), serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+
+    fn app_name(project: &str) -> String {
+        std::fs::read_to_string(super::octosense_app::bundle(project).join("manifest.json")).ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| v["name"].as_str().map(String::from))
+            .unwrap_or_else(|| Path::new(project).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
     }
 }
 
@@ -343,7 +424,7 @@ fn log(project: &str, p: &Probe, health: Health, why: &[String]) {
     let line = json!({
         "at": p.at, "version": p.version, "health": health.key(), "why": why, "started": p.started,
         "errors": p.errors.len(), "widgets": p.widgets.len(), "texts": texts(p), "took_ms": p.took_ms,
-        "shot": p.shot.as_ref().and_then(|s| s.strip_prefix(project).ok()).map(|s| s.display().to_string()), "drill": p.drill,
+        "shot": shot_of(project, p), "drill": p.drill,
     });
     let dir = loop_dir(project);
     let _ = std::fs::create_dir_all(&dir);
@@ -352,15 +433,63 @@ fn log(project: &str, p: &Probe, health: Health, why: &[String]) {
     }
 }
 
+fn shot_of(project: &str, p: &Probe) -> Option<String> {
+    p.shot.as_ref().and_then(|s| s.strip_prefix(project).ok()).map(|s| s.display().to_string())
+}
+
+/// The health of its last `n` runs, oldest first.
+fn history(project: &str, n: usize) -> Vec<Health> {
+    let text = std::fs::read_to_string(loop_dir(project).join("health.jsonl")).unwrap_or_default();
+    let all: Vec<Health> = text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| v["health"].as_str().and_then(Health::parse)).collect();
+    all[all.len().saturating_sub(n)..].to_vec()
+}
+
+/// Whether the project's app differs from its published copy (a fix to publish).
+fn changed_since_published(project: &str, published: &Path) -> bool {
+    let read = |p: PathBuf| std::fs::read(p).unwrap_or_default();
+    let bundle = super::octosense_app::bundle(project);
+    ["main.splash", "listing.json"].iter().any(|f| read(bundle.join(f)) != read(published.join(f)))
+}
+
+/// What the outer loop is asked when an incident goes to it.
+fn repair_brief(name: &str, i: &Incident) -> String {
+    let why: Vec<String> = i.why.iter().map(|w| format!("- {w}")).collect();
+    let shot = i.shot.as_deref().unwrap_or("");
+    let drill = match i.drill.as_deref() {
+        Some("offline-fresh") => i18n::t("\n(This was a drill: the watch ran it as on a new device, nothing kept, with its API cut off on purpose. There is no data to show then: check that it says so plainly and offers to try again, and change only what falls short of that.)",
+            "\n（这是一次演练：巡检按新设备运行，没有任何缓存，并故意断开了它的 API。这时本来就没有数据可显示：请确认它清楚地说明情况并能重试，只修改做得不够的地方。）"),
+        Some(_) => i18n::t("\n(This was a drill: the watch cut its API off on purpose, on a device that used it before. The fix to make: when its API does not answer, the app still gives something to use, such as the last data it fetched and when, not only an error.)",
+            "\n（这是一次演练：巡检时故意断开了它的 API，设备之前用过它。要做的修复：API 不响应时，应用仍然给出能用的界面，比如显示上次取到的数据和时间，而不是只显示报错。）"),
+        None => "",
+    };
+    i18n::pick(
+        format!("OctoBuddy's live watch found the published {name} {} {}:\n{}\nScreenshot: {shot} (octobuddy_app_look shows the app as it is now).{drill}\nRepair the app in this project so it works under these conditions, check it, and tell me what you changed. Do not publish it: I publish the fixed version from the Live page.",
+            i.version, i.health.word(), why.join("\n")),
+        format!("巡检发现已发布的 {name} {} {}：\n{}\n截图：{shot}（octobuddy_app_look 可以看应用现在的样子）。{drill}\n请修好这个项目里的应用，让它在这种情况下也能正常工作，检查通过后告诉我改了什么。先不要发布：我会在巡检页发布修复版。",
+            i.version, i.health.word(), why.join("\n")))
+}
+
 /// The watches of this window's projects.
 #[derive(Default)]
 pub struct Loops {
     pub watches: BTreeMap<String, Watch>,
     pub running: HashSet<String>,
+    /// Incidents to hand to their outer loop (auto repair), on the next event with a `Cx`.
+    pub pending_repairs: Vec<String>,
     loaded: bool,
 }
 
-const BUTTONS: [LiveId; 3] = [live_id!(loop_btn), live_id!(loop_btn_ok), live_id!(loop_btn_bad)];
+impl Loops {
+    /// Whether a watched app is not well (the sidebar's mark).
+    pub fn alarm(&self) -> bool {
+        self.watches.values().any(|w| w.watching && w.health.is_some_and(|h| h != Health::Healthy))
+    }
+}
+
+const CARDS: [LiveId; 8] = [live_id!(lc0), live_id!(lc1), live_id!(lc2), live_id!(lc3), live_id!(lc4), live_id!(lc5), live_id!(lc6), live_id!(lc7)];
+const DOTS: [LiveId; 12] = [live_id!(h0), live_id!(h1), live_id!(h2), live_id!(h3), live_id!(h4), live_id!(h5),
+    live_id!(h6), live_id!(h7), live_id!(h8), live_id!(h9), live_id!(h10), live_id!(h11)];
 
 fn ago(secs: u64) -> String {
     match secs {
@@ -379,6 +508,15 @@ fn span(secs: u64) -> String {
     }
 }
 
+fn health_color(h: Option<Health>) -> u32 {
+    crate::theme::hex(match h {
+        Some(Health::Healthy) => "success",
+        Some(Health::Degraded) => "warning",
+        Some(Health::Broken | Health::Down) => "danger",
+        None => "line_strong",
+    })
+}
+
 impl OctoBuddyView {
     fn card_loop_load(&mut self) {
         if self.card_loop.loaded {
@@ -393,73 +531,300 @@ impl OctoBuddyView {
         }
     }
 
-    /// The Live pill of an app project: off, well, or not.
-    pub(crate) fn sync_card_loop(&mut self, cx: &mut Cx, project: Option<&str>) {
-        self.card_loop_load();
-        let shown = project.filter(|p| super::active(super::CARD_LOOP, p));
-        let watch = shown.and_then(|p| self.card_loop.watches.get(p)).filter(|w| w.watching).cloned();
-        let running = shown.is_some_and(|p| self.card_loop.running.contains(p));
-        let which = match &watch {
-            None => 0,
-            Some(w) if w.health.is_none_or(|h| h == Health::Healthy) => 1,
-            Some(_) => 2,
-        };
-        for (i, id) in BUTTONS.iter().enumerate() {
-            self.view.view(cx, &[*id]).set_visible(cx, shown.is_some() && i == which);
-        }
-        let id = BUTTONS[which];
-        self.view.label(cx, &[id, live_id!(name)]).set_text(cx, i18n::t("Live", "巡检"));
-        let sub = match (&watch, running) {
-            (None, _) => i18n::t("off", "关").to_string(),
-            (Some(_), true) => i18n::t("checking…", "检查中…").to_string(),
-            (Some(w), false) => match w.health {
-                None => i18n::t("on", "开").to_string(),
-                Some(h) => format!("{} · {}", h.word(), ago(now_secs().saturating_sub(w.last))),
-            },
-        };
-        self.view.label(cx, &[id, live_id!(sub)]).set_text(cx, &sub);
+    /// The app projects the page lists: the plugin at work for them.
+    fn live_apps(&self) -> Vec<(usize, String)> {
+        self.store.projects.iter().enumerate().filter(|(_, p)| !p.is_chats() && super::active(super::CARD_LOOP, &p.path))
+            .map(|(i, p)| (i, p.path.clone())).take(CARDS.len()).collect()
     }
 
-    /// The Live pill pressed: the watch on (run now) or off.
-    pub(crate) fn card_loop_actions(&mut self, cx: &mut Cx, actions: &Actions) {
-        if !BUTTONS.iter().any(|id| tapped(&self.view.view(cx, &[*id]), actions)) {
-            return;
-        }
-        let Some(at) = self.selected.filter(|at| self.store.session(*at).is_some()) else { return };
-        let project = self.store.projects[at.0].path.clone();
-        let session = self.store.session(at).map(|s| s.id.clone()).unwrap_or_default();
-        let mut w = Watch::read(&project).unwrap_or_default();
-        if self.card_loop.watches.get(&project).is_some_and(|w| w.watching) {
-            w.watching = false;
-            w.write(&project);
-            self.card_loop.watches.remove(&project);
-            self.system(at, i18n::t("Live watch off: OctoBuddy no longer runs the published app.", "已关闭巡检：OctoBuddy 不再运行已发布的应用。"));
-        } else {
-            match published(&project) {
-                Err(err) => {
-                    self.system(at, &i18n::pick(format!("Live watch needs the app on the local App Hub ({err}): publish it first; the watch runs the published version."),
-                        format!("巡检需要应用已发布到本地 App Hub（{err}）：先点「发布」；巡检的是发布出去的那个版本。")));
-                }
-                Ok((version, _)) => {
-                    let name = Watch::app_name(&project);
-                    w.watching = true;
-                    w.every = if w.every == 0 { EVERY } else { w.every };
-                    w.session = session;
-                    w.last = 0;
-                    w.write(&project);
-                    self.card_loop.watches.insert(project.clone(), w.clone());
-                    self.system(at, &i18n::pick(format!("Live watch on: OctoBuddy runs the published {name} {version} every {} min on live data and says here when it breaks. Its record: .octobuddy/card-loop/health.jsonl", w.every / 60),
-                        format!("已开启巡检：每 {} 分钟用实时数据运行一次已发布的 {name} {version}，出问题会在这里说。记录在 .octobuddy/card-loop/health.jsonl", w.every / 60)));
+    /// The session an app's watch speaks in: its own, else the project's latest.
+    fn live_session(&self, pi: usize, project: &str) -> Option<crate::model::SessionRef> {
+        let own = self.card_loop.watches.get(project).map(|w| w.session.clone()).or_else(|| Watch::read(project).map(|w| w.session));
+        own.and_then(|id| self.store.find_session(&id))
+            .or_else(|| self.store.projects.get(pi).filter(|p| !p.sessions.is_empty()).map(|p| (pi, p.sessions.len() - 1)))
+    }
+
+    /// The sidebar's Live button: marked when a watched app is not well.
+    pub(crate) fn sync_live_button(&mut self, cx: &mut Cx) {
+        self.card_loop_load();
+        let alarm = self.card_loop.alarm();
+        self.view.view(cx, ids!(live_button)).set_visible(cx, !alarm);
+        self.view.view(cx, ids!(live_button_alert)).set_visible(cx, alarm);
+    }
+
+    /// The Live page: a card per app, its health, its runs, what to do.
+    pub(crate) fn sync_live_page(&mut self, cx: &mut Cx) {
+        self.card_loop_load();
+        self.view.label(cx, ids!(live_title)).set_text(cx, i18n::t("Live", "巡检"));
+        self.view.label(cx, ids!(live_hint)).set_text(cx, i18n::t(
+            "The apps OctoBuddy published to the local App Hub, as people run them. A watched app is run headless every few minutes on live data and judged against its first healthy run; when it breaks, its session hears it, and Repair hands it to that session's outer loop. The fixed version is published from here.",
+            "OctoBuddy 发布到本地 App Hub 的应用，也就是大家实际在用的版本。开启巡检后，每隔几分钟用实时数据 headless 运行一次，并和它第一次正常运行时的样子对比；出问题时会在它的会话里说，点「修复」就交给那个会话的外环去修，修好后在这里发布修复版。"));
+        let apps = self.live_apps();
+        self.view.label(cx, ids!(live_empty)).set_visible(cx, apps.is_empty());
+        self.view.label(cx, ids!(live_empty)).set_text(cx, i18n::t("No OctoSense app project yet (or the Production loop plugin is off in Settings › Plugins).",
+            "还没有 OctoSense 应用项目（或者 设置 › 插件 里关掉了「生产回路」）。"));
+        let now = now_secs();
+        for (i, slot) in CARDS.iter().enumerate() {
+            let card = self.view.view(cx, &[*slot]);
+            let Some((pi, project)) = apps.get(i).cloned() else {
+                card.set_visible(cx, false);
+                continue;
+            };
+            card.set_visible(cx, true);
+            let name = Watch::app_name(&project);
+            let published = published(&project);
+            let watch = self.card_loop.watches.get(&project).filter(|w| w.watching).cloned();
+            let running = self.card_loop.running.contains(&project);
+            card.label(cx, ids!(name)).set_text(cx, &name);
+            card.label(cx, ids!(version)).set_text(cx, &match &published {
+                Ok((v, _)) => i18n::pick(format!("published {v}"), format!("已发布 {v}")),
+                Err(_) => i18n::t("not published", "未发布").to_string(),
+            });
+            let health = watch.as_ref().and_then(|w| w.health);
+            let mut dot = card.view(cx, ids!(dot));
+            let color = crate::hex_color(health_color(health));
+            script_apply_eval!(cx, dot, { draw_bg +: {color: #(color)} });
+            let state = match (&published, &watch, running) {
+                (Err(_), _, _) => i18n::t("Publish it from its session first: the watch runs the published version.", "先在它的会话里发布：巡检的是发布出去的版本。").to_string(),
+                (_, None, _) => i18n::t("Not watched", "未开启巡检").to_string(),
+                (_, Some(_), true) => i18n::t("Checking…", "检查中…").to_string(),
+                (_, Some(w), false) => match w.health {
+                    None => i18n::t("Watching: first run soon", "巡检中：马上第一次检查").to_string(),
+                    Some(h) => i18n::pick(format!("{} · {} · every {} min", h.word(), ago(now.saturating_sub(w.last)), w.every / 60),
+                        format!("{} · {} · 每 {} 分钟", h.word(), ago(now.saturating_sub(w.last)), w.every / 60)),
+                },
+            };
+            card.label(cx, ids!(state)).set_text(cx, &state);
+            // Its last runs, a dot each.
+            let runs = if watch.is_some() || loop_dir(&project).join("health.jsonl").is_file() { history(&project, DOTS.len()) } else { Vec::new() };
+            for (j, id) in DOTS.iter().enumerate() {
+                let mut d = card.view(cx, &[*id]);
+                d.set_visible(cx, j < runs.len());
+                if let Some(h) = runs.get(j) {
+                    let color = crate::hex_color(health_color(Some(*h)));
+                    script_apply_eval!(cx, d, { draw_bg +: {color: #(color)} });
                 }
             }
+            card.view(cx, ids!(runs)).set_visible(cx, !runs.is_empty());
+            let incident = watch.as_ref().and_then(|w| w.incident.clone());
+            // What is wrong, and what was done about it.
+            let mut lines: Vec<String> = Vec::new();
+            if let Some(inc) = &incident {
+                lines.push(i18n::pick(format!("Since {} ({}):", ago(now.saturating_sub(inc.since)), inc.version), format!("{}起（{}）：", ago(now.saturating_sub(inc.since)), inc.version)));
+                lines.extend(inc.why.iter().map(|w| format!("· {w}")));
+                if let (Some(base), Some(w)) = (watch.as_ref().and_then(|w| w.baseline.as_ref()), &watch) {
+                    lines.push(i18n::pick(format!("Widgets with text: {} when well, {} when it broke, {} now", base.texts, inc.texts, w.texts),
+                        format!("有文字的控件：正常时 {}，出问题时 {}，现在 {}", base.texts, inc.texts, w.texts)));
+                }
+                match (&inc.repair, &inc.published) {
+                    (_, Some((v, at))) => lines.push(i18n::pick(format!("Fixed version {v} published {}; the next run checks it.", ago(now.saturating_sub(*at))),
+                        format!("修复版 {v} 已在{}发布，下一次巡检会检查它。", ago(now.saturating_sub(*at))))),
+                    (Some((sid, at)), None) => {
+                        let busy = self.store.find_session(sid).is_some_and(|s| self.session_busy(s));
+                        lines.push(if busy {
+                            i18n::pick(format!("Repairing: its outer loop took it {}.", ago(now.saturating_sub(*at))), format!("修复中：已在{}交给外环。", ago(now.saturating_sub(*at))))
+                        } else {
+                            i18n::t("The outer loop is done with it: publish the fixed version once its check passed.", "外环已处理完：检查通过后可以发布修复版。").to_string()
+                        });
+                    }
+                    (None, None) => {}
+                }
+            }
+            match watch.as_ref().and_then(|w| w.drill.as_deref()) {
+                Some("offline-fresh") => lines.push(i18n::t("Drill on: its API is cut off in the watch's runs, as on a new device with nothing kept (the published app is not touched).",
+                    "演练中：巡检按新设备运行（没有缓存）并断开它的 API（不影响已发布的应用）。").to_string()),
+                Some(_) => lines.push(i18n::t("Drill on: its API is cut off in the watch's runs (the published app is not touched).", "演练中：巡检运行时断开了它的 API（不影响已发布的应用）。").to_string()),
+                None => {}
+            }
+            if let Some(shot) = incident.as_ref().and_then(|i| i.shot.clone()) {
+                lines.push(i18n::pick(format!("Screenshot: {shot}"), format!("截图：{shot}")));
+            }
+            card.label(cx, ids!(why)).set_visible(cx, !lines.is_empty());
+            card.label(cx, ids!(why)).set_text(cx, &lines.join("\n"));
+            // Its buttons.
+            let can = published.is_ok();
+            let watching = watch.is_some();
+            let drill = watch.as_ref().is_some_and(|w| w.drill.is_some());
+            let auto = watch.as_ref().is_some_and(|w| w.auto_repair);
+            let repairing = incident.as_ref().and_then(|i| i.repair.as_ref()).and_then(|(sid, _)| self.store.find_session(sid)).is_some_and(|s| self.session_busy(s));
+            let fix_ready = incident.as_ref().is_some_and(|i| i.published.is_none())
+                && published.as_ref().is_ok_and(|(_, dir)| changed_since_published(&project, dir));
+            let show = [
+                (ids!(watch_on), watching, i18n::t("Watching", "巡检中")), (ids!(watch_off), can && !watching, i18n::t("Watch", "开启巡检")),
+                (ids!(run_now), watching && !running, i18n::t("Run now", "立即巡检")),
+                (ids!(drill_on), watching && drill, i18n::t("Drill: API off", "演练：断网中")), (ids!(drill_off), watching && !drill, i18n::t("Drill: cut API", "演练断网")),
+                (ids!(auto_on), watching && auto, i18n::t("Auto repair", "自动修复")), (ids!(auto_off), watching && !auto, i18n::t("Auto repair", "自动修复")),
+                (ids!(open), self.live_session(pi, &project).is_some(), i18n::t("Session", "打开会话")),
+                (ids!(repair), incident.is_some() && !repairing, i18n::t("Repair", "修复")),
+                (ids!(publish_fix), fix_ready && self.publishing.is_none(), i18n::t("Publish fix", "发布修复版")),
+            ];
+            for (id, visible, text) in show {
+                card.button(cx, id).set_visible(cx, visible);
+                card.button(cx, id).set_text(cx, text);
+            }
         }
+    }
+
+    /// The Live page's buttons, and the sidebar's.
+    pub(crate) fn live_page_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        if tapped(&self.view.view(cx, ids!(live_button)), actions) || tapped(&self.view.view(cx, ids!(live_button_alert)), actions) {
+            self.page = crate::Page::Live;
+            self.relayout(cx);
+            return;
+        }
+        if tapped(&self.view.view(cx, ids!(live_back)), actions) {
+            self.page = crate::Page::Chat;
+            self.relayout(cx);
+            return;
+        }
+        if self.page != crate::Page::Live {
+            return;
+        }
+        for (slot, (pi, project)) in CARDS.iter().zip(self.live_apps()) {
+            let card = self.view.view(cx, &[*slot]);
+            let hit = |id: &[LiveId]| card.button(cx, id).clicked(actions);
+            if hit(ids!(watch_off)) {
+                self.card_loop_watch(pi, &project, true);
+            } else if hit(ids!(watch_on)) {
+                self.card_loop_watch(pi, &project, false);
+            } else if hit(ids!(run_now)) {
+                self.card_loop_update(&project, |w| w.last = 0);
+            } else if hit(ids!(drill_off)) {
+                self.card_loop_update(&project, |w| { w.drill = Some("offline".into()); w.last = 0; });
+            } else if hit(ids!(drill_on)) {
+                self.card_loop_update(&project, |w| { w.drill = None; w.last = 0; });
+            } else if hit(ids!(auto_off)) {
+                self.card_loop_update(&project, |w| w.auto_repair = true);
+            } else if hit(ids!(auto_on)) {
+                self.card_loop_update(&project, |w| w.auto_repair = false);
+            } else if hit(ids!(open)) {
+                if let Some(at) = self.live_session(pi, &project) {
+                    self.selected = Some(at);
+                    self.page = crate::Page::Chat;
+                }
+            } else if hit(ids!(repair)) {
+                self.card_loop_repair(cx, pi, &project, true);
+            } else if hit(ids!(publish_fix)) {
+                self.card_loop_publish(cx, pi, &project);
+            } else {
+                continue;
+            }
+            self.relayout(cx);
+            return;
+        }
+    }
+
+    fn card_loop_update(&mut self, project: &str, change: impl FnOnce(&mut Watch)) {
+        if let Some(w) = self.card_loop.watches.get_mut(project) {
+            change(w);
+            w.write(project);
+        }
+    }
+
+    /// A watch turned on (it runs at once) or off.
+    fn card_loop_watch(&mut self, pi: usize, project: &str, on: bool) {
+        let mut w = Watch::read(project).unwrap_or_default();
+        let at = self.live_session(pi, project);
+        let name = Watch::app_name(project);
+        if !on {
+            w.watching = false;
+            w.write(project);
+            self.card_loop.watches.remove(project);
+            if let Some(at) = at {
+                self.system(at, &i18n::pick(format!("Live watch off for {name}."), format!("已关闭 {name} 的巡检。")));
+            }
+            return;
+        }
+        let Ok((version, _)) = published(project) else { return };
+        w.watching = true;
+        // Afresh: its baseline is taken again, no incident carried over.
+        w.health = None;
+        w.incident = None;
+        w.baseline = None;
+        w.warm = false;
+        w.every = if w.every == 0 { EVERY } else { w.every };
+        w.session = at.and_then(|at| self.store.session(at)).map(|s| s.id.clone()).unwrap_or_default();
+        w.last = 0;
+        w.write(project);
+        let every = w.every / 60;
+        self.card_loop.watches.insert(project.to_string(), w);
+        if let Some(at) = at {
+            self.system(at, &i18n::pick(format!("Live watch on: OctoBuddy runs the published {name} {version} every {every} min on live data and says here when it breaks. Its record: .octobuddy/card-loop/health.jsonl"),
+                format!("已开启巡检：每 {every} 分钟用实时数据运行一次已发布的 {name} {version}，出问题会在这里说。记录在 .octobuddy/card-loop/health.jsonl")));
+        }
+    }
+
+    /// An incident handed to its session's outer loop (`show`: and that
+    /// session opened).
+    fn card_loop_repair(&mut self, cx: &mut Cx, pi: usize, project: &str, show: bool) {
+        let Some(incident) = self.card_loop.watches.get(project).and_then(|w| w.incident.clone()) else { return };
+        let at = match self.live_session(pi, project) {
+            Some(at) => Some(at),
+            None => self.store.add_session(pi),
+        };
+        let Some(at) = at else { return };
+        let Some(sid) = self.store.session(at).map(|s| s.id.clone()) else { return };
+        if show {
+            self.selected = Some(at);
+            self.page = crate::Page::Chat;
+        }
+        let brief = repair_brief(&Watch::app_name(project), &incident);
+        if self.send_text(cx, at, brief) {
+            let now = now_secs();
+            self.card_loop_update(project, |w| {
+                w.session = sid.clone();
+                if let Some(i) = w.incident.as_mut() {
+                    i.repair = Some((sid, now));
+                }
+            });
+        }
+    }
+
+    /// The fixed version published to the local App Hub (as the session's
+    /// Publish does); `card_loop_published` hears how it went.
+    fn card_loop_publish(&mut self, cx: &mut Cx, pi: usize, project: &str) {
+        if self.publishing.is_some() {
+            return;
+        }
+        let Some(at) = self.live_session(pi, project) else { return };
+        let Some(session) = self.store.session(at).map(|s| s.id.clone()) else { return };
+        self.publishing = Some(session.clone());
+        self.system(at, i18n::t("Publishing the fixed version to the local App Hub…", "正在把修复版发布到本地 App Hub……"));
+        let (inbox, project) = (self.rt.inbox.clone(), project.to_string());
+        std::thread::spawn(move || {
+            let result = super::app_publish::publish(&project);
+            crate::events::post(&inbox, crate::events::LoopEvent::Published { session, result });
+        });
         self.relayout(cx);
+    }
+
+    /// A version of `project` was published (from here or its session): the
+    /// watch runs it next, and an open incident records the fix.
+    pub(crate) fn card_loop_published(&mut self, project: &str, version: Option<String>) {
+        let Some(version) = version else { return };
+        let now = now_secs();
+        self.card_loop_update(project, |w| {
+            w.last = 0;
+            w.warm = w.drill.is_some();
+            if let Some(i) = w.incident.as_mut() {
+                i.published = Some((version, now));
+            }
+        });
+    }
+
+    /// Incidents for their outer loop without asking (auto repair).
+    pub(crate) fn card_loop_pending(&mut self, cx: &mut Cx) {
+        for project in std::mem::take(&mut self.card_loop.pending_repairs) {
+            if let Some(pi) = self.store.projects.iter().position(|p| p.path == project) {
+                self.card_loop_repair(cx, pi, &project, false);
+            }
+        }
     }
 
     /// Each second: a watched app whose run is due is run.
     pub(crate) fn card_loop_tick(&mut self) {
         self.card_loop_load();
-        // Its pace and drill as watch.json has them now (a demo changes them there).
+        // Its pace and drill as watch.json has them now (a demo may change them there).
         for (project, w) in self.card_loop.watches.iter_mut() {
             if let Some(file) = Watch::read(project) {
                 w.every = file.every;
@@ -469,7 +834,7 @@ impl OctoBuddyView {
         let now = now_secs();
         let due: Vec<(String, Option<String>)> = self.card_loop.watches.iter()
             .filter(|(p, w)| w.watching && !self.card_loop.running.contains(*p) && now.saturating_sub(w.last) >= w.every)
-            .map(|(p, w)| (p.clone(), w.drill.clone())).collect();
+            .map(|(p, w)| (p.clone(), if w.warm { None } else { w.drill.clone() })).collect();
         for (project, drill) in due {
             self.card_loop.running.insert(project.clone());
             if let Some(w) = self.card_loop.watches.get_mut(&project) {
@@ -485,7 +850,8 @@ impl OctoBuddyView {
         }
     }
 
-    /// A run came back: its health logged, and a change of it said.
+    /// A run came back: its health logged, an incident opened or closed, and
+    /// a change said in the app's session.
     pub(crate) fn card_loop_probed(&mut self, project: &str, result: Result<Probe, String>) {
         self.card_loop.running.remove(project);
         let Some(mut w) = self.card_loop.watches.get(project).cloned().filter(|w| w.watching) else { return };
@@ -501,55 +867,87 @@ impl OctoBuddyView {
             }
         };
         let name = Watch::app_name(project);
-        // A new version: it is judged against itself once it runs well.
-        if w.baseline.as_ref().is_some_and(|b| b.version != p.version) {
-            w.baseline = None;
+        // The warm run of a version just published: logged, judged by its
+        // drilled runs (the next ones), not by this one.
+        if w.warm && p.drill.is_none() {
+            let (health, why) = judge(&p, None);
+            log(project, &p, health, &why);
+            w.warm = false;
+            w.last = p.at.saturating_sub(w.every.saturating_sub(5));
+            w.write(project);
+            self.card_loop.watches.insert(project.to_string(), w);
+            return;
         }
-        let (health, why) = judge(&p, w.baseline.as_ref());
+        // A new version is judged against itself once it runs well; until
+        // then against what its last version showed (content kept or not).
+        let (health, why) = match w.baseline.as_ref() {
+            // (its widgets may be new: only its content and failures count).
+            Some(b) if b.version != p.version => judge(&p, Some(&Baseline { version: p.version.clone(), ids: Vec::new(), ..b.clone() })),
+            other => judge(&p, other),
+        };
         log(project, &p, health, &why);
-        let was = w.health;
-        if health == Health::Healthy && w.baseline.is_none() && p.drill.is_none() {
+        if health == Health::Healthy && p.drill.is_none() && w.baseline.as_ref().is_none_or(|b| b.version != p.version) {
             w.baseline = Some(Baseline::of(&p));
         }
-        // How long it was as it was, before this run.
-        let lasted = p.at.saturating_sub(w.since);
-        if was != Some(health) {
-            w.since = p.at;
-        }
+        let was = w.health;
         w.health = Some(health);
         w.last = p.at;
-        w.write(project);
-        let shot = p.shot.as_ref().and_then(|s| s.strip_prefix(project).ok()).map(|s| s.display().to_string()).unwrap_or_default();
+        w.texts = texts(&p);
         let drill = if p.drill.is_some() { i18n::t(" (drill: its API cut off)", "（演练：断开了它的 API）") } else { "" };
-        let text = match (was, health) {
-            (None, Health::Healthy) => Some(i18n::pick(
-                format!("Live watch: the published {name} {} runs well{drill}. That run is its baseline ({} named widgets).", p.version, w.baseline.as_ref().map(|b| b.ids.len()).unwrap_or(0)),
-                format!("巡检：已发布的 {name} {} 运行正常{drill}。这次运行作为基线（{} 个命名控件）。", p.version, w.baseline.as_ref().map(|b| b.ids.len()).unwrap_or(0)))),
-            (Some(Health::Healthy), Health::Healthy) => None,
-            (_, Health::Healthy) => Some(i18n::pick(
-                format!("✓ Live watch: the published {name} {} is well again{drill}, after {}.", p.version, span(lasted)),
-                format!("✓ 巡检：已发布的 {name} {} 恢复正常{drill}，故障持续了 {}。", p.version, span(lasted)))),
-            (_, bad) if was == Some(bad) => None,
-            (_, bad) => {
-                let lines: Vec<String> = why.iter().map(|l| format!("· {l}")).collect();
-                Some(i18n::pick(
-                    format!("⚠ Live watch: the published {name} {} is {}{drill}.\n{}\nScreenshot: {shot}\nRecord: .octobuddy/card-loop/health.jsonl", p.version, bad.word(), lines.join("\n")),
-                    format!("⚠ 巡检发现故障：已发布的 {name} {} {}{drill}。\n{}\n截图：{shot}\n记录：.octobuddy/card-loop/health.jsonl", p.version, bad.word(), lines.join("\n"))))
+        let mut text = None;
+        match (w.incident.take(), health) {
+            // Well, and was: nothing to say (but the first run).
+            (None, Health::Healthy) => {
+                if was.is_none() {
+                    text = Some(i18n::pick(
+                        format!("Live watch: the published {name} {} runs well{drill}. That run is its baseline ({} widgets with text).", p.version, w.texts),
+                        format!("巡检：已发布的 {name} {} 运行正常{drill}。这次运行作为基线（{} 个有文字的控件）。", p.version, w.texts)));
+                }
             }
-        };
+            // Well again: the incident's story, start to end.
+            (Some(inc), Health::Healthy) => {
+                let mut steps = Vec::new();
+                if let Some((_, at)) = &inc.repair {
+                    steps.push(i18n::pick(format!("handed to the outer loop after {}", span(at.saturating_sub(inc.since))), format!("{}后交给外环", span(at.saturating_sub(inc.since)))));
+                }
+                if let Some((v, at)) = &inc.published {
+                    steps.push(i18n::pick(format!("{v} published after {}", span(at.saturating_sub(inc.since))), format!("{}后发布 {v}", span(at.saturating_sub(inc.since)))));
+                }
+                let steps = if steps.is_empty() { String::new() } else { format!(" {}", steps.join(i18n::t(", ", "，"))) };
+                text = Some(i18n::pick(
+                    format!("✓ Live watch: the published {name} {} is well again{drill}, {} after it broke.{steps}", p.version, span(p.at.saturating_sub(inc.since))),
+                    format!("✓ 巡检：已发布的 {name} {} 恢复正常{drill}，距发现问题 {}。{steps}", p.version, span(p.at.saturating_sub(inc.since)))));
+            }
+            // Still not well: kept, with what it shows now.
+            (Some(mut inc), bad) => {
+                let worse = bad > inc.health;
+                inc.health = bad;
+                inc.why = why.clone();
+                inc.version = p.version.clone();
+                if worse {
+                    text = Some(i18n::pick(format!("⚠ Live watch: {name} {} is now {}.", p.version, bad.word()), format!("⚠ 巡检：{name} {} 现在{}。", p.version, bad.word())));
+                }
+                w.incident = Some(inc);
+            }
+            // It broke: an incident.
+            (None, bad) => {
+                let inc = Incident { since: p.at, version: p.version.clone(), health: bad, why: why.clone(), shot: shot_of(project, &p), texts: w.texts, drill: p.drill.clone(), repair: None, published: None };
+                let lines: Vec<String> = why.iter().map(|l| format!("· {l}")).collect();
+                let shot = inc.shot.clone().unwrap_or_default();
+                text = Some(i18n::pick(
+                    format!("⚠ Live watch: the published {name} {} is {}{drill}.\n{}\nScreenshot: {shot}\nThe Live page (sidebar) can hand it to this session's outer loop to repair.", p.version, bad.word(), lines.join("\n")),
+                    format!("⚠ 巡检发现故障：已发布的 {name} {} {}{drill}。\n{}\n截图：{shot}\n可以在侧栏的「巡检」页点「修复」，交给这个会话的外环去修。", p.version, bad.word(), lines.join("\n"))));
+                if w.auto_repair {
+                    self.card_loop.pending_repairs.push(project.to_string());
+                }
+                w.incident = Some(inc);
+            }
+        }
+        w.write(project);
         self.card_loop.watches.insert(project.to_string(), w);
         if let (Some(at), Some(text)) = (at, text) {
             self.system(at, &text);
         }
-    }
-}
-
-impl Watch {
-    fn app_name(project: &str) -> String {
-        std::fs::read_to_string(super::octosense_app::bundle(project).join("manifest.json")).ok()
-            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
-            .and_then(|v| v["name"].as_str().map(String::from))
-            .unwrap_or_else(|| Path::new(project).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
     }
 }
 
@@ -583,6 +981,10 @@ mod tests {
         assert_eq!(judge(&broken, Some(&base)).0, Health::Broken);
         let down = Probe { started: false, errors: vec!["refused: manifest".into()], ..Default::default() };
         assert_eq!(judge(&down, None).0, Health::Down);
+        // Offline, but its last rates still shown: coping.
+        let coping = run(&[("Label", "title", "汇率看板"), ("Label", "usd_cny", "7.10"), ("Label", "usd_eur", "0.92"),
+            ("Label", "offline", "离线：显示的是 10:00 的汇率"), ("Label", "help", "加载失败时会自动重试")]);
+        assert_eq!(judge(&coping, Some(&base)).0, Health::Healthy);
     }
 
     #[test]
@@ -597,7 +999,8 @@ mod tests {
         assert_eq!(newest_in(&catalog, "nope"), None);
     }
 
-    /// A published app run for real, as it is and with its API cut off:
+    /// A published app run for real, as it is and with its API cut off (where
+    /// it ran before, and on a new device):
     /// `OCTOBUDDY_HOME=<data> OCTOBUDDY_CARD_LOOP_PROJECT=<app project> cargo test -- --ignored probes_a_published`.
     #[test]
     #[ignore]
@@ -608,10 +1011,15 @@ mod tests {
         println!("as it is: {health:?} {why:?}, {} widgets, {} errors, {} ms, shot {:?}", well.widgets.len(), well.errors.len(), well.took_ms, well.shot);
         assert_eq!(health, Health::Healthy);
         let base = Baseline::of(&well);
+        // Its API down where it ran before: what it kept carries it (fx-board does).
         let cut = probe(&project, Some("offline")).unwrap();
         let (health, why) = judge(&cut, Some(&base));
-        println!("cut off: {health:?} {why:?}, {} widgets, shot {:?}", cut.widgets.len(), cut.shot);
-        assert_ne!(health, Health::Healthy);
+        println!("cut off, kept: {health:?} {why:?}, {} widgets, shot {:?}", cut.widgets.len(), cut.shot);
+        // On a new device, nothing kept: it has nothing to show.
+        let fresh = probe(&project, Some("offline-fresh")).unwrap();
+        let (fresh_health, why) = judge(&fresh, Some(&base));
+        println!("cut off, new device: {fresh_health:?} {why:?}, {} widgets, shot {:?}", fresh.widgets.len(), fresh.shot);
+        assert_ne!(fresh_health, Health::Healthy);
     }
 
     #[test]
@@ -619,12 +1027,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("octobuddy-card-loop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let project = dir.to_string_lossy().into_owned();
+        let incident = Incident { since: 5, version: "0.1.0".into(), health: Health::Degraded, why: vec!["it shows “x”".into()], shot: Some("s.png".into()),
+            texts: 8, drill: Some("offline".into()), repair: Some(("s-1".into(), 7)), published: Some(("0.1.1".into(), 8)) };
         let w = Watch { watching: true, every: 120, session: "s-1".into(), baseline: Some(Baseline { version: "0.1.0".into(), ids: vec!["a".into()], texts: 3, failure_texts: vec![] }),
-            health: Some(Health::Degraded), since: 5, last: 9, drill: Some("offline".into()) };
+            health: Some(Health::Degraded), last: 9, texts: 8, drill: Some("offline".into()), auto_repair: true, warm: true, incident: Some(incident) };
         w.write(&project);
         let back = Watch::read(&project).unwrap();
-        assert_eq!((back.watching, back.every, back.session.as_str(), back.health, back.since, back.last, back.drill.as_deref()), (true, 120, "s-1", Some(Health::Degraded), 5, 9, Some("offline")));
-        assert_eq!(back.baseline, w.baseline);
+        assert_eq!((back.watching, back.every, back.session.as_str(), back.health, back.last, back.texts, back.drill.as_deref(), back.auto_repair),
+            (true, 120, "s-1", Some(Health::Degraded), 9, 8, Some("offline"), true));
+        assert!(back.warm);
+        assert_eq!((back.baseline, back.incident), (w.baseline, w.incident));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
