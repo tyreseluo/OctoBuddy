@@ -59,8 +59,32 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
 - **Steer.** ⌘Enter (Ctrl+Enter elsewhere) puts a message into the running turn without cutting it off. A queued message has a **Steer in** button that does the same.
   - The agent takes it up at its next step. If it arrives just after the turn ends, it goes first in the queue instead.
   - Below the message, a receipt says whether it was taken up.
+- **Interrupt & send.** ⇧⌘Enter (⇧Ctrl+Enter elsewhere), or the **Interrupt & send** button shown while a turn is at work and something is typed. The turn and its subagents are cut off, and the message starts the next turn. The inner loops go on. An inner loop's panel has the same button.
 - **Views.** Chat, the flow graph of the outer and inner loops, a timeline to replay the session, and (with the native TUI plugin) the agent's own terminal UI.
+  - **Live view.** A read-only view of what the outer loop or an inner loop does now: what it writes, each tool call, its subagents. It works as usual; nothing is taken over. Kept in `<data>/live/`. Once its turn is done, **Take over** opens the agent's own terminal on the same conversation.
+  - **The timeline.** Each line between the loops joins the turn that sent it to the turn that took it up. Each wait is a dotted line that says why: the agent starting, the previous wave's acceptance, a queue, OctoBuddy's check, you, a restart. The summary adds them up by why, counting time once when several lanes wait together. Work that did not stand is marked: a lane replaced by a later one is hatched as history, a turn done again later is outlined, a ring marks each rework with its likely cause, and the panel under it lists them with the time they cost. **Learn from it** asks the outer loop to keep lessons from them (below).
 - **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, the app factory and the production loop (below), and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
+
+## Building an OctoSense app
+
+OctoBuddy gives the agents that build an app what they would otherwise look up or work out again on every run.
+
+- **Two digests**, in every app project's `.octobuddy/docs/`, read first by the outer loop and every inner loop:
+  - `SPLASH-COOKBOOK.md`: verified Splash patterns (pages, lists, forms, storage, dates, money, bars), the gotchas and the errors they give, then what OctoBuddy's own runs learned since.
+  - `DESIGN-FLOW.md`: OctoScript App Design Flow in one place. It covers the flow's steps and what passes each, where a person must decide (publisher details, keys and signing, a real submission), the design checklist (empty, error and restart states; what each action means), the manifest and listing rules, what each capability gives on today's devices, and the common mistakes. Each fact cites its line in the flow's repo (distilled from `63d3dbda`).
+  - The flow's own docs are copied beside them (AGENTS.md, FLOW.md, SCRIPT-API.md, CAPABILITIES.md, HOST-SERVICES.md, PUBLISHING.md), to open at a line a digest cites.
+- **A skill.** The same as the skill `octosense-app`, in a plugin OctoBuddy writes to `<data>/agent-plugin/octobuddy/`. Claude Code loads it with `--plugin-dir`, pi with `--skill`.
+- **Tools for every agent.** An inner loop's sandbox cannot run the app, so OctoBuddy runs it outside for the agent:
+  - `octobuddy_app_look`: script errors, a screenshot, the widgets on screen;
+  - `octobuddy_app_drive`: click by id or text, type, press keys, wait, look, so a flow is verified by doing it;
+  - `octobuddy_app_probe`: a few lines of Splash run headless in seconds, to try something instead of reading the runtime's source;
+  - `octobuddy_check`: the slice's own check.
+
+  Claude Code and Codex reach them over MCP. octos reaches them through a small stdio shim in the inner loop's profile, because octos refuses an MCP server on loopback HTTP. pi, which has no MCP, runs the command `octobuddy-app look | drive <steps.json> | probe <file> | check`. The outer loop has probe and drive too.
+- **Parts.** A new project's `bundle/main.splash` is made from `app/parts/*.splash` (shared state, one part per page, the root) before every check, preview and publish. Slices can then build the pages at the same time. A check's errors name the part and its line.
+- **Checked before review.** When a slice's check fails, OctoBuddy sends the output back to its inner loop, with hints for errors it knows, up to 2 times before the outer loop reviews it. A turn that ends on a promise ("Now let me…") is nudged once to finish.
+- **Learning from rework.** After a round is accepted with time lost to rework, or on **Learn from it**, the outer loop keeps up to 3 new lessons with `octobuddy_learn`. A `splash` lesson goes into every project's cookbook and the skill; an `orchestration` lesson goes into the outer loop's rules. They are kept in `<data>/lessons/`.
+- **Verified** on 2026-10-02 with 小账本 (pocket-ledger), built with Claude Code · Opus as the outer loop and codex, octos, pi and Claude Code on MiniMax and GLM as inner loops. It was published to the local App Hub (0.1.1). That run took about 2 hours, before parts, the tools for every agent and the digests; a timed run with them has not been made yet.
 
 ## App factory
 
