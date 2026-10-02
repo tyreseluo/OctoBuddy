@@ -39,6 +39,9 @@ impl OctoBuddyView {
             "蓝：outer · 绿：inner · 紫：审查者 · 红：失败 · 向下的线：outer 派任务（从发出它的那一轮到 inner 开始做的那一轮）· 向上的线：汇报（从写它的那一轮到读它的那一轮，曲线上标着等了多久） · 黄点：你的消息 · 绿菱形：提交 · 橙色圆环：返工 · 描边的淡色段：后来重做了 · 斜纹 lane：历史 · 灰带：压缩的空闲 · 滚轮缩放 · 双击一段在对话中打开"));
         self.view.label(cx, ids!(time_rework_title)).set_text(cx, &i18n::pick(format!("Rework and repeats ({})", tl.rework.len()), format!("返工与重复（{}）", tl.rework.len())));
         let lines = tl.rework_lines();
+        let evolve = self.view.button(cx, ids!(time_evolve));
+        evolve.set_visible(cx, !lines.is_empty());
+        evolve.set_text(cx, i18n::t("Learn from it", "沉淀经验"));
         self.view.label(cx, ids!(time_rework)).set_text(cx, &if lines.is_empty() {
             i18n::t("None: nothing was done twice.", "没有：没有重复做的工作。").to_string()
         } else {
@@ -172,6 +175,15 @@ impl OctoBuddyView {
             canvas.set_squeeze(cx, !self.time_unsqueezed);
             self.time_controls(cx);
             self.time_panels(cx);
+        }
+        // The rework, learned from: the outer loop keeps lessons for later runs.
+        if self.view.button(cx, ids!(time_evolve)).clicked(actions) {
+            if let Some(at) = self.selected {
+                let tl = self.time_tl.clone();
+                self.evolve(at, &tl);
+                self.save();
+                self.relayout(cx);
+            }
         }
         if self.view.button(cx, ids!(time_open)).clicked(actions) {
             if let Some(i) = canvas.selected() {

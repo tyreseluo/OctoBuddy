@@ -2618,6 +2618,36 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
         let project = self.store.projects[at.0].path.clone();
         let text = format!("Rework in \"{}\", round {round} (agent · model in brackets):\n- {}\n", session.title, lines.join("\n- "));
         crate::memory::remember(&project, "rework", text);
+        // Enough was lost to learn from: the outer loop keeps what would have
+        // spared it, for every later run (it evolves its own references).
+        let lost: f64 = tl.rework.iter().map(|r| r.lost).sum();
+        if lost >= 120.0 {
+            self.evolve(at, &tl);
+        }
+    }
+
+    /// The outer loop of the session at `at` is asked to learn from `tl`'s
+    /// rework: lessons kept with `octobuddy_learn`, for every later run. After
+    /// a round is accepted with time lost; or when the person asks (the
+    /// timeline's rework panel). Whether it was asked.
+    pub(crate) fn evolve(&mut self, at: SessionRef, tl: &crate::timeline::Timeline) -> bool {
+        let Some(session) = self.store.session(at).cloned() else { return false };
+        let lines = tl.rework_lines();
+        if lines.is_empty() || self.store.is_plain(at) || session.is_detached() {
+            return false;
+        }
+        let lost: f64 = tl.rework.iter().map(|r| r.lost).sum();
+        let note = format!("EVOLVE (OctoBuddy): this session did work again, {} time(s), {} lost:\n- {}\n\n\
+For causes a shared reference or rule would have prevented, keep at most 3 NEW lessons with octobuddy_learn: topic \"splash\" \
+for how Splash and the app runtime behave (try it with octobuddy_app_probe first; the lesson is the rule, the evidence what the \
+probe showed), topic \"orchestration\" for how to plan, split and pick agents and models (evidence: what happened here). Skip \
+what the cookbook or the lessons already say. Then say in one line what you kept, or that nothing was new. Start no new work.",
+            tl.rework.len(), crate::timeline::span_len(lost), lines.join("\n- "));
+        self.queue_outer(&session.id, OuterWork::Note(note));
+        self.system(at, i18n::t("OctoBuddy asked the outer loop to learn from this session's rework (lessons for every later run).",
+            "OctoBuddy 请外环从这次的返工里沉淀经验（之后每次运行都会用到）。"));
+        self.drain_outer(at);
+        true
     }
 
     /// What `p` ran on: its agent and model.

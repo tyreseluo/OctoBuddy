@@ -38,6 +38,7 @@ mod persist;
 pub mod providers;
 pub mod own_providers;
 pub mod live;
+pub mod lessons;
 mod providers_view;
 mod review;
 pub mod stream;
@@ -1336,7 +1337,11 @@ script_mod! {
                                 RoundedView{
                                     width: Fill height: Fill flow: Down spacing: 5 new_batch: true padding: 10
                                     draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
-                                    time_rework_title := Label{text: "" padding: 0 draw_text.color: th_warning draw_text.text_style: theme.font_bold{font_size: 9}}
+                                    View{
+                                        width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                                        time_rework_title := Label{width: Fill text: "" padding: 0 draw_text.color: th_warning draw_text.text_style: theme.font_bold{font_size: 9}}
+                                        time_evolve := SegOff{text: "Learn from it" height: 22 visible: false}
+                                    }
                                     ScrollYView{
                                         width: Fill height: Fill
                                         time_rework := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
