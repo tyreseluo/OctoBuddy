@@ -66,6 +66,7 @@ use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};
 use orchestrate::Runtime;
+use plugins::card_loop::Loops as CardLoops;
 use providers::Providers;
 
 /// The outer-loop CLIs the picker offers, each with its selected and
@@ -813,6 +814,11 @@ script_mod! {
         Path{d: "M12 15V4M7 9l5-5 5 5M5 15v4h14v-4" fill: false stroke: th_accent stroke_width: 1.8 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let FloatPublish = FloatSquare{icon := PublishIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
+    // The production loop's watch over the published app.
+    let LiveIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+        Path{d: "M3 12h4l2.5-6 5 12 2.5-6h4" fill: false stroke: th_success stroke_width: 1.8 stroke_linecap: "round" stroke_linejoin: "round"}
+    }
+    let FloatLive = FloatSquare{icon := LiveIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     // An external plugin's button (Settings › Plugins).
     let PluginIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
         Path{d: "M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4" fill: false stroke: th_muted_strong stroke_width: 1.7 stroke_linecap: "round" stroke_linejoin: "round"}
@@ -1252,6 +1258,9 @@ script_mod! {
                                 preview_btn := FloatApp{visible: false}
                                 preview_btn_on := FloatApp{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
                                 publish_btn := FloatPublish{visible: false}
+                                loop_btn := FloatLive{visible: false}
+                                loop_btn_ok := FloatLive{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
+                                loop_btn_bad := FloatLive{visible: false draw_bg.color: th_danger_bg draw_bg.border_color: th_danger draw_bg.border_size: 1.0}
                                 plug_btn0 := FloatPlugin{visible: false}
                                 plug_btn1 := FloatPlugin{visible: false}
                                 plug_btn2 := FloatPlugin{visible: false}
@@ -2011,6 +2020,9 @@ pub struct OctoBuddyView {
     // The session whose app is being published.
     #[rust]
     publishing: Option<String>,
+    // The production loop's watches (`plugins::card_loop`).
+    #[rust]
+    card_loop: CardLoops,
     // The projects the side menu's "move to" rows stand for, by name.
     #[rust]
     side_moves: Vec<String>,
@@ -2398,6 +2410,7 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(publish_btn.name)).set_text(cx, i18n::t("Publish", "发布"));
         let sub = if self.publishing.is_some() { i18n::t("publishing…", "发布中…") } else { "" };
         self.view.label(cx, ids!(publish_btn.sub)).set_text(cx, sub);
+        self.sync_card_loop(cx, selected.map(|_| project_path.as_str()));
         for id in [ids!(preview_btn), ids!(preview_btn_on)] {
             self.view.label(cx, &[id[0], live_id!(name)]).set_text(cx, i18n::t("App", "应用"));
             self.view.label(cx, &[id[0], live_id!(sub)]).set_text(cx, "");
@@ -2452,7 +2465,7 @@ impl OctoBuddyView {
             self.view.label(cx, &[id, live_id!(name)]).set_visible(cx, !compact);
         }
         let all = views.into_iter().chain([live_id!(outer_btn), live_id!(outer_btn_on), live_id!(inner_btn), live_id!(inner_btn_on), live_id!(new_peer_btn), live_id!(data_btn),
-            live_id!(preview_btn), live_id!(preview_btn_on), live_id!(publish_btn), live_id!(plug_btn0), live_id!(plug_btn1), live_id!(plug_btn2)]);
+            live_id!(preview_btn), live_id!(preview_btn_on), live_id!(publish_btn), live_id!(loop_btn), live_id!(loop_btn_ok), live_id!(loop_btn_bad), live_id!(plug_btn0), live_id!(plug_btn1), live_id!(plug_btn2)]);
         for id in all {
             let sub = self.view.label(cx, &[id, live_id!(sub)]);
             sub.set_visible(cx, !sub.text().is_empty());
@@ -4117,6 +4130,7 @@ impl OctoBuddyView {
         if tapped(&self.view.view(cx, ids!(publish_btn)), actions) {
             self.publish_app(cx);
         }
+        self.card_loop_actions(cx, actions);
         if tapped(&self.view.view(cx, ids!(data_btn)), actions) {
             self.show_data = !self.show_data;
             self.relayout(cx);
@@ -5119,6 +5133,10 @@ impl Widget for OctoBuddyView {
                 let _ = panel_was_open;
                 self.relayout(cx);
             }
+        }
+        // The production loop's runs that are due.
+        if self.clock.is_event(event).is_some() {
+            self.card_loop_tick();
         }
         // An inner loop that stopped on the outer loop's task, unreported.
         if self.clock.is_event(event).is_some() && !self.rt.pending.is_empty() {

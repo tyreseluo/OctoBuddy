@@ -37,6 +37,7 @@
 pub mod app_data;
 pub mod app_preview;
 pub mod app_publish;
+pub mod card_loop;
 pub(crate) mod native_tui;
 pub mod octosense_app;
 pub(crate) mod view;
@@ -56,6 +57,8 @@ pub const APP_PREVIEW: &str = APP_STUDIO;
 pub const APP_PUBLISH: &str = APP_STUDIO;
 /// Data for the app: a CSV or an API it is built on.
 pub const APP_DATA: &str = "app-data";
+/// The production loop: the published app watched, its breakage said.
+pub const CARD_LOOP: &str = "card-loop";
 /// An agent's own terminal UI in place of OctoBuddy's messages (off until
 /// the person turns it on: some prefer the CLI they know).
 pub const NATIVE_TUI: &str = "native-tui";
@@ -146,12 +149,22 @@ pub fn builtins() -> Vec<Plugin> {
             external: None, broken: None,
         },
         Plugin {
-            id: APP_DATA.into(), name: tr("App data", "应用数据"), version,
+            id: APP_DATA.into(), name: tr("App data", "应用数据"), version: version.clone(),
             description: tr("Builds the app on your data: a CSV embedded in it, or an API it fetches; the outer loop is told its shape.",
                 "用你的数据做应用：CSV 嵌进应用，或让应用去取一个 API；外环会拿到数据结构。"),
-            when_to_use: String::new(), applies_to: app, requires: vec![OCTOSENSE_APP.into()],
+            when_to_use: String::new(), applies_to: app.clone(), requires: vec![OCTOSENSE_APP.into()],
             tools: Vec::new(),
             buttons: vec![Button { id: "data".into(), name: tr("Data", "数据"), sub: tr("add", "添加") }],
+            external: None, broken: None,
+        },
+        Plugin {
+            id: CARD_LOOP.into(), name: tr("Production loop", "生产回路"), version,
+            description: tr("Keeps watch over the version published to the local App Hub: runs it headless every few minutes on live data, records its health in .octobuddy/card-loop/health.jsonl, and says in the session when it breaks (it does not start, script errors, its key widgets gone, a failure shown) and when it is well again.",
+                "守护发布到本地 App Hub 的那个版本：每隔几分钟用实时数据 headless 运行一次，健康记录写在 .octobuddy/card-loop/health.jsonl；坏了（起不来、脚本报错、关键控件不见、显示失败提示）和恢复时都会在会话里说。"),
+            // It watches what was published, with or without the publish slot on now.
+            when_to_use: String::new(), applies_to: app, requires: vec![OCTOSENSE_APP.into()],
+            tools: Vec::new(),
+            buttons: vec![Button { id: "loop".into(), name: tr("Live", "巡检"), sub: tr("watch", "守护") }],
             external: None, broken: None,
         },
     ]

@@ -56,7 +56,23 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
   - The agent takes it up at its next step. If it arrives just after the turn ends, it goes first in the queue instead.
   - Below the message, a receipt says whether it was taken up.
 - **Views.** Chat, the flow graph of the outer and inner loops, a timeline to replay the session, and (with the native TUI plugin) the agent's own terminal UI.
-- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
+- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, the production loop (below), and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
+
+## Production loop
+
+The plugin `card-loop` keeps watch over an app after it is published: GOSIM 2026's "production-loop agent" bounty (read its runtime signals, find a failing card, repair it, publish again). The watch part runs now; repairing and publishing again come next.
+
+- **On.** The **Live** pill of an app project turns it on. It needs the app on the local App Hub, because it watches the version published there, not the project's working copy.
+- **A run.** Every 5 minutes it runs a copy of the published version headless, on live data, as the app check does. It reads whether the app started, its script errors, the widgets on screen and a screenshot.
+- **Judged.** The first healthy run of a version is its baseline. A later run is:
+  - **down** if it did not start;
+  - **broken** if it has script errors;
+  - **degraded** if 40% of its named widgets are gone, it shows text in less than half as many widgets, or it shows a failure it did not show in its baseline ("无法获取汇率…").
+- **Said.** A change of health is a message in the session the watch was turned on from, with the reasons and the screenshot. The pill says how it is (green, red) and when it last ran.
+- **Kept.** In `<project>/.octobuddy/card-loop/`: `watch.json` (on, pace, baseline, health), `health.jsonl` (one line per run), `shots/` (the last 20).
+- **Drill.** `"drill": "offline"` in `watch.json` runs the copy with its network hosts swapped for one that never answers, as if its API were down. `"every"` (seconds, 30 or more) sets the pace. Both apply from the next run. The published copy itself is never changed.
+- **Verified** on macOS on 2026-10-02 with the published 汇率看板 (fx-board) 0.1.0. The live test `probes_a_published_app_well_and_cut_off` (ignored by default) found it healthy (25 widgets, 5.7 s a run) and degraded with its API cut off. In OctoSense, the watch was turned on and took its baseline. The offline drill was reported 29 s later with the pill red, and the recovery 30 s after that. The watch was then turned off.
+- **Not seen by it.** Failures only the real host shows, such as a permission denied in OctoSense. The shell does not share installed cards' runtime errors with other apps yet.
 
 ## Appearance
 

@@ -21,6 +21,8 @@ pub enum LoopEvent {
     /// OctoBuddy's copy of an agent's program is installed (its path), or
     /// why not. `awaited`: something could not start without it.
     AgentInstalled { name: String, result: Result<String, String>, awaited: bool },
+    /// The production loop ran a published app (`card_loop::probe`).
+    CardLoopProbed { project: String, result: Result<crate::plugins::card_loop::Probe, String> },
     /// An external plugin's button ran: what it said, for the session.
     PluginSaid { session: String, plugin: String, result: Result<String, String> },
     /// A piece of the lead's reply as it is written.

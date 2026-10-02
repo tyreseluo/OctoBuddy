@@ -113,7 +113,7 @@ pub struct Tools {
 }
 
 impl Tools {
-    fn octo(&self) -> PathBuf {
+    pub(crate) fn octo(&self) -> PathBuf {
         self.flow.join("tools/octo")
     }
 
