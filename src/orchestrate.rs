@@ -1278,6 +1278,7 @@ impl OctoBuddyView {
             let dir = model::data_dir().join("octos").join("serve");
             let profile = providers::peer_profile(&self.providers);
             providers::serve_data_dir(&dir, &profile).map_err(|err| format!("could not prepare octos: {err}"))?;
+            providers::clear_peer_profiles(&dir);
             // The profiles a loop on octos may run under, one per model.
             if let Err(err) = providers::model_profiles(&dir, &profile) {
                 log!("octobuddy: outer loop profiles: {err}");
@@ -1342,6 +1343,22 @@ impl OctoBuddyView {
         }
     }
 
+    /// The profile `peer` runs under on octos with OctoBuddy's tools in it
+    /// (`providers::peer_profile_with_tools`), when they can be: its id.
+    fn tools_profile(&mut self, peer: &str, base: &str, p: &Peer) -> Option<String> {
+        if p.reviews_for.is_some() {
+            return None;
+        }
+        let url = self.mcp.as_ref()?.inner_url(peer);
+        let shim = crate::plugins::octosense_app::bin_dir().join("octobuddy-mcp-shim.py");
+        let _ = std::fs::create_dir_all(crate::plugins::octosense_app::bin_dir());
+        if std::fs::read_to_string(&shim).ok().as_deref() != Some(providers::MCP_SHIM) {
+            std::fs::write(&shim, providers::MCP_SHIM).ok()?;
+        }
+        let dir = model::data_dir().join("octos").join("serve");
+        providers::peer_profile_with_tools(&dir, base, peer, &shim, &url).ok()
+    }
+
     /// Starts what waited for `peer` (its CLI let it go).
     pub(crate) fn start_peer_turn_now(&mut self, peer: &str, d: Delivery) {
         self.start_peer_turn(peer, d);
@@ -1390,18 +1407,25 @@ impl OctoBuddyView {
 What the person says to you after it stays between you and them.");
                     }
                 }
-                // An app's inner loop does not run the app: OctoBuddy does (for
-                // one on Claude Code, through its tools, as it works).
+                // An app's inner loop does not run the app: OctoBuddy does, for
+                // it, through its tools, as it works (on octos too: see `tools_profile`).
                 if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &p.dir) {
-                    text.push_str(if self.on_claude(peer) { crate::plugins::octosense_app::INNER_NOTE_TOOLS } else { crate::plugins::octosense_app::INNER_NOTE });
+                    let tools = self.on_claude(peer) || (self.mcp.is_some() && p.reviews_for.is_none());
+                    text.push_str(if tools { crate::plugins::octosense_app::INNER_NOTE_TOOLS } else { crate::plugins::octosense_app::INNER_NOTE });
                 }
                 text
             }
             (false, _) => later_prompt(d.from, &d.text, self.rt.pending.contains(peer)),
         };
         let opened = self.rt.opened.contains(peer);
-        // Its slice's model: the profile octos keeps for it.
-        let profile = p.model_pick.as_deref().map(|m| serde_json::json!({"profile_id": providers::model_profile_id(m)})).unwrap_or_else(|| serde_json::json!({}));
+        // Its slice's model: the profile octos keeps for it; with OctoBuddy's
+        // tools in it, a profile of its own (a reviewer reads only).
+        let base = p.model_pick.as_deref().map(providers::model_profile_id).unwrap_or_else(|| "_main".into());
+        let profile = match self.tools_profile(peer, &base, &p).filter(|_| !opened && !self.on_claude(peer)) {
+            Some(id) => serde_json::json!({"profile_id": id}),
+            None if p.model_pick.is_some() => serde_json::json!({"profile_id": base}),
+            None => serde_json::json!({}),
+        };
         let result = if self.on_claude(peer) {
             self.claude_inner_start(peer, &text)
         } else {

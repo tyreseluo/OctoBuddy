@@ -42,6 +42,11 @@ impl Server {
         json!({"mcpServers": {"octobuddy": {"type": "http", "url": format!("http://127.0.0.1:{}/mcp/{}/{}", self.port, session, self.token)}}}).to_string()
     }
 
+    /// An inner loop's own endpoint (its tools), for the shim octos runs.
+    pub fn inner_url(&self, peer: &str) -> String {
+        format!("http://127.0.0.1:{}/mcp/inner:{}/{}", self.port, peer, self.token)
+    }
+
     /// `--mcp-config` for an inner loop on Claude Code: its own tools
     /// (run its check, look at its app), outside its sandbox.
     pub fn inner_config(&self, peer: &str) -> String {
