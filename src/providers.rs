@@ -1,5 +1,6 @@
-//! The LLM providers OctoSense's AI providers app has enabled, and the octos
-//! profile the inner loop runs with because of them.
+//! The LLM providers OctoSense's AI providers app has enabled (or, on the
+//! host, OctoBuddy's own: `own_providers.rs`), and the octos profile the
+//! inner loop runs with because of them.
 //!
 //! AI providers writes the kernel's profile (`<core dir>/profiles/_main.json`,
 //! keys in the platform keychain). OctoBuddy only reads it: the settings page
@@ -34,7 +35,7 @@ pub struct ClaudeRoute {
 
 /// A family's Chat Completions endpoint: known ones by name, else the
 /// Anthropic endpoint's sibling (`…/anthropic` → `…/v1`).
-fn chat_url(family: &str, anthropic: &str) -> Option<String> {
+pub(crate) fn chat_url(family: &str, anthropic: &str) -> Option<String> {
     let known = match family {
         "zai-coding" => Some("https://api.z.ai/api/coding/paas/v4"),
         "zai" => Some("https://api.z.ai/api/paas/v4"),
@@ -47,13 +48,13 @@ fn chat_url(family: &str, anthropic: &str) -> Option<String> {
 }
 
 /// Whether `url` speaks Anthropic's Messages API (what Claude Code calls).
-fn anthropic_compatible(url: &str) -> bool {
+pub(crate) fn anthropic_compatible(url: &str) -> bool {
     url.contains("/anthropic") || url.contains("api.anthropic.com") || url.contains("api.kimi.com/coding")
 }
 
 /// A key the profile holds: itself, or a keychain marker resolved the way
 /// octos does (`security`, service `octos`, the marker's account).
-fn resolve_key(value: &str, env_name: &str) -> Option<String> {
+pub(crate) fn resolve_key(value: &str, env_name: &str) -> Option<String> {
     let Some(rest) = value.strip_prefix("keychain:") else {
         return Some(value.to_string()).filter(|v| !v.is_empty());
     };
@@ -141,6 +142,8 @@ pub struct ProviderRow {
     pub role: String,
     pub route: String,
     pub key: KeyState,
+    /// The agents that can run on it (`crate::own_providers::agents_for`).
+    pub agents: Vec<&'static str>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -148,6 +151,9 @@ pub struct Providers {
     pub profile_path: PathBuf,
     pub rows: Vec<ProviderRow>,
     pub error: Option<String>,
+    /// On the host: the providers OctoSense's AI providers has here that
+    /// OctoBuddy's own does not (what importing would add; labels).
+    pub octosense: Vec<String>,
 }
 
 impl Providers {
@@ -161,9 +167,18 @@ impl Providers {
 /// (`<OCTOSENSE_HOME>/octos-home/.octos` on a desktop); outside a shell, the
 /// same default the kernel would use.
 fn core_dir() -> Option<PathBuf> {
-    // On the host, another profile when the person names one.
-    let named = std::env::var_os("OCTOBUDDY_PROVIDERS").map(PathBuf::from).filter(|_| !crate::system::hosted());
-    named.or_else(octosense_app_peers::octos_core::core_dir).or_else(profile::default_core_dir)
+    if crate::system::hosted() {
+        return octosense_app_peers::octos_core::core_dir().or_else(profile::default_core_dir);
+    }
+    // On the host: a profile the person names, else the one chosen in
+    // Settings › AI Providers (its own, or OctoSense's).
+    if let Some(named) = std::env::var_os("OCTOBUDDY_PROVIDERS").map(PathBuf::from) {
+        return Some(named);
+    }
+    match crate::own_providers::source() {
+        crate::own_providers::Source::Own => Some(crate::own_providers::dir()),
+        crate::own_providers::Source::OctoSense => crate::own_providers::octosense_dir(),
+    }
 }
 
 /// Reads what AI providers has enabled. Never returns a key.
@@ -184,10 +199,15 @@ pub fn read() -> Providers {
                 role: if i == 0 && loaded.set.primary.is_some() { "primary".into() } else { format!("fallback {}", if loaded.set.primary.is_some() { i } else { i + 1 }) },
                 route: p.route_label.clone().or_else(|| p.route_id.clone()).unwrap_or_else(|| "official".into()),
                 key: key(&p.key_env),
+                agents: crate::own_providers::agents_for(p),
             }).collect();
-            Providers { profile_path: path, rows, error: None }
+            let octosense = if crate::system::hosted() { Vec::new() } else {
+                let own: Vec<String> = crate::own_providers::set().iter().map(octosense_llm_config::Provider::label).collect();
+                crate::own_providers::octosense_has().into_iter().filter(|l| !own.contains(l)).collect()
+            };
+            Providers { profile_path: path, rows, error: None, octosense }
         }
-        Err(err) => Providers { profile_path: path, rows: Vec::new(), error: Some(err.to_string()) },
+        Err(err) => Providers { profile_path: path, rows: Vec::new(), error: Some(err.to_string()), ..Default::default() },
     }
 }
 
@@ -209,7 +229,7 @@ pub fn peer_profile(providers: &Providers) -> PeerProfile {
         return PeerProfile {
             file: Some(providers.profile_path.clone()),
             name: LINKED_NAME.to_string(),
-            source: format!("OctoSense AI providers · {}", primary.label),
+            source: format!("{} · {}", if crate::own_providers::is_own(&providers.profile_path) { "OctoBuddy's AI providers" } else { "OctoSense AI providers" }, primary.label),
         };
     }
     let name = fallback_profile();

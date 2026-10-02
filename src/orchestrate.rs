@@ -1666,6 +1666,8 @@ It works for you now: message it, review its work, or close it.)\n"));
                 let _ = reply.send(answer);
             }
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
+            LoopEvent::ProvidersDone { job, result } => self.providers_done(job, result),
+            LoopEvent::LoginsProbed(logins) => self.logins_probed(logins),
             LoopEvent::AgentInstalled { name, result, awaited } => self.agent_installed(&name, result, awaited),
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),
             LoopEvent::FactoryReady { id, result } => self.factory_ready(id, result),
