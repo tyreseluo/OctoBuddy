@@ -209,8 +209,9 @@ impl OctoBuddyView {
                 "octobuddy_check" => match check {
                     None => Err("your slice has no check command: the lead set none".into()),
                     Some(cmd) => crate::plugins::octosense_app::ensure_check(&cmd).map(|_| {
+                        let _ = crate::plugins::octosense_app::assemble(&dir);
                         let outcome = crate::verify::run(&cmd, &dir, crate::verify::TIMEOUT);
-                        outcome.summary(&cmd)
+                        crate::plugins::octosense_app::name_parts(&dir, &outcome.summary(&cmd))
                     }),
                 },
                 other => Err(format!("no tool {other}")),

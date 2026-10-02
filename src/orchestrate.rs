@@ -2190,8 +2190,14 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
                 let touched = p.touched.get_or_insert_with(Vec::new);
                 if !touched.contains(&rel) { touched.push(rel.clone()); }
+                // A part of an app built from parts: its main.splash put together
+                // again, committed with the part (the preview and checks see it).
+                let generated = rel.starts_with("app/parts/") && rel.ends_with(".splash") && crate::plugins::octosense_app::assemble(&p.dir).is_ok();
                 let pending = self.rt.to_commit.entry(peer).or_default();
                 if !pending.contains(&rel) { pending.push(rel); }
+                if generated && !pending.iter().any(|f| f == "bundle/main.splash") {
+                    pending.push("bundle/main.splash".into());
+                }
             }
             LoopEvent::PeerAgents { peer, running } => {
                 self.rt.running_agents.insert(peer, running);
@@ -2489,12 +2495,13 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             }
             let mut passed = None;
             if let Some(cmd) = tests {
+                let _ = crate::plugins::octosense_app::assemble(&dir);
                 let outcome = match crate::plugins::octosense_app::ensure_check(&cmd) {
                     Ok(()) => crate::verify::run(&cmd, &dir, crate::verify::TIMEOUT),
                     Err(err) => crate::verify::Outcome { passed: false, status: format!("could not start: {err}"), tail: String::new() },
                 };
                 passed = Some(outcome.passed);
-                verdict.push(outcome.summary(&cmd));
+                verdict.push(crate::plugins::octosense_app::name_parts(&dir, &outcome.summary(&cmd)));
             }
             // No `Commit:` line: its files go in when its check passed.
             if let Some(message) = auto {
