@@ -217,9 +217,11 @@ const SELF_FIX: u32 = 2;
 fn check_hints(output: &str) -> String {
     let mut out = Vec::new();
     if output.contains("not found in tree") {
-        out.push("`widget 'x' not found in tree`: `ui.x` reaches a widget only when it and every container above it, up to \
-the root, are named with `:=` (a `:=` id is a field of its direct parent only). Check every `ui.` reference in the file at \
-once (`grep -n 'ui\\.' bundle/main.splash`) against the names of its parents, not only the one reported.");
+        out.push("`widget 'x' not found in tree`: `ui.x` finds a widget anywhere in the tree once it exists, so `x` did not \
+exist when that line ran: it is made inside an `on_render` container that has not rendered yet (such a container is empty \
+until its first `.render()`: render it first, in boot(), or set the value inside its render), or the id is misspelled \
+or not declared with `:=`. Check every `ui.` reference in the file at once (`grep -n 'ui\\.' bundle/main.splash`), not \
+only the one reported. See .octobuddy/docs/SPLASH-COOKBOOK.md §2.");
     }
     if output.contains("on_render closure failed") || output.contains("callback error") {
         out.push("A closure raised while it ran (often an index past the end, a nil field, or a value of the wrong type): \
