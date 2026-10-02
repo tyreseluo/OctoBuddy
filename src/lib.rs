@@ -1331,6 +1331,16 @@ script_mod! {
                                     time_events_title := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9}}
                                     time_events := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                                 }
+                                // What was done again, and why: for finding where the loops lose time.
+                                RoundedView{
+                                    width: Fill height: Fill flow: Down spacing: 5 new_batch: true padding: 10
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                    time_rework_title := Label{text: "" padding: 0 draw_text.color: th_warning draw_text.text_style: theme.font_bold{font_size: 9}}
+                                    ScrollYView{
+                                        width: Fill height: Fill
+                                        time_rework := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                    }
+                                }
                                 RoundedView{
                                     width: Fill height: Fill flow: Down spacing: 5 new_batch: true padding: 10
                                     draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
