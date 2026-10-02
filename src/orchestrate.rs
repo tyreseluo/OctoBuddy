@@ -1892,18 +1892,20 @@ It works for you now: message it, review its work, or close it.)\n"));
                     }
                 }
             }
-            // The outer loop tries Splash: off the UI thread (a headless run takes seconds).
-            LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_app_probe" && !session.starts_with("inner:") => {
+            // The outer loop tries Splash, or drives its app: off the UI thread (a headless run takes seconds).
+            LoopEvent::McpCall { session, name, args, reply } if matches!(name.as_str(), "octobuddy_app_probe" | "octobuddy_app_drive") && !session.starts_with("inner:") => {
                 let Some(dir) = self.store.find_session(&session).map(|at| self.store.projects[at.0].path.clone()) else {
                     let _ = reply.send(Err("no such session".into()));
                     return;
                 };
                 let source = args.get("source").and_then(|s| s.as_str()).unwrap_or("").to_string();
                 std::thread::spawn(move || {
-                    let answer = if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) {
-                        crate::plugins::octosense_app::probe(&dir, &source)
-                    } else {
+                    let answer = if !crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) {
                         Err("this project is not an OctoSense app".into())
+                    } else if name == "octobuddy_app_drive" {
+                        crate::plugins::octosense_app::drive(&dir, args.get("steps").unwrap_or(&serde_json::Value::Null))
+                    } else {
+                        crate::plugins::octosense_app::probe(&dir, &source)
                     };
                     let _ = reply.send(answer);
                 });

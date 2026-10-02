@@ -30,7 +30,9 @@ sandbox, so do not look for them or install them: OctoBuddy runs the app for you
 .octobuddy/shots/, which you can read) and the widgets on screen (type, id, text: what a test finds them by). \
 `octobuddy_check` runs your slice's own check command, the one OctoBuddy runs when you finish, and gives you its \
 output. `octobuddy_app_probe` runs a few lines of Splash of your own (a whole small main.splash) and gives you its \
-errors and widgets: when unsure how Splash behaves, try it there, in seconds, rather than guess or read sources. Use them as you work: after each meaningful change, look; before you report, run your check until it \
+errors and widgets: when unsure how Splash behaves, try it there, in seconds, rather than guess or read sources. \
+`octobuddy_app_drive` runs the app and does what a person would (click a widget by id or text, type, a key, wait, \
+look): verify a flow by doing it (add an entry, delete it, switch a tab) instead of writing a test script for it. Use them as you work: after each meaningful change, look; before you report, run your check until it \
 passes. Start with .octobuddy/docs/SPLASH-COOKBOOK.md: OctoBuddy's verified patterns for what an app needs (pages, \
 lists, forms, storage, dates, money, bars, gotchas and the errors they give). Read .octobuddy/docs/SCRIPT-API.md \
 only for what it lacks, and other apps' sources not at all unless both lack it. When the project has \
@@ -45,12 +47,12 @@ url = os.environ.get("OCTOBUDDY_MCP_URL")
 if not url:
     print("OCTOBUDDY_MCP_URL is not set: OctoBuddy did not start this agent with its tools")
     sys.exit(2)
-names = {"look": "octobuddy_app_look", "check": "octobuddy_check", "probe": "octobuddy_app_probe"}
+names = {"look": "octobuddy_app_look", "check": "octobuddy_check", "probe": "octobuddy_app_probe", "drive": "octobuddy_app_drive"}
 cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-if cmd not in names or (cmd == "probe" and len(sys.argv) < 3):
-    print("usage: octobuddy-app look | check | probe <file.splash>")
+if cmd not in names or (cmd in ("probe", "drive") and len(sys.argv) < 3):
+    print("usage: octobuddy-app look | check | probe <file.splash> | drive <steps.json>")
     sys.exit(2)
-args = {"source": open(sys.argv[2]).read()} if cmd == "probe" else {}
+args = {"source": open(sys.argv[2]).read()} if cmd == "probe" else {"steps": json.load(open(sys.argv[2]))} if cmd == "drive" else {}
 req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": names[cmd], "arguments": args}}
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 r = opener.open(urllib.request.Request(url, data=json.dumps(req).encode(), headers={"Content-Type": "application/json", "Accept": "application/json"}), timeout=660)
@@ -81,7 +83,9 @@ shell, so do not look for them or install them: OctoBuddy runs the app for you, 
 .octobuddy/shots/, which you can read) and the widgets on screen. `octobuddy-app check` runs your slice's own check, \
 the one OctoBuddy runs when you finish. `octobuddy-app probe <file>` runs a small Splash program of yours (a whole \
 main.splash, in a file of your own outside bundle/) and prints its errors and widgets: when unsure how Splash \
-behaves, try it there, in seconds. Look after each meaningful change; run your check until it passes before you \
+behaves, try it there, in seconds. `octobuddy-app drive <steps.json>` runs the app and does what a person would \
+(a JSON list of {\"click\": \"<widget id or text>\"}, {\"type\": \"<text>\"}, {\"key\": \"Return\"}, {\"wait\": 1}, {\"look\": true}): \
+verify a flow by doing it, then read what each step did and what is on screen. Look after each meaningful change; run your check until it passes before you \
 report. Start with .octobuddy/docs/SPLASH-COOKBOOK.md (verified patterns and gotchas); SCRIPT-API.md only for what it \
 lacks. When the project has app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated \
 from them (never edit it).";
@@ -116,6 +120,40 @@ pub fn probe(project: &str, source: &str) -> Result<String, String> {
     let out = std::fs::write(copy.join("main.splash"), source).map_err(|e| e.to_string()).and_then(|_| look_at(project, &copy, "probe-"));
     let _ = std::fs::remove_dir_all(&work);
     out
+}
+
+/// The app driven as a person would (`app_drive.py`): it runs headless, the
+/// steps are done (click a widget by id or text, type, a key, wait, look),
+/// and what each did, its script errors and what is on screen come back,
+/// with a screenshot. A flow is verified in seconds, by doing it.
+pub const APP_DRIVE: &str = include_str!("app_drive.py");
+
+pub fn drive(project: &str, steps: &serde_json::Value) -> Result<String, String> {
+    let steps = steps.as_array().filter(|s| !s.is_empty()).ok_or("give `steps`: a list of {click|type|key|wait|look}")?;
+    let tools = tools()?;
+    assemble(project)?;
+    let script = bin_dir().join("octobuddy-app-drive.py");
+    let _ = std::fs::create_dir_all(bin_dir());
+    if std::fs::read_to_string(&script).ok().as_deref() != Some(APP_DRIVE) {
+        std::fs::write(&script, APP_DRIVE).map_err(|e| e.to_string())?;
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let steps_file = std::env::temp_dir().join(format!("octobuddy-drive-{stamp}.json"));
+    std::fs::write(&steps_file, serde_json::Value::Array(steps.clone()).to_string()).map_err(|e| e.to_string())?;
+    let shots = Path::new(project).join(".octobuddy/shots");
+    std::fs::create_dir_all(&shots).map_err(|e| e.to_string())?;
+    let shot = shots.join(format!("drive-{}.png", stamp / 1_000_000_000));
+    let mut cmd = Command::new("python3");
+    cmd.arg(&script).arg(bundle(project)).arg(tools.octo()).arg(&shot).arg(&steps_file).env("PATH", crate::workspace::search_path());
+    if let Some(hub) = &tools.app_hub {
+        cmd.env("OCTOSENSE_APP_HUB", hub);
+    }
+    let out = cmd.output().map_err(|e| format!("could not drive the app: {e}"));
+    let _ = std::fs::remove_file(&steps_file);
+    let out = out?;
+    let text = name_parts(project, &format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)));
+    let rel = shot.strip_prefix(project).map(|p| p.display().to_string()).unwrap_or_else(|_| shot.display().to_string());
+    Ok(if shot.is_file() { format!("{}\nscreenshot: {rel}", text.trim()) } else { text.trim().to_string() })
 }
 
 fn look_at(project: &str, bundle: &Path, prefix: &str) -> Result<String, String> {
@@ -154,6 +192,8 @@ fi
 # Its first data comes in (a fetch, a timer) before it is looked at.
 sleep 4
 python3 "$octo" shot "$port" "$shot" > /dev/null 2>&1
+# Smaller for the agent that reads it (fewer tokens, the same widgets).
+command -v sips > /dev/null && [ -f "$shot" ] && sips -Z 1280 "$shot" > /dev/null 2>&1
 curl -s -m 5 "http://127.0.0.1:$port/snap" > "$work/snap.json"
 curl -s -m 5 "http://127.0.0.1:$port/quit" > /dev/null 2>&1
 sleep 1
@@ -586,7 +626,7 @@ mod parts_tests {
     /// a string literal broke two of them once).
     #[test]
     fn its_python_scripts_parse() {
-        for (name, source) in [("octobuddy-app", APP_CLI), ("octobuddy-mcp-shim", crate::providers::MCP_SHIM)] {
+        for (name, source) in [("octobuddy-app", APP_CLI), ("octobuddy-mcp-shim", crate::providers::MCP_SHIM), ("octobuddy-app-drive", APP_DRIVE)] {
             let mut child = Command::new("python3").args(["-c", "import ast, sys; ast.parse(sys.stdin.read())"])
                 .stdin(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
             use std::io::Write;
@@ -632,6 +672,20 @@ mod probe_tests {
         assert!(out.contains("missing"), "its error comes back: {out}");
         assert!(out.contains("hi"), "and its widgets: {out}");
         assert!(started.elapsed().as_secs() < 30);
+    }
+
+    /// The new app driven: two taps on Add, its count says so.
+    #[test]
+    #[ignore]
+    fn an_app_is_driven_as_a_person_would() {
+        let dir = std::env::temp_dir().join(format!("octobuddy-drive-app-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        super::create(&dir).unwrap();
+        let out = super::drive(&dir.to_string_lossy(), &serde_json::json!([{"click": "home_add_btn"}, {"click": "Add"}, {"look": true}])).unwrap();
+        eprintln!("{out}");
+        assert!(out.contains("1. click 'home_add_btn'") && out.contains("2 items"), "{out}");
+        assert!(out.contains("== script errors\n(none)"), "{out}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// A new app (its parts put together) runs with no script errors.

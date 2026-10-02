@@ -143,8 +143,15 @@ fn inner_tools() -> Value {
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "octobuddy_app_look", "description": "For an OctoSense app: run it headless now and get its script errors, a screenshot (a PNG under .octobuddy/shots/ you can read) and the widgets on screen (type, id, text), the way a test finds them.",
          "inputSchema": {"type": "object", "properties": {}}},
-        probe_tool()
+        probe_tool(),
+        drive_tool()
     ])
+}
+
+/// The app driven as a person would (outer and inner loops alike).
+fn drive_tool() -> Value {
+    json!({"name": "octobuddy_app_drive", "description": "For an OctoSense app: run it headless and do what a person would, step by step, then get what each step did, its script errors and the widgets on screen (and a screenshot). Verify a flow by doing it (add an entry, delete it, switch a tab) instead of writing a test script or a probe driver.",
+        "inputSchema": {"type": "object", "required": ["steps"], "properties": {"steps": {"type": "array", "description": "in order: {\"click\": \"<widget id or its text>\"}, {\"type\": \"<text into the focused input>\"}, {\"key\": \"Return\"}, {\"wait\": <seconds>}, {\"look\": true}", "items": {"type": "object"}}}}})
 }
 
 /// Splash tried at once (outer and inner loops alike).
@@ -185,6 +192,7 @@ fn tools() -> Value {
         {"name": "octobuddy_status", "description": "What each inner loop of this session does now, what waits for it, its estimate against the steps it took, the models.",
          "inputSchema": {"type": "object", "properties": {}}},
         probe_tool(),
+        drive_tool(),
         {"name": "octobuddy_learn", "description": "Keep a lesson OctoBuddy's later runs start from (every project): topic splash for how Splash and the app runtime behave (verify it with octobuddy_app_probe first), orchestration for how to plan, split and pick agents and models. Say it as a rule an agent can follow; evidence is what showed it.",
          "inputSchema": {"type": "object", "required": ["topic", "lesson", "evidence"], "properties": {
             "topic": {"type": "string", "enum": ["splash", "orchestration"]}, "lesson": {"type": "string"}, "evidence": {"type": "string"}}}}
@@ -202,17 +210,20 @@ impl OctoBuddyView {
         };
         let (name, dir, check) = (name.to_string(), p.dir.clone(), p.check.clone());
         let source = args.get("source").and_then(Value::as_str).unwrap_or("").to_string();
+        let steps = args.get("steps").cloned().unwrap_or(Value::Null);
         if let Some(q) = self.store.peer_mut(peer) {
             q.activity = Some(match name.as_str() {
                 "octobuddy_app_look" => crate::i18n::t("OctoBuddy runs its app for it", "OctoBuddy 在替它运行应用").into(),
                 "octobuddy_app_probe" => crate::i18n::t("OctoBuddy tries its Splash for it", "OctoBuddy 在替它试运行一段 Splash").into(),
+                "octobuddy_app_drive" => crate::i18n::t("OctoBuddy drives its app for it", "OctoBuddy 在替它操作应用").into(),
                 _ => crate::i18n::t("OctoBuddy runs its check for it", "OctoBuddy 在替它跑检查").into(),
             });
         }
         std::thread::spawn(move || {
             let answer = match name.as_str() {
                 "octobuddy_app_look" if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) => crate::plugins::octosense_app::look(&dir),
-                "octobuddy_app_look" | "octobuddy_app_probe" if !crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) => Err("this project is not an OctoSense app (or its plugin is switched off in Settings › Plugins)".into()),
+                "octobuddy_app_look" | "octobuddy_app_probe" | "octobuddy_app_drive" if !crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) => Err("this project is not an OctoSense app (or its plugin is switched off in Settings › Plugins)".into()),
+                "octobuddy_app_drive" => crate::plugins::octosense_app::drive(&dir, &steps),
                 "octobuddy_app_probe" => crate::plugins::octosense_app::probe(&dir, &source),
                 "octobuddy_check" => match check {
                     None => Err("your slice has no check command: the lead set none".into()),
@@ -307,7 +318,7 @@ mod tests {
         assert!(answer(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}), "s", &inbox).is_none(), "a notification gets no answer");
         let tools = answer(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}), "s", &inbox).unwrap();
         let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_learn"]);
+        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_app_drive", "octobuddy_learn"]);
 
         let server = Server::start(&inbox).unwrap();
         let config: Value = serde_json::from_str(&server.config("s1")).unwrap();
