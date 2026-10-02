@@ -219,11 +219,13 @@ const SELF_FIX: u32 = 2;
 fn check_hints(output: &str) -> String {
     let mut out = Vec::new();
     if output.contains("not found in tree") {
-        out.push("`widget 'x' not found in tree`: `ui.x` finds a widget anywhere in the tree once it exists, so `x` did not \
-exist when that line ran: it is made inside an `on_render` container that has not rendered yet (such a container is empty \
-until its first `.render()`: render it first, in boot(), or set the value inside its render), or the id is misspelled \
-or not declared with `:=`. Check every `ui.` reference in the file at once (`grep -n 'ui\\.' bundle/main.splash`), not \
-only the one reported. See .octobuddy/docs/SPLASH-COOKBOOK.md §2.");
+        out.push("`widget 'x' not found in tree`: `ui.x` finds a widget anywhere in the tree once it exists, so `x` is not \
+there under that name when that line runs. The causes seen: the dotted `draw_text.text_style +: {…}` in a widget literal \
+renames that widget and its nearest named ancestor to `text_style` (write `draw_text.text_style.font_size: N`; \
+`grep -n 'text_style +:' bundle/main.splash`); it is made inside an `on_render` container that has not rendered yet \
+(empty until its first `.render()`: render it in boot()); the id is misspelled or not declared with `:=`. Check every \
+`ui.` reference at once, not only the one reported; when unsure, reproduce it with octobuddy_app_probe. See \
+.octobuddy/docs/SPLASH-COOKBOOK.md §2 and its learned lessons.");
     }
     if output.contains("on_render closure failed") || output.contains("callback error") {
         out.push("A closure raised while it ran (often an index past the end, a nil field, or a value of the wrong type): \
