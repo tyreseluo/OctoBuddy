@@ -35,8 +35,8 @@ impl OctoBuddyView {
         };
         self.view.label(cx, ids!(time_summary)).set_text(cx, &summary);
         self.view.label(cx, ids!(time_legend)).set_text(cx, i18n::t(
-            "Blue: outer · green: inner · purple: reviewer · red: failed · line down: outer sends work · line up: a report · yellow dot: you · green diamond: commit · orange triangle: rework · outlined faint bar: done again later · hatched lane: history · grey band: idle, squeezed · wheel: zoom · double-click a turn: open it",
-            "蓝：outer · 绿：inner · 紫：审查者 · 红：失败 · 向下的线：outer 派任务 · 向上的线：汇报 · 黄点：你的消息 · 绿菱形：提交 · 橙三角：返工 · 描边的淡色段：后来重做了 · 斜纹 lane：历史 · 灰带：压缩的空闲 · 滚轮缩放 · 双击一段在对话中打开"));
+            "Blue: outer · green: inner · purple: reviewer · red: failed · line down: outer sends work (from the turn that sent it to the turn that took it up) · line up: a report (from the turn that wrote it to the turn that read it; a curve says how long it waited) · yellow dot: you · green diamond: commit · orange ring: rework · outlined faint bar: done again later · hatched lane: history · grey band: idle, squeezed · wheel: zoom · double-click a turn: open it",
+            "蓝：outer · 绿：inner · 紫：审查者 · 红：失败 · 向下的线：outer 派任务（从发出它的那一轮到 inner 开始做的那一轮）· 向上的线：汇报（从写它的那一轮到读它的那一轮，曲线上标着等了多久） · 黄点：你的消息 · 绿菱形：提交 · 橙色圆环：返工 · 描边的淡色段：后来重做了 · 斜纹 lane：历史 · 灰带：压缩的空闲 · 滚轮缩放 · 双击一段在对话中打开"));
         self.view.label(cx, ids!(time_rework_title)).set_text(cx, &i18n::pick(format!("Rework and repeats ({})", tl.rework.len()), format!("返工与重复（{}）", tl.rework.len())));
         let lines = tl.rework_lines();
         self.view.label(cx, ids!(time_rework)).set_text(cx, &if lines.is_empty() {

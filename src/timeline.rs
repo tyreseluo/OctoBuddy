@@ -112,6 +112,10 @@ pub struct Mark {
     pub at: f64,
     pub kind: MarkKind,
     pub text: String,
+    /// Where it lands on `to`: the turn there that took it up (work down:
+    /// the inner turn's start; a report up: the outer turn that read it).
+    /// None: not taken up yet. Its line joins the two turns, its wait shown.
+    pub until: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -166,16 +170,19 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
         let mut turn: Vec<usize> = Vec::new();
         let (mut cause, mut pending_cause): (Option<usize>, Option<usize>) = (None, None);
         let mut n = 0;
-        let mut close = |tl: &mut Timeline, turn: &mut Vec<usize>, cause: Option<usize>, open: bool| {
+        // `cut`: the turn ended there without finishing (OctoBuddy restarted,
+        // the person stopped it): drawn up to then, as interrupted.
+        let mut close = |tl: &mut Timeline, turn: &mut Vec<usize>, cause: Option<usize>, open: bool, cut: Option<f64>| {
             let (Some(&a), Some(&z)) = (turn.first(), turn.last()) else { return };
             n += 1;
             let last = &msgs[z];
             let start = last.started.map(rel).unwrap_or_else(|| rel(msgs[a].at));
-            let end = match (last.took, last.started) {
-                (Some(t), Some(_)) => start + t as f64,
-                (Some(t), None) => (start + t as f64).max(rel(last.at)),
-                (None, _) if open => now_rel,
-                (None, _) => rel(last.at) + 1.0,
+            let end = match (last.took, last.started, cut) {
+                (None, _, Some(cut)) => cut.max(start + 1.0),
+                (Some(t), Some(_), _) => start + t as f64,
+                (Some(t), None, _) => (start + t as f64).max(rel(last.at)),
+                (None, _, _) if open => now_rel,
+                (None, _, _) => rel(last.at) + 1.0,
             };
             let steps: Vec<_> = turn.iter().filter_map(|&i| msgs[i].steps.as_ref()).flatten().collect();
             let (from, input) = match cause.map(|c| &msgs[c]) {
@@ -186,7 +193,8 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
             };
             let reply: String = turn.iter().map(|&i| msgs[i].text.as_str()).collect::<Vec<_>>().join("\n").chars().take(400).collect();
             tl.spans.push(Span {
-                lane: 0, start, end: end.max(start + 1.0), open, turn: n, from: from.into(), outcome: String::new(),
+                lane: 0, start, end: end.max(start + 1.0), open: open && cut.is_none(), turn: n, from: from.into(),
+                outcome: if cut.is_some() && last.took.is_none() { "interrupted".into() } else { String::new() },
                 steps: steps.len(), failed: steps.iter().filter(|s| s.status == "failed").count(), cost: last.cost,
                 input, reply, message: Some(z), redone: false,
             });
@@ -200,25 +208,29 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
                     }
                     turn.push(i);
                     if m.took.is_some() {
-                        close(&mut tl, &mut turn, cause, false);
+                        close(&mut tl, &mut turn, cause, false, None);
                     }
                 }
                 Role::User => {
                     pending_cause = Some(i);
-                    tl.marks.push(Mark { lane: 0, to: None, at: rel(m.at), kind: MarkKind::Person, text: first_line(&m.text, 120) });
+                    tl.marks.push(Mark { lane: 0, to: None, at: rel(m.at), kind: MarkKind::Person, text: first_line(&m.text, 120), until: None });
                 }
                 Role::Peer => {
                     pending_cause = pending_cause.or(Some(i));
                     if let Some(lane) = lane_of(&m.author) {
-                        tl.marks.push(Mark { lane, to: Some(0), at: rel(m.at), kind: MarkKind::Report, text: first_line(&m.text, 120) });
+                        tl.marks.push(Mark { lane, to: Some(0), at: rel(m.at), kind: MarkKind::Report, text: first_line(&m.text, 120), until: None });
                     }
+                }
+                // A restart or a stop ends the turn under way there.
+                Role::System if cut_off(&m.text) && !turn.is_empty() => {
+                    close(&mut tl, &mut turn, cause, false, Some(rel(m.at)));
                 }
                 Role::System => pending_cause = pending_cause.or(Some(i)),
                 _ => {}
             }
         }
         if !turn.is_empty() {
-            close(&mut tl, &mut turn, cause, outer_busy);
+            close(&mut tl, &mut turn, cause, outer_busy, None);
         }
     }
 
@@ -248,11 +260,12 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
             let from = match e.from.as_str() { "lead" => "outer", "person" => "you", "subagents" => "itself", other => other };
             let reply = e.reply.clone().unwrap_or_default();
             if let Some(message) = has_commit(&reply).filter(|_| e.outcome.as_deref() == Some("completed")) {
-                tl.marks.push(Mark { lane, to: None, at: end, kind: MarkKind::Commit, text: message });
+                tl.marks.push(Mark { lane, to: None, at: end, kind: MarkKind::Commit, text: message, until: None });
             }
             match from {
-                "outer" if !detached => tl.marks.push(Mark { lane: 0, to: Some(lane), at: start, kind: MarkKind::Dispatch, text: first_line(&e.input, 120) }),
-                "you" => tl.marks.push(Mark { lane, to: None, at: start, kind: MarkKind::Person, text: first_line(&e.input, 120) }),
+                // Sent when OctoBuddy handed it over; taken up when the turn began.
+                "outer" if !detached => tl.marks.push(Mark { lane: 0, to: Some(lane), at: rel(e.at).min(start), kind: MarkKind::Dispatch, text: first_line(&e.input, 120), until: Some(start) }),
+                "you" => tl.marks.push(Mark { lane, to: None, at: start, kind: MarkKind::Person, text: first_line(&e.input, 120), until: None }),
                 _ => {}
             }
             tl.spans.push(Span {
@@ -276,11 +289,59 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
     if rounds.len() > 1 {
         tl.rounds = rounds;
     }
+    if !detached {
+        join_marks(&mut tl);
+    }
     rework(&mut tl, &peers, base, &rel);
     tl.marks.sort_by(|a, b| a.at.total_cmp(&b.at));
     let open = tl.spans.iter().any(|s| s.open);
     tl.end = tl.spans.iter().map(|s| s.end).chain(tl.marks.iter().map(|m| m.at)).fold(if open { now_rel } else { 0.0 }, f64::max).max(1.0);
     tl
+}
+
+/// A message that says the outer loop's turn was cut off there.
+fn cut_off(text: &str) -> bool {
+    ["OctoBuddy restarted", "OctoBuddy 已重启", "Stopped by the person", "已由你停止"].iter().any(|s| text.starts_with(s))
+}
+
+/// Each line between the outer loop and an inner one, joined to the turns
+/// at both its ends, so neither end points at a lane where nothing ran.
+/// Work down leaves the outer turn that sent it (the one running then, or
+/// the last before: OctoBuddy may hold it for a wave or a slot) and lands
+/// where the inner turn began. A report leaves the end of the inner turn
+/// that wrote it and lands where the outer turn that read it began (the
+/// first after it; none yet: it waits).
+fn join_marks(tl: &mut Timeline) {
+    let outer: Vec<(f64, f64)> = tl.spans.iter().filter(|s| s.lane == 0).map(|s| (s.start, s.end)).collect();
+    let lane_spans = |lane: usize| -> Vec<(f64, f64)> { tl.spans.iter().filter(|s| s.lane == lane).map(|s| (s.start, s.end)).collect() };
+    let mut joined = Vec::with_capacity(tl.marks.len());
+    for m in &tl.marks {
+        let mut m = m.clone();
+        match (m.kind, m.to) {
+            (MarkKind::Dispatch, Some(_)) => {
+                let (sent, lands) = (m.at, m.until.unwrap_or(m.at));
+                // The outer turn it came from: running when it was sent, or the last before.
+                let from = outer.iter().find(|(a, b)| *a <= sent + 0.5 && sent <= *b + 0.5).map(|_| sent)
+                    .or_else(|| outer.iter().filter(|(_, b)| *b <= sent).map(|(_, b)| *b).fold(None, |acc: Option<f64>, b| Some(acc.map_or(b, |a: f64| a.max(b)))))
+                    .unwrap_or(sent);
+                m.at = from.min(lands);
+                m.until = Some(lands);
+            }
+            (MarkKind::Report, Some(_)) => {
+                let said = m.at;
+                // The inner turn that wrote it: the last one ended by then.
+                let wrote = lane_spans(m.lane).into_iter().filter(|(_, b)| *b <= said + 1.0).map(|(_, b)| b)
+                    .fold(None, |acc: Option<f64>, b| Some(acc.map_or(b, |a: f64| a.max(b))));
+                m.at = wrote.unwrap_or(said);
+                // The outer turn that read it: the first to begin after it was said.
+                m.until = outer.iter().map(|(a, _)| *a).filter(|a| *a >= said - 1.0)
+                    .fold(None, |acc: Option<f64>, a| Some(acc.map_or(a, |x: f64| x.min(a))));
+            }
+            _ => {}
+        }
+        joined.push(m);
+    }
+    tl.marks = joined;
 }
 
 /// Why `p`'s work did not stand: closed unaccepted (replaced by a later
@@ -354,7 +415,7 @@ fn rework(tl: &mut Timeline, peers: &[&Peer], base: usize, rel: &dyn Fn(u64) -> 
                 tl.spans[i].redone = true;
             }
             let at = rel(e.began.unwrap_or(e.at));
-            tl.marks.push(Mark { lane, to: None, at, kind: MarkKind::Rework, text: why.clone() });
+            tl.marks.push(Mark { lane, to: None, at, kind: MarkKind::Rework, text: why.clone(), until: None });
             found.push(Rework { lane, at, kind, why, lost });
         }
         // Closed unaccepted: the whole lane is history.
@@ -971,12 +1032,15 @@ impl Widget for TimelineCanvas {
                 texts.push((dvec2(xa + 2.0, rect.pos.y + 16.0), format!("≈{}", span_len(r1 - r0)), 7.0, rgb(crate::theme::hex("faint"), 1.0)));
             }
         }
-        // Rounds: a dashed line where each began.
+        // Rounds: a dashed line where each began (a label each, unless the
+        // last one is too near to read).
+        let mut last_label = f64::MIN;
         for (at, round) in self.tl.rounds.clone() {
             let x = self.x(self.axis.vis(at));
             if x < x0 || x > x1 {
                 continue;
             }
+            let labelled = x - last_label > 56.0;
             let mut y = rect.pos.y + AXIS_H;
             while y < bottom {
                 self.draw_vector.set_color_hex(crate::theme::hex("purple"), 0.5);
@@ -985,7 +1049,10 @@ impl Widget for TimelineCanvas {
                 y += 7.0;
             }
             // At the line's foot: the axis's top is the playhead's.
-            texts.push((dvec2(x + 3.0, bottom - 12.0), i18n::pick(format!("round {round}"), format!("第 {round} 轮")), 7.0, rgb(crate::theme::hex("purple"), 1.0)));
+            if labelled {
+                last_label = x;
+                texts.push((dvec2(x + 3.0, bottom - 12.0), i18n::pick(format!("round {round}"), format!("第 {round} 轮")), 7.0, rgb(crate::theme::hex("purple"), 1.0)));
+            }
         }
         // The turns: solid up to the playhead, faint after.
         let tip_rect = self.hover.and_then(|h| self.tl.spans.get(h)).map(|_| Rect::default());
@@ -1032,7 +1099,11 @@ impl Widget for TimelineCanvas {
         // Between the lanes: work down, reports up; the person; commits.
         for m in self.tl.marks.clone() {
             let x = self.x(self.axis.vis(m.at));
-            if x < x0 - 1.0 || x > x1 + 1.0 {
+            // A line between two lanes is drawn when either end shows.
+            let xb = m.until.map(|u| self.x(self.axis.vis(u))).unwrap_or(x);
+            let joins = matches!(m.kind, MarkKind::Dispatch | MarkKind::Report) && m.to.is_some();
+            let off = |x: f64| x < x0 - 1.0 || x > x1 + 1.0;
+            if if joins { off(x) && off(xb) && (x < x0) == (xb < x0) } else { off(x) } {
                 continue;
             }
             let alpha = if m.at <= now + 0.01 { 1.0 } else { 0.18 };
@@ -1040,22 +1111,63 @@ impl Widget for TimelineCanvas {
             match (m.kind, m.to) {
                 (MarkKind::Dispatch | MarkKind::Report, Some(to)) => {
                     let color = if m.kind == MarkKind::Dispatch { crate::theme::hex("accent") } else { crate::theme::hex("purple") };
-                    let (ya, yb) = (mid(m.lane), mid(to));
-                    let dir = if yb > ya { 1.0 } else { -1.0 };
-                    let (ya, yb) = (ya + dir * 7.0, yb - dir * 9.0);
+                    // From the edge of the bar it leaves to the edge of the bar it
+                    // lands on: the bars' tops and bottoms, as `bar` places them.
+                    let h = (lane_h - 10.0).clamp(10.0, 18.0);
+                    let edge = |lane: usize, low: bool| self.lane_y(lane) + (lane_h - h) * 0.5 + if low { h } else { 0.0 };
+                    let down = self.lane_y(to) > self.lane_y(m.lane);
+                    let (ya, yb) = (edge(m.lane, down), edge(to, !down));
+                    let dir = if down { 1.0 } else { -1.0 };
+                    let _ = mid;
                     // Both ends scrolled out on the same side: nothing shows.
                     if (ya < top && yb < top) || (ya > bottom && yb > bottom) {
                         continue;
                     }
+                    // Not taken up yet: a dashed line to where it waits.
+                    let waiting = m.until.is_none();
+                    // Landed after the playhead: on its way.
+                    let alpha = match m.until { Some(u) if u > now + 0.01 && m.at <= now + 0.01 => 0.5, _ => alpha };
+                    // An S from one end to the other (straight down when they meet).
+                    let pts: Vec<(f64, f64)> = (0..=18).map(|i| {
+                        let t = i as f64 / 18.0;
+                        let (c1, c2) = ((x, ya + (yb - ya) * 0.55), (xb, ya + (yb - ya) * 0.45));
+                        let u = 1.0 - t;
+                        let px = u * u * u * x + 3.0 * u * u * t * c1.0 + 3.0 * u * t * t * c2.0 + t * t * t * xb;
+                        let py = u * u * u * ya + 3.0 * u * u * t * c1.1 + 3.0 * u * t * t * c2.1 + t * t * t * (yb - dir * 4.0);
+                        (px, py)
+                    }).collect();
                     self.draw_vector.set_color_hex(color, alpha * 0.85);
-                    self.draw_vector.move_to(x as f32, ya as f32);
-                    self.draw_vector.line_to(x as f32, yb as f32);
-                    self.draw_vector.stroke(1.2);
-                    self.draw_vector.move_to(x as f32, (yb + dir * 4.0) as f32);
-                    self.draw_vector.line_to((x - 3.5) as f32, (yb - dir * 1.0) as f32);
-                    self.draw_vector.line_to((x + 3.5) as f32, (yb - dir * 1.0) as f32);
+                    for (k, w) in pts.windows(2).enumerate() {
+                        if waiting && k % 2 == 1 {
+                            continue;
+                        }
+                        self.draw_vector.move_to(w[0].0 as f32, w[0].1 as f32);
+                        self.draw_vector.line_to(w[1].0 as f32, w[1].1 as f32);
+                        self.draw_vector.stroke(1.2);
+                    }
+                    // Its head, on the bar it lands on.
+                    self.draw_vector.move_to(xb as f32, yb as f32);
+                    self.draw_vector.line_to((xb - 3.5) as f32, (yb - dir * 5.0) as f32);
+                    self.draw_vector.line_to((xb + 3.5) as f32, (yb - dir * 5.0) as f32);
                     self.draw_vector.close();
                     self.draw_vector.fill();
+                    // How long it waited, between its ends, when that shows.
+                    let wait = m.until.map(|u| u - m.at).unwrap_or(0.0);
+                    let label = if waiting {
+                        Some(i18n::t("waits for the outer loop", "等外环处理").to_string())
+                    } else if wait >= 20.0 && (xb - x).abs() > 46.0 {
+                        Some(i18n::pick(format!("waited {}", span_len(wait)), format!("等了 {}", span_len(wait))))
+                    } else {
+                        None
+                    };
+                    if let Some(label) = label {
+                        // Inside the plot, its right end too.
+                        let w = self.text_w(cx, &label, 7.0);
+                        let (lx, ly) = (((x + xb) * 0.5 + 4.0).min(x1 - w - 6.0).max(x0 + 2.0), (ya + yb) * 0.5 - 5.0);
+                        if ly > top && ly < bottom {
+                            texts.push((dvec2(lx, ly), label, 7.0, rgb(color, 0.9 * alpha as f32)));
+                        }
+                    }
                 }
                 (MarkKind::Person, _) if self.lane_visible(m.lane) => {
                     let y = self.lane_y(m.lane) + 4.0;
@@ -1064,14 +1176,13 @@ impl Widget for TimelineCanvas {
                     self.draw_vector.fill();
                 }
                 (MarkKind::Rework, _) if self.lane_visible(m.lane) => {
-                    // A warning triangle at the lane's top: work done again here.
-                    let y = self.lane_y(m.lane) + 2.0;
+                    // A ring above the bar's start: work done again here (not a
+                    // triangle: those are the lines' heads).
+                    let h = (lane_h - 10.0).clamp(10.0, 18.0);
+                    let y = self.lane_y(m.lane) + (lane_h - h) * 0.5 - 4.0;
                     self.draw_vector.set_color_hex(crate::theme::hex("warning"), alpha);
-                    self.draw_vector.move_to(x as f32, y as f32);
-                    self.draw_vector.line_to((x + 4.5) as f32, (y + 8.0) as f32);
-                    self.draw_vector.line_to((x - 4.5) as f32, (y + 8.0) as f32);
-                    self.draw_vector.close();
-                    self.draw_vector.fill();
+                    self.draw_vector.circle((x + 6.0) as f32, y as f32, 3.6);
+                    self.draw_vector.stroke(1.6);
                 }
                 (MarkKind::Commit, _) if self.lane_visible(m.lane) => {
                     let y = self.lane_y(m.lane) + lane_h - 5.0;
@@ -1393,6 +1504,29 @@ mod tests {
         assert!(tl.spans.iter().filter(|s| s.lane == 1).all(|s| s.redone), "a replaced lane's turns are history");
         assert!(tl.marks.iter().any(|m| m.kind == MarkKind::Rework));
         assert_eq!(tl.rework_lines().len(), tl.rework.len());
+    }
+
+    #[test]
+    fn lines_join_the_turns_at_both_their_ends() {
+        let span = |lane: usize, start: f64, end: f64| Span { lane, start, end, open: false, turn: 1, from: String::new(), outcome: String::new(), steps: 0, failed: 0, cost: None, input: String::new(), reply: String::new(), message: None, redone: false };
+        let mut tl = Timeline {
+            lanes: Vec::new(),
+            // The outer loop: 0–60 (it plans), 300–330 (it reviews).
+            spans: vec![span(0, 0.0, 60.0), span(0, 300.0, 330.0), span(1, 90.0, 200.0)],
+            marks: vec![
+                // Sent at 50 (in its planning turn), begun at 90 (a slot was free then).
+                Mark { lane: 0, to: Some(1), at: 50.0, kind: MarkKind::Dispatch, text: String::new(), until: Some(90.0) },
+                // Said at 230 (after its check), read by the turn at 300.
+                Mark { lane: 1, to: Some(0), at: 230.0, kind: MarkKind::Report, text: String::new(), until: None },
+                // Said at 340: no outer turn has read it yet.
+                Mark { lane: 1, to: Some(0), at: 340.0, kind: MarkKind::Report, text: String::new(), until: None },
+            ],
+            ..Default::default()
+        };
+        join_marks(&mut tl);
+        assert_eq!((tl.marks[0].at, tl.marks[0].until), (50.0, Some(90.0)), "from the turn that sent it to the turn that took it up");
+        assert_eq!((tl.marks[1].at, tl.marks[1].until), (200.0, Some(300.0)), "from the end of the turn that wrote it to the turn that read it");
+        assert_eq!(tl.marks[2].until, None, "not read yet: it waits");
     }
 
     #[test]
