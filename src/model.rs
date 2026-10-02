@@ -693,11 +693,12 @@ impl Store {
     }
 
     /// After a restart nothing is running any more: say so on every peer
-    /// that was queued or running.
+    /// that was running, or queued after a turn. One that never began (it
+    /// waits for its wave) still waits, as it says.
     pub fn mark_interrupted(&mut self) {
         for p in &mut self.projects {
             for s in &mut p.sessions {
-                for peer in s.peers_mut().iter_mut().filter(|peer| peer.is_active()) {
+                for peer in s.peers_mut().iter_mut().filter(|peer| peer.is_active() && !(peer.status == "queued" && peer.log().is_empty())) {
                     peer.status = "interrupted".to_string();
                     peer.activity = None;
                     if let Some(open) = peer.open_exchange() {
@@ -887,9 +888,15 @@ mod tests {
                 session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None,
             });
         }
+        // A queued one that had a turn already was cut off too.
+        let mut d = store.session(at).unwrap().peers()[2].clone();
+        d.id = "d".into();
+        d.log_mut().push(Exchange { from: "lead".into(), input: "x".into(), reply: None, outcome: None, at: 0, steps: None, took: None, cost_total: None, began: None });
+        store.session_mut(at).unwrap().peers_mut().push(d);
         store.mark_interrupted();
         let statuses: Vec<_> = store.session(at).unwrap().peers().iter().map(|p| p.status.as_str()).collect();
-        assert_eq!(statuses, ["interrupted", "done", "interrupted"]);
+        assert_eq!(statuses, ["interrupted", "done", "queued", "interrupted"], "one waiting for its wave still waits");
+        assert_eq!(store.session(at).unwrap().peers()[2].activity.as_deref(), Some("x"), "and says so");
         assert_eq!(store.find_session(&store.session(at).unwrap().id.clone()), Some(at));
     }
 
