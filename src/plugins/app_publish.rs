@@ -85,6 +85,8 @@ fn listed(id: &str) -> Vec<String> {
 /// Publishes `project`'s app to the local hub (blocks: run it off the UI thread).
 pub fn publish(project: &str) -> Result<Published, String> {
     let tools = octosense_app::tools()?;
+    // Built from parts: its main.splash as they are now.
+    octosense_app::assemble(project)?;
     let hub = tools.app_hub.clone().map(|d| d.join("target/release/hub")).filter(|h| h.is_file())
         .ok_or("App Hub's `hub` command was not found: build OctoSense-App-Hub (cargo build --release) beside OctoSense, or set OCTOSENSE_APP_HUB")?;
     let dir = Path::new(project);
