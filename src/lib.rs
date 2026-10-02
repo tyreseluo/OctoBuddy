@@ -37,6 +37,7 @@ pub mod plan;
 mod persist;
 pub mod providers;
 pub mod own_providers;
+pub mod live;
 mod providers_view;
 mod review;
 pub mod stream;
@@ -1680,7 +1681,13 @@ script_mod! {
                                 peer_messages := ChatList{padding: Inset{left: 12 right: 12 top: 4 bottom: 8}}
                             }
                             inner_term_pane := View{
-                                width: Fill height: Fill visible: false margin: Inset{left: 8 right: 8 bottom: 8}
+                                width: Fill height: Fill visible: false margin: Inset{left: 8 right: 8 bottom: 8} flow: Down spacing: 6
+                                // The live view's: what it is, and taking it over when its turn is done.
+                                inner_live_bar := View{
+                                    width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5} visible: false
+                                    inner_live_title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_ink2 draw_text.text_style.font_size: 9}
+                                    inner_take := SegOff{text: "Take over" height: 24}
+                                }
                                 inner_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}}
                             }
                         }

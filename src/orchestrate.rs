@@ -58,6 +58,8 @@ pub struct Runtime {
     /// Peer id → how many times OctoBuddy sent its failed check back to it
     /// (before its outer loop reviews it): see `SELF_FIX`.
     pub(crate) self_fix: HashMap<String, u32>,
+    /// The loops' live logs (what the read-only live view follows).
+    pub(crate) live: crate::live::Live,
     /// Rounds whose rework went to the project's memory: (session, round).
     pub(crate) rework_saved: HashSet<(String, u64)>,
     /// Peer id → the message its running turn answers (to re-queue a refused start).
@@ -808,6 +810,7 @@ impl OctoBuddyView {
         };
         match sent {
             Ok(()) => {
+                self.rt.live.asked(&crate::live::outer_key(&session.id), i18n::t("its message", "收到的消息"), &text);
                 self.rt.lead_inflight.entry(session.id.clone()).or_default().push_back(text.clone());
                 let pending = self.rt.lead_pending.entry(session.id.clone()).or_insert(0);
                 *pending += 1;
@@ -1382,6 +1385,8 @@ What the person says to you after it stays between you and them.");
             Ok(turn) => {
                 let dirty = workspace::uncommitted(&p.dir);
                 self.rt.turn_snap.insert(peer.to_string(), workspace::file_hashes(&p.dir, &dirty));
+                let who = if d.from == From::Person { i18n::t("you", "你") } else { "outer" };
+                self.rt.live.asked(&crate::live::inner_key(peer), who, &d.text);
                 self.rt.opened.insert(peer.to_string());
                 if let Some(line) = self.rt.lines.get_mut(peer) {
                     line.started(turn.unwrap_or_default(), d.from);
@@ -1763,6 +1768,7 @@ It works for you now: message it, review its work, or close it.)\n"));
         // An outer loop on octos speaks as a peer of the server: said again as the outer loop's.
         let Some(event) = self.octos_outer_event(event) else { return };
         let Some(event) = self.claude_inner_event(event) else { return };
+        self.rt.live.log(&event);
         // The outer loop's first sign of work on the message it was sent:
         // its turn begins here (the wait to get there is not its work).
         if let LoopEvent::LeadStatus { session, .. } | LoopEvent::LeadDelta { session, .. } | LoopEvent::LeadTool { session, .. } = &event {
@@ -2256,6 +2262,7 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
                 let head = verdict.lines().filter(|l| l.starts_with('[')).collect::<Vec<_>>().join(" · ");
                 self.system(at, &format!("{slug}: {head}"));
+                self.rt.live.note(&crate::live::inner_key(&peer), &format!("OctoBuddy: {head}"));
                 // Its check failed: it fixes that first (a few times), its
                 // report held, before its outer loop spends a review on it.
                 let tries = self.rt.self_fix.get(&peer).copied().unwrap_or(0);
