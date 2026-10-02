@@ -508,6 +508,15 @@ fn span(secs: u64) -> String {
     }
 }
 
+/// How often it runs, for a person.
+fn pace(every: u64) -> String {
+    if every < 60 {
+        i18n::pick(format!("every {every} s"), format!("每 {every} 秒"))
+    } else {
+        i18n::pick(format!("every {} min", every / 60), format!("每 {} 分钟", every / 60))
+    }
+}
+
 fn health_color(h: Option<Health>) -> u32 {
     crate::theme::hex(match h {
         Some(Health::Healthy) => "success",
@@ -590,8 +599,7 @@ impl OctoBuddyView {
                 (_, Some(_), true) => i18n::t("Checking…", "检查中…").to_string(),
                 (_, Some(w), false) => match w.health {
                     None => i18n::t("Watching: first run soon", "巡检中：马上第一次检查").to_string(),
-                    Some(h) => i18n::pick(format!("{} · {} · every {} min", h.word(), ago(now.saturating_sub(w.last)), w.every / 60),
-                        format!("{} · {} · 每 {} 分钟", h.word(), ago(now.saturating_sub(w.last)), w.every / 60)),
+                    Some(h) => format!("{} · {} · {}", h.word(), ago(now.saturating_sub(w.last)), pace(w.every)),
                 },
             };
             card.label(cx, ids!(state)).set_text(cx, &state);
@@ -610,7 +618,7 @@ impl OctoBuddyView {
             // What is wrong, and what was done about it.
             let mut lines: Vec<String> = Vec::new();
             if let Some(inc) = &incident {
-                lines.push(i18n::pick(format!("Since {} ({}):", ago(now.saturating_sub(inc.since)), inc.version), format!("{}起（{}）：", ago(now.saturating_sub(inc.since)), inc.version)));
+                lines.push(i18n::pick(format!("Found {} ({}):", ago(now.saturating_sub(inc.since)), inc.version), format!("{}发现问题（{}）：", ago(now.saturating_sub(inc.since)), inc.version)));
                 lines.extend(inc.why.iter().map(|w| format!("· {w}")));
                 if let (Some(base), Some(w)) = (watch.as_ref().and_then(|w| w.baseline.as_ref()), &watch) {
                     lines.push(i18n::pick(format!("Widgets with text: {} when well, {} when it broke, {} now", base.texts, inc.texts, w.texts),
@@ -746,11 +754,11 @@ impl OctoBuddyView {
         w.session = at.and_then(|at| self.store.session(at)).map(|s| s.id.clone()).unwrap_or_default();
         w.last = 0;
         w.write(project);
-        let every = w.every / 60;
+        let every = pace(w.every);
         self.card_loop.watches.insert(project.to_string(), w);
         if let Some(at) = at {
-            self.system(at, &i18n::pick(format!("Live watch on: OctoBuddy runs the published {name} {version} every {every} min on live data and says here when it breaks. Its record: .octobuddy/card-loop/health.jsonl"),
-                format!("已开启巡检：每 {every} 分钟用实时数据运行一次已发布的 {name} {version}，出问题会在这里说。记录在 .octobuddy/card-loop/health.jsonl")));
+            self.system(at, &i18n::pick(format!("Live watch on: OctoBuddy runs the published {name} {version} {every} on live data and says here when it breaks. Its record: .octobuddy/card-loop/health.jsonl"),
+                format!("已开启巡检：{every}用实时数据运行一次已发布的 {name} {version}，出问题会在这里说。记录在 .octobuddy/card-loop/health.jsonl")));
         }
     }
 
