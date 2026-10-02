@@ -29,14 +29,42 @@ impl OctoBuddyView {
                 format!("总时长 {} · 实际在跑 {} · outer {} 轮 · inner {inner_turns} 轮（{agents} 个 agent）· ${cost:.2}",
                     span_len(tl.end), span_len(tl.busy()), tl.turns(Kind::Outer)))
         };
+        // Where the waiting went, by why (the outer loop's lane, and the inner ones').
+        // Each why's time once: waits on several lanes at once (a wave holding
+        // three slices) are one stretch of the session, not three.
+        let mut by: Vec<(&'static str, f64)> = Vec::new();
+        let mut kinds: Vec<&'static str> = tl.waits.iter().map(|w| w.kind).collect();
+        kinds.sort();
+        kinds.dedup();
+        for kind in kinds {
+            let mut iv: Vec<(f64, f64)> = tl.waits.iter().filter(|w| w.kind == kind).map(|w| (w.from, w.to)).collect();
+            iv.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let (mut total, mut until) = (0.0, f64::MIN);
+            for (a, b) in iv {
+                total += (b - a.max(until)).max(0.0);
+                until = until.max(b);
+            }
+            by.push((kind, total));
+        }
+        by.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let word = |k: &str| match k {
+            "start" => i18n::t("starting", "启动"),
+            "wave" => i18n::t("waves", "等 wave"),
+            "queue" => i18n::t("queued", "排队"),
+            "check" => i18n::t("checks", "检查"),
+            "person" => i18n::t("you", "等你"),
+            _ => i18n::t("restarts", "重启"),
+        };
+        let waited = by.iter().filter(|(_, t)| *t >= 1.0).map(|(k, t)| format!("{} {}", word(k), span_len(*t))).collect::<Vec<_>>().join(" · ");
+        let summary = if waited.is_empty() { summary } else { i18n::pick(format!("{summary} · waits: {waited}"), format!("{summary} · 等待：{waited}")) };
         let lost: f64 = tl.rework.iter().map(|r| r.lost).sum();
         let summary = if tl.rework.is_empty() { summary } else {
             i18n::pick(format!("{summary} · rework: {} ({} lost)", tl.rework.len(), span_len(lost)), format!("{summary} · 返工 {} 处（浪费 {}）", tl.rework.len(), span_len(lost)))
         };
         self.view.label(cx, ids!(time_summary)).set_text(cx, &summary);
         self.view.label(cx, ids!(time_legend)).set_text(cx, i18n::t(
-            "Blue: outer · green: inner · purple: reviewer · red: failed · line down: outer sends work (from the turn that sent it to the turn that took it up) · line up: a report (from the turn that wrote it to the turn that read it; a curve says how long it waited) · yellow dot: you · green diamond: commit · orange ring: rework · outlined faint bar: done again later · hatched lane: history · grey band: idle, squeezed · wheel: zoom · double-click a turn: open it",
-            "蓝：outer · 绿：inner · 紫：审查者 · 红：失败 · 向下的线：outer 派任务（从发出它的那一轮到 inner 开始做的那一轮）· 向上的线：汇报（从写它的那一轮到读它的那一轮，曲线上标着等了多久） · 黄点：你的消息 · 绿菱形：提交 · 橙色圆环：返工 · 描边的淡色段：后来重做了 · 斜纹 lane：历史 · 灰带：压缩的空闲 · 滚轮缩放 · 双击一段在对话中打开"));
+            "Blue: outer · green: inner · purple: reviewer · red: failed · line down: outer sends work (from the turn that sent it to the turn that took it up) · line up: a report (from the turn that wrote it to the turn that read it; a curve says how long it waited) · yellow dot: you · green diamond: commit · orange ring: rework · dotted line: a wait (why beside it; orange: waits for you) · outlined faint bar: done again later · hatched lane: history · grey band: idle, squeezed · wheel: zoom · double-click a turn: open it",
+            "蓝：outer · 绿：inner · 紫：审查者 · 红：失败 · 向下的线：outer 派任务（从发出它的那一轮到 inner 开始做的那一轮）· 向上的线：汇报（从写它的那一轮到读它的那一轮，曲线上标着等了多久） · 黄点：你的消息 · 绿菱形：提交 · 橙色圆环：返工 · 点线：等待（旁边写着原因，橙色是等你）· 描边的淡色段：后来重做了 · 斜纹 lane：历史 · 灰带：压缩的空闲 · 滚轮缩放 · 双击一段在对话中打开"));
         self.view.label(cx, ids!(time_rework_title)).set_text(cx, &i18n::pick(format!("Rework and repeats ({})", tl.rework.len()), format!("返工与重复（{}）", tl.rework.len())));
         let lines = tl.rework_lines();
         let evolve = self.view.button(cx, ids!(time_evolve));
