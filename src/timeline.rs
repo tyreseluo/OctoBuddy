@@ -1165,7 +1165,7 @@ impl Widget for TimelineCanvas {
                         let w = self.text_w(cx, &label, 7.0);
                         let (lx, ly) = (((x + xb) * 0.5 + 4.0).min(x1 - w - 6.0).max(x0 + 2.0), (ya + yb) * 0.5 - 5.0);
                         if ly > top && ly < bottom {
-                            texts.push((dvec2(lx, ly), label, 7.0, rgb(color, 0.9 * alpha as f32)));
+                            texts.push((dvec2(lx, ly), label, 7.0, rgb(color, 0.9 * alpha)));
                         }
                     }
                 }
