@@ -121,6 +121,28 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - 点「修复」后，说明发给了会话的外环，并打开了会话。那一轮随后被停止。
 - **还没有端到端跑过：**外环真正修复、发布修复版、以及确认恢复的那次巡检。fx-board 本身就能应对演练，没什么可修的。
 
+**和 OctoSense 系统 agent 配合。**OctoBuddy 在 OctoSense 里的应用 agent 有三个工具，系统 agent 可以调用，被授权的其他应用的 agent 也可以：
+- `octobuddy.status`（只读）现在还会返回 `live.apps`：每个已发布应用的版本、是否在巡检、健康状态、未结束的故障（哪里有问题、是否已交给外环、修复版是否已发布），以及最近一次报告。
+- `octobuddy.report {app, problem, from}`（会执行动作，需宿主确认）用来转达别人看到的问题，比如你说「汇率看板打开是空白」，或者别的应用的 agent 发现它出错了。
+  - OctoBuddy 立刻运行一次已发布的版本（没开巡检的话会顺便打开）。
+  - 调用的返回值就是这次运行看到了什么；超过 20 秒还没跑完，就先返回「还在复查」。
+  - 应用的会话里会说明收到的报告和复查结果，巡检页也会列出这条报告。
+  - 复查确认的报告会并入故障，也会写进修复说明。
+  - 复查没复现的报告，仍然可以点「修复」交给外环，因为它可能只在真实设备上出现。
+- `octobuddy.send` 和以前一样，给某个会话的外环发消息。
+
+修不修、发不发布，仍然由你决定。一条报告只会让 OctoBuddy 去看一看。
+
+**已验证：**2026-10-02 在 OctoSense 里用 fx-board 验证。shell 的内核是 OctoSense 钉住的 octos `ae230ce`；更旧的内核打不开应用 agent 的对话（octos UPCR-2026-034 `read_parent`）。
+- **在 Ask OctoBuddy 里说**「汇率看板整个是空白的，帮我让 OctoBuddy 复查一下」：它的 agent 调用了 `octobuddy.report`。复查结果是健康，agent 把结果和下一步建议转告了用户。这次调用没有弹出确认表。
+- **在系统 agent 的对话里说**「朋友新装了 OctoSense，打开汇率看板什么都看不到」（开着新设备断网演练）：
+  - 系统 agent 用 `peer_send_input` 把问题转给 OctoBuddy 的 agent；
+  - 那个 agent 先申请用 `terminal.run` 去取 API，在那里被拒绝；
+  - 随后它调用了 `octobuddy.report`；
+  - 复查确认了问题，这条报告并入了故障。
+
+  `octobuddy.report` 的描述现在写明要先调用它。
+
 **巡检看不到的。**只在真实宿主里才出现的问题，比如在 OctoSense 里权限被拒。shell 目前还不会把已安装卡片的运行时报错开放给其他应用。
 
 ## 外观

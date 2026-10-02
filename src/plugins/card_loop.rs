@@ -29,6 +29,7 @@
 //! `offline-fresh` does it on a new device (no storage kept). The published
 //! copy itself is never touched.
 use crate::model::now_secs;
+use octosense_app_peers::host_tools::{ToolOutcome, ToolReply};
 use crate::{i18n, tapped, OctoBuddyView};
 use makepad_widgets::*;
 use serde_json::{json, Value};
@@ -316,6 +317,40 @@ print(json.dumps({"started": started, "errors": errors, "widgets": widgets[:400]
 PY
 "#;
 
+/// A problem with an app someone else saw: the system agent's
+/// `octobuddy.report` (the person told it, or another app's agent saw it).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Report {
+    pub at: u64,
+    /// Who saw it, as the system agent says.
+    pub from: String,
+    pub problem: String,
+    /// What the run of the published version that followed found: `None`
+    /// until it ran.
+    pub reproduced: Option<bool>,
+}
+
+impl Report {
+    fn to_json(&self) -> Value {
+        json!({"at": self.at, "from": self.from, "problem": self.problem, "reproduced": self.reproduced})
+    }
+
+    fn from_json(v: &Value) -> Option<Report> {
+        Some(Report {
+            at: v["at"].as_u64()?, from: v["from"].as_str().unwrap_or("").to_string(),
+            problem: v["problem"].as_str()?.to_string(), reproduced: v["reproduced"].as_bool(),
+        })
+    }
+
+    fn who(&self) -> String {
+        if self.from.is_empty() { i18n::t("the OctoSense assistant", "系统 agent").to_string() } else { self.from.clone() }
+    }
+}
+
+fn reports_of(v: &Value) -> Vec<Report> {
+    v.as_array().map(|a| a.iter().filter_map(Report::from_json).collect()).unwrap_or_default()
+}
+
 /// A spell of ill health: from the run that saw it to the one that found the
 /// app well again, with what was done about it on the way.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -333,6 +368,8 @@ pub struct Incident {
     pub repair: Option<(String, u64)>,
     /// The fixed version published, and when.
     pub published: Option<(String, u64)>,
+    /// What others reported of it (the run confirmed them).
+    pub reports: Vec<Report>,
 }
 
 impl Incident {
@@ -342,6 +379,7 @@ impl Incident {
             "texts": self.texts, "drill": self.drill,
             "repair": self.repair.as_ref().map(|(s, at)| json!({"session": s, "at": at})),
             "published": self.published.as_ref().map(|(v, at)| json!({"version": v, "at": at})),
+            "reports": self.reports.iter().map(Report::to_json).collect::<Vec<_>>(),
         })
     }
 
@@ -356,6 +394,7 @@ impl Incident {
             drill: v["drill"].as_str().map(String::from),
             repair: v["repair"]["session"].as_str().map(|s| (s.to_string(), v["repair"]["at"].as_u64().unwrap_or(0))),
             published: v["published"]["version"].as_str().map(|s| (s.to_string(), v["published"]["at"].as_u64().unwrap_or(0))),
+            reports: reports_of(&v["reports"]),
         })
     }
 }
@@ -379,6 +418,8 @@ pub struct Watch {
     /// device online when it updated (its storage filled by it).
     pub warm: bool,
     pub incident: Option<Incident>,
+    /// The last reports of it (five at most), newest last.
+    pub reports: Vec<Report>,
 }
 
 impl Watch {
@@ -396,6 +437,7 @@ impl Watch {
             auto_repair: v["auto_repair"].as_bool().unwrap_or(false),
             warm: v["warm"].as_bool().unwrap_or(false),
             incident: Incident::from_json(&v["incident"]),
+            reports: reports_of(&v["reports"]),
         })
     }
 
@@ -407,6 +449,7 @@ impl Watch {
             "baseline": self.baseline.as_ref().map(Baseline::to_json), "health": self.health.map(Health::key),
             "last": self.last, "texts": self.texts, "drill": self.drill, "auto_repair": self.auto_repair, "warm": self.warm,
             "incident": self.incident.as_ref().map(Incident::to_json),
+            "reports": self.reports.iter().map(Report::to_json).collect::<Vec<_>>(),
         });
         let _ = std::fs::write(dir.join("watch.json"), serde_json::to_string_pretty(&v).unwrap_or_default());
     }
@@ -454,7 +497,10 @@ fn changed_since_published(project: &str, published: &Path) -> bool {
 
 /// What the outer loop is asked when an incident goes to it.
 fn repair_brief(name: &str, i: &Incident) -> String {
-    let why: Vec<String> = i.why.iter().map(|w| format!("- {w}")).collect();
+    let mut why: Vec<String> = i.why.iter().map(|w| format!("- {w}")).collect();
+    for r in &i.reports {
+        why.push(i18n::pick(format!("- reported by {}: “{}”", r.who(), r.problem), format!("- {}报告：「{}」", r.who(), r.problem)));
+    }
     let shot = i.shot.as_deref().unwrap_or("");
     let drill = match i.drill.as_deref() {
         Some("offline-fresh") => i18n::t("\n(This was a drill: the watch ran it as on a new device, nothing kept, with its API cut off on purpose. There is no data to show then: check that it says so plainly and offers to try again, and change only what falls short of that.)",
@@ -477,6 +523,8 @@ pub struct Loops {
     pub running: HashSet<String>,
     /// Incidents to hand to their outer loop (auto repair), on the next event with a `Cx`.
     pub pending_repairs: Vec<String>,
+    /// `octobuddy.report` calls answered once their run is back (project, asked at).
+    pub waiting: Vec<(String, u64, ToolReply)>,
     loaded: bool,
 }
 
@@ -644,6 +692,15 @@ impl OctoBuddyView {
                 Some(_) => lines.push(i18n::t("Drill on: its API is cut off in the watch's runs (the published app is not touched).", "演练中：巡检运行时断开了它的 API（不影响已发布的应用）。").to_string()),
                 None => {}
             }
+            if let Some(r) = watch.as_ref().and_then(|w| w.reports.last()) {
+                let found = match r.reproduced {
+                    None => i18n::t("checking…", "复查中……"),
+                    Some(true) => i18n::t("the run found it", "巡检确认了"),
+                    Some(false) => i18n::t("the run did not show it", "巡检没有复现"),
+                };
+                lines.push(i18n::pick(format!("Reported {} by {}: “{}” — {found}", ago(now.saturating_sub(r.at)), r.who(), r.problem),
+                    format!("{}{}报告：「{}」——{found}", ago(now.saturating_sub(r.at)), r.who(), r.problem)));
+            }
             if let Some(shot) = incident.as_ref().and_then(|i| i.shot.clone()) {
                 lines.push(i18n::pick(format!("Screenshot: {shot}"), format!("截图：{shot}")));
             }
@@ -655,6 +712,9 @@ impl OctoBuddyView {
             let drill = watch.as_ref().is_some_and(|w| w.drill.is_some());
             let auto = watch.as_ref().is_some_and(|w| w.auto_repair);
             let repairing = incident.as_ref().and_then(|i| i.repair.as_ref()).and_then(|(sid, _)| self.store.find_session(sid)).is_some_and(|s| self.session_busy(s));
+            // A report the run did not confirm, in the last day: still the person's to hand over.
+            let unconfirmed = incident.is_none() && watch.as_ref().and_then(|w| w.reports.last())
+                .is_some_and(|r| r.reproduced == Some(false) && now.saturating_sub(r.at) < 86_400);
             let fix_ready = incident.as_ref().is_some_and(|i| i.published.is_none())
                 && published.as_ref().is_ok_and(|(_, dir)| changed_since_published(&project, dir));
             let show = [
@@ -663,7 +723,7 @@ impl OctoBuddyView {
                 (ids!(drill_on), watching && drill, i18n::t("Drill: API off", "演练：断网中")), (ids!(drill_off), watching && !drill, i18n::t("Drill: cut API", "演练断网")),
                 (ids!(auto_on), watching && auto, i18n::t("Auto repair", "自动修复")), (ids!(auto_off), watching && !auto, i18n::t("Auto repair", "自动修复")),
                 (ids!(open), self.live_session(pi, &project).is_some(), i18n::t("Session", "打开会话")),
-                (ids!(repair), incident.is_some() && !repairing, i18n::t("Repair", "修复")),
+                (ids!(repair), (incident.is_some() || unconfirmed) && !repairing, i18n::t("Repair", "修复")),
                 (ids!(publish_fix), fix_ready && self.publishing.is_none(), i18n::t("Publish fix", "发布修复版")),
             ];
             for (id, visible, text) in show {
@@ -765,7 +825,14 @@ impl OctoBuddyView {
     /// An incident handed to its session's outer loop (`show`: and that
     /// session opened).
     fn card_loop_repair(&mut self, cx: &mut Cx, pi: usize, project: &str, show: bool) {
-        let Some(incident) = self.card_loop.watches.get(project).and_then(|w| w.incident.clone()) else { return };
+        // An incident, or a report the run did not confirm (as one, for its brief).
+        let Some(w) = self.card_loop.watches.get(project).cloned() else { return };
+        let incident = w.incident.clone().or_else(|| w.reports.last().filter(|r| r.reproduced == Some(false)).map(|r| Incident {
+            since: r.at, version: published(project).map(|(v, _)| v).unwrap_or_default(), health: Health::Degraded,
+            why: vec![i18n::t("the watch's run did not show it: it may happen only on a real device", "巡检的运行没有复现：可能只在真实设备上出现").to_string()],
+            reports: vec![r.clone()], ..Default::default()
+        }));
+        let Some(incident) = incident else { return };
         let at = match self.live_session(pi, project) {
             Some(at) => Some(at),
             None => self.store.add_session(pi),
@@ -832,6 +899,14 @@ impl OctoBuddyView {
     /// Each second: a watched app whose run is due is run.
     pub(crate) fn card_loop_tick(&mut self) {
         self.card_loop_load();
+        // A report's call whose run is slow is answered before the host gives up on it.
+        let now = now_secs();
+        let (late, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.card_loop.waiting).into_iter().partition(|(_, at, _)| now.saturating_sub(*at) >= 20);
+        self.card_loop.waiting = kept;
+        for (_, _, reply) in late {
+            reply.finish(ToolOutcome::Ok(json!({"checking": true,
+                "next": "OctoBuddy is still running the published version; its session will say what it found, and octobuddy.status shows it in a minute."})));
+        }
         // Its pace and drill as watch.json has them now (a demo may change them there).
         for (project, w) in self.card_loop.watches.iter_mut() {
             if let Some(file) = Watch::read(project) {
@@ -868,6 +943,11 @@ impl OctoBuddyView {
             Ok(p) => p,
             Err(err) => {
                 log!("octobuddy: card-loop {project}: {err}");
+                let (waiting, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.card_loop.waiting).into_iter().partition(|(p, _, _)| p == project);
+                self.card_loop.waiting = kept;
+                for (_, _, reply) in waiting {
+                    reply.finish(ToolOutcome::error("check_failed", format!("OctoBuddy could not run the published app: {err}")));
+                }
                 if let Some(at) = at.filter(|_| w.health.is_some()) {
                     self.system(at, &i18n::pick(format!("Live watch could not run the app: {err}"), format!("巡检没能运行应用：{err}")));
                 }
@@ -939,7 +1019,7 @@ impl OctoBuddyView {
             }
             // It broke: an incident.
             (None, bad) => {
-                let inc = Incident { since: p.at, version: p.version.clone(), health: bad, why: why.clone(), shot: shot_of(project, &p), texts: w.texts, drill: p.drill.clone(), repair: None, published: None };
+                let inc = Incident { since: p.at, version: p.version.clone(), health: bad, why: why.clone(), shot: shot_of(project, &p), texts: w.texts, drill: p.drill.clone(), repair: None, published: None, reports: Vec::new() };
                 let lines: Vec<String> = why.iter().map(|l| format!("· {l}")).collect();
                 let shot = inc.shot.clone().unwrap_or_default();
                 text = Some(i18n::pick(
@@ -951,11 +1031,139 @@ impl OctoBuddyView {
                 w.incident = Some(inc);
             }
         }
+        // What others reported, found or not by this run; their calls answered.
+        let fresh: Vec<Report> = w.reports.iter().filter(|r| r.reproduced.is_none()).cloned().collect();
+        let found = health != Health::Healthy;
+        for r in w.reports.iter_mut().filter(|r| r.reproduced.is_none()) {
+            r.reproduced = Some(found);
+        }
+        let mut note = None;
+        if !fresh.is_empty() {
+            if let Some(i) = w.incident.as_mut().filter(|_| found) {
+                i.reports.extend(fresh.iter().cloned().map(|mut r| { r.reproduced = Some(true); r }));
+            }
+            if !found {
+                let r = &fresh[fresh.len() - 1];
+                note = Some(i18n::pick(
+                    format!("Live watch: the published {name} {} runs well; the run did not show what {} reported (“{}”). It may happen only on a real device (a permission, the host). The Live page can still hand the report to the outer loop.", p.version, r.who(), r.problem),
+                    format!("巡检复查：已发布的 {name} {} 运行正常，没有看到{}报告的「{}」。这可能只在真实设备上出现（比如权限、宿主）。巡检页仍然可以点「修复」，把报告交给外环。", p.version, r.who(), r.problem)));
+            }
+        }
+        let answer = json!({
+            "app": name, "published": p.version, "health": health.key(), "found_a_problem": found, "why": why,
+            // What it showed, as text (an agent may not reach the screenshot's folder).
+            "on_screen": p.widgets.iter().map(|w| w.2.trim()).filter(|t| !t.is_empty()).take(24).collect::<Vec<_>>(),
+            "screenshot_for_the_person": shot_of(project, &p).map(|s| Path::new(project).join(s).display().to_string()),
+            "incident_open": w.incident.is_some(),
+            "next": if found { "OctoBuddy opened an incident and keeps watching the app. The person hands it to the app's outer loop to repair from OctoBuddy's Live page (or it goes there by itself if they turned Auto repair on); octobuddy.status shows how it goes." }
+                else { "The run of the published version shows nothing wrong. OctoBuddy keeps watching it; the person can still hand the report to the app's outer loop from OctoBuddy's Live page." },
+        });
+        let (waiting, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.card_loop.waiting).into_iter().partition(|(p, _, _)| p == project);
+        self.card_loop.waiting = kept;
+        for (_, _, reply) in waiting {
+            reply.finish(ToolOutcome::Ok(answer.clone()));
+        }
         w.write(project);
         self.card_loop.watches.insert(project.to_string(), w);
-        if let (Some(at), Some(text)) = (at, text) {
-            self.system(at, &text);
+        for text in [text, note].into_iter().flatten() {
+            if let Some(at) = at {
+                self.system(at, &text);
+            }
         }
+    }
+
+    /// The app projects a name may mean: its id, its name, its folder.
+    fn find_app(&self, app: &str) -> Vec<(usize, String)> {
+        let needle = app.trim().to_lowercase();
+        let apps: Vec<(usize, String)> = self.store.projects.iter().enumerate()
+            .filter(|(_, p)| !p.is_chats() && super::octosense_app::is_app(&p.path)).map(|(i, p)| (i, p.path.clone())).collect();
+        let exact: Vec<(usize, String)> = apps.iter().filter(|(_, p)| {
+            app_id(p).is_ok_and(|id| id.to_lowercase() == needle) || Watch::app_name(p).to_lowercase() == needle
+                || Path::new(p).file_name().is_some_and(|f| f.to_string_lossy().to_lowercase() == needle)
+        }).cloned().collect();
+        if !exact.is_empty() {
+            return exact;
+        }
+        apps.into_iter().filter(|(_, p)| {
+            let name = Watch::app_name(p).to_lowercase();
+            !needle.is_empty() && (name.contains(&needle) || needle.contains(&name))
+        }).collect()
+    }
+
+    /// `octobuddy.report`: a problem with one of its apps, from the system
+    /// agent. The published version runs now (its watch on, if it was not);
+    /// the call is answered with what that run found.
+    pub(crate) fn card_loop_report(&mut self, args: &Value, reply: ToolReply) {
+        self.card_loop_load();
+        let app = args["app"].as_str().unwrap_or("").trim().to_string();
+        let problem = args["problem"].as_str().unwrap_or("").trim().to_string();
+        let from = args["from"].as_str().unwrap_or("").trim().to_string();
+        if app.is_empty() || problem.is_empty() {
+            reply.finish(ToolOutcome::error("bad_args", "name the app and say what is wrong with it"));
+            return;
+        }
+        let (pi, project) = match self.find_app(&app).as_slice() {
+            [one] => one.clone(),
+            [] => {
+                let names: Vec<String> = self.store.projects.iter().filter(|p| !p.is_chats() && super::octosense_app::is_app(&p.path)).map(|p| Watch::app_name(&p.path)).collect();
+                reply.finish(ToolOutcome::error("no_app", format!("OctoBuddy has no app project called \"{app}\" (its apps: {})", names.join(", "))));
+                return;
+            }
+            many => {
+                let names: Vec<String> = many.iter().map(|(_, p)| Watch::app_name(p)).collect();
+                reply.finish(ToolOutcome::error("ambiguous", format!("\"{app}\" may mean {}: name one", names.join(", "))));
+                return;
+            }
+        };
+        let version = match published(&project) {
+            Ok((v, _)) => v,
+            Err(err) => {
+                reply.finish(ToolOutcome::error("not_published", format!("{}: {err}; OctoBuddy watches only what it published to the local App Hub", Watch::app_name(&project))));
+                return;
+            }
+        };
+        if !self.card_loop.watches.get(&project).is_some_and(|w| w.watching) {
+            self.card_loop_watch(pi, &project, true);
+        }
+        let report = Report { at: now_secs(), from: from.clone(), problem: problem.clone(), reproduced: None };
+        let who = report.who();
+        self.card_loop_update(&project, |w| {
+            w.reports.push(report);
+            let extra = w.reports.len().saturating_sub(5);
+            w.reports.drain(..extra);
+            w.last = 0;
+        });
+        if let Some(at) = self.live_session(pi, &project) {
+            let name = Watch::app_name(&project);
+            self.system(at, &i18n::pick(format!("The OctoSense assistant passes on a problem with {name} (seen by {who}): “{problem}”. Running the published {version} now to check…"),
+                format!("系统 agent 转来 {name} 的问题（{who}看到的）：「{problem}」。正在复查已发布的 {version}……")));
+        }
+        self.card_loop.waiting.push((project, now_secs(), reply));
+    }
+
+    /// The Live page as the system agent reads it (`octobuddy.status`).
+    pub(crate) fn card_loop_status(&self) -> Value {
+        let now = now_secs();
+        let apps: Vec<Value> = self.store.projects.iter().filter(|p| !p.is_chats() && super::octosense_app::is_app(&p.path)).map(|p| {
+            let w = self.card_loop.watches.get(&p.path).filter(|w| w.watching).cloned().or_else(|| Watch::read(&p.path).filter(|w| w.watching));
+            json!({
+                "name": Watch::app_name(&p.path), "id": app_id(&p.path).ok(), "project": p.name,
+                "published": published(&p.path).ok().map(|(v, _)| v),
+                "watching": w.is_some(),
+                "health": w.as_ref().and_then(|w| w.health).map(Health::key),
+                "last_run_secs_ago": w.as_ref().filter(|w| w.last > 0).map(|w| now.saturating_sub(w.last)),
+                "every_secs": w.as_ref().map(|w| w.every),
+                "drill": w.as_ref().and_then(|w| w.drill.clone()),
+                "incident": w.as_ref().and_then(|w| w.incident.as_ref()).map(|i| json!({
+                    "since_secs_ago": now.saturating_sub(i.since), "version": i.version, "health": i.health.key(), "why": i.why,
+                    "handed_to_outer_loop_secs_ago": i.repair.as_ref().map(|(_, at)| now.saturating_sub(*at)),
+                    "fixed_version_published": i.published.as_ref().map(|(v, _)| v),
+                    "reports": i.reports.iter().map(Report::to_json).collect::<Vec<_>>(),
+                })),
+                "last_report": w.as_ref().and_then(|w| w.reports.last()).map(Report::to_json),
+            })
+        }).collect();
+        json!({"apps": apps})
     }
 }
 
@@ -1036,15 +1244,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let project = dir.to_string_lossy().into_owned();
         let incident = Incident { since: 5, version: "0.1.0".into(), health: Health::Degraded, why: vec!["it shows “x”".into()], shot: Some("s.png".into()),
-            texts: 8, drill: Some("offline".into()), repair: Some(("s-1".into(), 7)), published: Some(("0.1.1".into(), 8)) };
+            texts: 8, drill: Some("offline".into()), repair: Some(("s-1".into(), 7)), published: Some(("0.1.1".into(), 8)),
+            reports: vec![Report { at: 4, from: "the person".into(), problem: "空白".into(), reproduced: Some(true) }] };
         let w = Watch { watching: true, every: 120, session: "s-1".into(), baseline: Some(Baseline { version: "0.1.0".into(), ids: vec!["a".into()], texts: 3, failure_texts: vec![] }),
-            health: Some(Health::Degraded), last: 9, texts: 8, drill: Some("offline".into()), auto_repair: true, warm: true, incident: Some(incident) };
+            health: Some(Health::Degraded), last: 9, texts: 8, drill: Some("offline".into()), auto_repair: true, warm: true, incident: Some(incident),
+            reports: vec![Report { at: 10, from: String::new(), problem: "打不开".into(), reproduced: None }] };
         w.write(&project);
         let back = Watch::read(&project).unwrap();
         assert_eq!((back.watching, back.every, back.session.as_str(), back.health, back.last, back.texts, back.drill.as_deref(), back.auto_repair),
             (true, 120, "s-1", Some(Health::Degraded), 9, 8, Some("offline"), true));
         assert!(back.warm);
-        assert_eq!((back.baseline, back.incident), (w.baseline, w.incident));
+        assert_eq!((back.baseline, back.incident, back.reports), (w.baseline, w.incident, w.reports));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

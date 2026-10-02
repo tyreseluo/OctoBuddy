@@ -3,9 +3,12 @@
 //! assistant services granted, the shell gives OctoBuddy ONE peer owned by
 //! the system agent: the system agent sees it (`peer_list`), talks to it
 //! (`peer_send_input`), and its model reaches OctoBuddy through two tools
-//! (`native-apps.json`): `octobuddy.status` (what runs now) and
-//! `octobuddy.send` (a message to a session's outer loop, approved by the
-//! host). OctoBuddy answers them on the UI thread, where its state lives.
+//! (`native-apps.json`): `octobuddy.status` (what runs now, and how its
+//! published apps are: the Live page), `octobuddy.send` (a message to a
+//! session's outer loop) and `octobuddy.report` (a problem with one of its
+//! apps: the production loop runs it and says what it found), the last two
+//! approved by the host. OctoBuddy answers them on the UI thread, where its
+//! state lives.
 //!
 //! The inner loops that write code do not run on this kernel yet: an app's
 //! peer cannot work in a directory the person picks, share it with other

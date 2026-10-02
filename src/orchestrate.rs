@@ -548,7 +548,8 @@ impl OctoBuddyView {
                 }).collect::<Vec<_>>(),
             }))
             .collect();
-        json!({"projects": projects})
+        // Its published apps as the Live page has them.
+        json!({"projects": projects, "live": self.card_loop_status()})
     }
 
     /// `octobuddy.send`: the system agent writes to a session's outer loop,
@@ -1843,6 +1844,8 @@ It works for you now: message it, review its work, or close it.)\n"));
                     }
                 }
             }
+            // A problem with one of its apps: answered once a run checked it.
+            LoopEvent::ToolCall { name, args, reply } if name == "octobuddy.report" => self.card_loop_report(&args, reply),
             LoopEvent::ToolCall { name, args, reply } => {
                 use octosense_app_peers::host_tools::ToolOutcome;
                 let outcome = match name.as_str() {

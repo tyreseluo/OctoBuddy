@@ -118,6 +118,28 @@ A new version is judged by its content against the last version's baseline until
   - Repair sent the brief to the session's outer loop and opened the session. That turn was stopped there.
 - **Not run end to end yet:** an outer loop's repair, Publish fix, and the run that closes the incident. fx-board already copes with a drill, so it has nothing to repair.
 
+**With the OctoSense assistant.** OctoBuddy's agent in OctoSense has three tools. The system agent can call them, and so can the agents of apps granted them:
+- `octobuddy.status` (read) also returns `live.apps`: each published app's version, whether it is watched, its health, an open incident (what is wrong, whether it went to an outer loop, the fixed version published) and the last report.
+- `octobuddy.report {app, problem, from}` (act, confirmed by the host) passes on a problem someone saw, for example "汇率看板打开是空白" from the person, or another app's agent that saw it fail.
+  - OctoBuddy runs the published version at once, turning the watch on if it was off.
+  - The call is answered with what that run found, or that it is still checking after 20 s.
+  - The app's session hears the report and the result. The Live page lists the report.
+  - A report the run confirmed joins the incident and the repair brief.
+  - One the run did not confirm can still be handed to the outer loop with Repair, since it may happen only on a real device.
+- `octobuddy.send` writes to a session's outer loop, as before.
+
+The person still decides the repair and the publish. A report only makes OctoBuddy look.
+
+**Verified** in OctoSense on 2026-10-02, with fx-board. The shell's kernel was octos `ae230ce`, the revision OctoSense pins; an older kernel cannot open an app agent's conversation (octos UPCR-2026-034 `read_parent`).
+- **Asked in Ask OctoBuddy** ("汇率看板整个是空白的，帮我让 OctoBuddy 复查一下"): its agent called `octobuddy.report`. The run found the app healthy, and the agent passed that on with what to try next. No sheet was shown for it.
+- **Asked in the system agent's chat** ("朋友新装了 OctoSense，打开汇率看板什么都看不到"), with the new-device drill on:
+  - the system agent passed it to OctoBuddy's agent with `peer_send_input`;
+  - that agent first asked for `terminal.run` to fetch the API, which was denied there;
+  - it then called `octobuddy.report`;
+  - the run confirmed the problem, and the report joined the incident.
+
+  `octobuddy.report`'s description now says to call it first.
+
 **Not seen by the watch.** Failures only the real host shows, such as a permission denied in OctoSense. The shell does not share installed cards' runtime errors with other apps yet.
 
 ## Appearance
