@@ -62,8 +62,32 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **插话。**⌘Enter（其他平台 Ctrl+Enter）把消息插进正在运行的这一轮，不打断它。排队中的消息上也有「插话」按钮，作用相同。
   - agent 在下一步采纳它；如果刚好在这一轮结束后才到，就改成排在队列最前面。
   - 消息下方有一行回执，显示它是否已送达。
+- **打断并发送。**⇧⌘Enter（其他平台 ⇧Ctrl+Enter），或在运行中输入内容后出现的「打断并发送」按钮：这一轮和它的子代理被打断，这条消息作为下一轮的开始。内环照常工作。内环面板上也有同样的按钮。
 - **视图。**对话；外环和内环的流程图；回放整个会话的时间轴；开启原生 TUI 插件后，还有 agent 自己的终端界面。
+  - **实时视图。**只读地显示外环或某个内环此刻在做什么：它写的话、每次工具调用、它的子代理。它照常工作，不接管任何东西。记录在 `<data>/live/`。这一轮结束后，「接管终端」会在同一个会话上打开 agent 自己的终端。
+  - **时间轴。**环与环之间的每条线，都从发出它的那一轮连到接手它的那一轮。每段等待画成点线并写明原因：等 agent 启动、等前一个 wave 验收、排队、OctoBuddy 在检查、等你、重启。汇总按原因累计，几条泳道同时等待的时段只算一次。没有留下来的工作会单独标出：被后来的内环取代的泳道画成斜线（历史），后来重做过的一轮只画轮廓，每处返工有一个圆环并注明可能的原因，下方的面板列出它们和浪费的时间。「从中学习」让外环从中总结经验（见下文）。
 - **插件。**内置的有：OctoSense 应用类型、应用预览与发布到 App Hub、应用数据、应用工厂和生产回路（见下文）、原生 TUI（默认关闭）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
+
+## 做 OctoSense 应用
+
+OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直接交给它们。
+
+- **两份总结**，放在每个应用项目的 `.octobuddy/docs/` 里，外环和每个内环都先读它们：
+  - `SPLASH-COOKBOOK.md`：验证过的 Splash 写法（页面、列表、表单、存储、日期、金额、柱状图），各种坑和它们报的错，以及 OctoBuddy 自己跑出来的经验。
+  - `DESIGN-FLOW.md`：把 OctoScript App Design Flow 汇总在一处。内容包括流程的每一步和通过条件；哪些地方必须由人来定（发布者信息、密钥和签名、正式提交）；设计检查清单（空状态、错误状态、重启后的状态，每个操作的含义）；manifest 和 listing 的规则；每种能力在现有设备上实际能用到什么；常见错误。每条都注明它在 design flow 仓库里的出处行（基于 `63d3dbda` 整理）。
+  - design flow 自己的文档也复制在旁边（AGENTS.md、FLOW.md、SCRIPT-API.md、CAPABILITIES.md、HOST-SERVICES.md、PUBLISHING.md），只在需要总结引用的原文时打开对应的行。
+- **一个 skill。**同样的内容做成 skill `octosense-app`，放在 OctoBuddy 写到 `<data>/agent-plugin/octobuddy/` 的插件里。Claude Code 用 `--plugin-dir` 加载，pi 用 `--skill`。
+- **每种 agent 都有的工具。**内环的沙箱里跑不了应用，OctoBuddy 在沙箱外替它跑：
+  - `octobuddy_app_look`：脚本错误、截图、屏幕上的控件；
+  - `octobuddy_app_drive`：按 id 或文字点击、输入、按键、等待、查看，用实际操作来验证一条流程；
+  - `octobuddy_app_probe`：几秒内无界面地跑几行 Splash，用试的代替去读运行时源码；
+  - `octobuddy_check`：切片自己的检查。
+
+  Claude Code 和 Codex 通过 MCP 调用。octos 通过内环 profile 里的一个 stdio 小转接程序调用，因为 octos 拒绝本机回环地址上的 HTTP MCP。pi 没有 MCP，用命令 `octobuddy-app look | drive <steps.json> | probe <file> | check`。外环也有 probe 和 drive。
+- **分块。**新项目的 `bundle/main.splash` 由 `app/parts/*.splash`（共享状态、每页一块、根）在每次检查、预览和发布前拼成。这样各个页面可以由不同切片同时做。检查报错时会指出是哪一块、哪一行。
+- **审查前先检查。**切片的检查没过时，OctoBuddy 先把输出交回它的内环修，遇到认得的错误还附上提示，最多 2 次，然后才交给外环审查。一轮以「接下来我会……」这类承诺结束时，会被提醒一次把事做完。
+- **从返工中学习。**某一轮被接受但有返工浪费了时间时，或点了「从中学习」后，外环用 `octobuddy_learn` 最多记下 3 条新经验。`splash` 类的经验进入每个项目的 cookbook 和 skill，`orchestration` 类的经验进入外环的规则。保存在 `<data>/lessons/`。
+- **已验证：**2026-10-02 做了小账本（pocket-ledger）：外环是 Claude Code · Opus，内环是跑在 MiniMax 和 GLM 上的 codex、octos、pi 和 Claude Code。它已发布到本地 App Hub（0.1.1）。那次用了约 2 小时，当时还没有分块、每种 agent 的工具和这两份总结；有了它们之后的计时重跑还没做。
 
 ## 应用工厂
 
