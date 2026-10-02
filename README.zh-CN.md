@@ -184,14 +184,48 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **单独运行时有什么不同。**
   - 没有系统 agent：关于页会说明，选择器也不提供 OctoSense 的 agent；octos 跑在 OctoBuddy 自己的 octos 上。
   - `octobuddy.status`、`.report`、`.request` 要在 OctoSense 里才能被调用，所以宿主机上的「应用」页不会收到外部请求；巡检照常工作。
-  - AI providers：只读地读取 OctoSense 的 AI Providers 应用写的那份 profile（`<OctoSense home>/octos-home/.octos/profiles/_main.json`）。设置 › AI Providers 会写明是哪个文件；用 `OCTOBUDDY_PROVIDERS=<octos 目录>` 可以换一份。
+  - AI providers：用它自己的，或 OctoSense 的（见下文）。
   - agent 的程序用它自带的或你自己的（见上文）。
 - **数据**在 `~/.octobuddy`（用 `OCTOBUDDY_HOME` 可以换目录），宿主机上和 OctoSense 里是同一份。
 - **还没做：**
   - 发布包（用 cargo-packager 打签名的 `.dmg`、Linux 和 Windows 安装包、发布 workflow）；
-  - OctoBuddy 自己的 providers 表单，不必再读 OctoSense 的 profile；
   - 把 octos 打进应用包里。
 - **已验证：**2026-10-02 在 macOS（Apple silicon）上验证：`cargo run` 启动了 `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`，窗口标题是 OctoBuddy；关于页和 AI Providers 页都说明它是单独运行的，并写明了读取的 profile。
+
+### 它自己的 AI providers
+
+在宿主机上，设置 › AI Providers 是 OctoBuddy 自己的，做法参照 Cindy。在 OctoSense 里，这一页和以前一样只读地显示 shell 的 AI Providers。代码在 `src/own_providers.rs`（数据）和 `src/providers_view.rs`（页面）。
+
+- **同一种格式。**它存在 `<data>/providers/profiles/_main.json`，用 `octosense-llm-config` 写。OctoSense 的 AI Providers 应用就是基于这个库做的，供应商、模型和接入点都来自它的目录。所以本机代理、各 agent 和 inner 的 octos 读这份配置，和读 OctoSense 的一样。
+- **来源由你选**，就在页面标题下面：
+  - **OctoBuddy 自己的**（有了之后默认用它）；
+  - **OctoSense 的**：它的 AI Providers 应用写的那份，只读。
+
+  OctoSense 的里有 OctoBuddy 自己没有的 provider 时，会出现横幅，提供 **导入**。导入会把它们加在 OctoBuddy 自己的后面，并复制它们的 key。它不会替换 OctoBuddy 已有的 provider 或 key，也不改动 OctoSense 的。`OCTOBUDDY_PROVIDERS=<octos 目录>` 仍可指定另一份配置，只读。
+- **添加**分三步：
+  1. **选择供应商。**分三组：Coding Plan 在前，然后是更多供应商，最后是本机和自托管。每一项都写明要不要 key、有几个模型、哪些 agent 能跑在它上面。
+  2. **连接。**选接入点，填 key（输入时显示为圆点）。只有接入点是你自己的服务时才要填接入地址。对已知控制台的供应商，**获取 API Key…** 会打开它的控制台。**测试连接**只发一个 1 token 的请求，并显示返回结果。Key 从不显示，报错里也没有。
+  3. **选择模型。**列出这个接入点上的模型。推荐的那个默认勾选；多勾几个，就作为后备一起加上。
+- **列表**主模型在前。每一行写明哪些 agent 能跑在它上面，按接入点的协议推导：
+  - Anthropic 兼容的接入点上能跑 Claude Code 和 pi；
+  - 有 Chat Completions 的地方能跑 Codex（经转换层）；
+  - octos 哪里都能跑。
+
+  按钮有 **设为主模型**、**测试**、**删除**。删除要点两次；如果没有别的 provider 用同一个 key，删除时也会删掉这个 key。
+- **Key。**
+  - 在 macOS 上，key 存进 octos 读取的钥匙串条目（服务 `octos`），账户是 OctoBuddy 自己的 `<KEY_ENV>::octobuddy`，不会碰到 OctoSense 给同一个供应商存的条目。配置文件里只写标记 `keychain:<账户>`。
+  - 在其他系统上，key 直接写在配置文件里。
+  - 配置文件权限是 `0600`。
+  - Key 通过标准输入交给钥匙串（`security -i`）和测试（`curl -K -`），从不出现在命令行上。
+  - Agent 拿到的仍然是占位符，由 OctoBuddy 的代理在上游加上 key。相比之下，Cindy 会把 key 本身交给 pi。
+- **Agent 自己的登录。**页面会显示 Claude Code（`claude auth status`）和 Codex（`codex login status`）有没有登录，但不显示登录的是谁。没选 provider 时，agent 就用它自己的登录。
+- **还没做：**在页面上登录（目前只提示要运行的命令）；目录里没有的供应商的自定义接入点；从供应商拉取模型列表。
+- **已验证：**2026-10-02 在 macOS 上，用隐藏窗口、单独的数据目录和一份假的 OctoSense 配置（`OCTOS_APP_CORE_DIR`）验证：
+  - 页面读出了 OctoSense 的配置，并提示可以导入；
+  - 选「OctoBuddy 自己的」后，向导添加了 `zai-coding/glm-5.3` 和 `glm-5.3-flash`。配置文件权限是 `0600`，里面只有钥匙串标记，key 进了钥匙串；
+  - 用假 key 测试，显示了供应商返回的 `401`，key 被遮住；
+  - 「设为主模型」调整了顺序，「导入」补上了缺的那个；
+  - 删除全部行后，钥匙串条目也被删掉，OctoSense 的配置没有变化。
 
 ## 构建与测试
 

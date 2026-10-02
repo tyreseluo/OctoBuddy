@@ -36,6 +36,8 @@ mod orchestrate;
 pub mod plan;
 mod persist;
 pub mod providers;
+pub mod own_providers;
+mod providers_view;
 mod review;
 pub mod stream;
 pub mod system;
@@ -805,13 +807,59 @@ script_mod! {
                 width: Fill height: Fit flow: Down spacing: 3
                 name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
                 detail := Label{width: Fill text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
+                agents := Label{width: Fill text: "" draw_text.color: th_success draw_text.text_style.font_size: 9}
             }
+            row_primary := SegOff{text: "Make primary" visible: false}
+            row_test := SegOff{text: "Test" visible: false}
+            row_remove := SegOff{text: "Remove" visible: false}
             role_badge := RoundedView{
                 width: Fit height: Fit new_batch: true
                 padding: Inset{left: 8 right: 8 top: 2 bottom: 2}
                 draw_bg.color: th_accent_soft draw_bg.border_radius: 8.0
                 role := Label{text: "" draw_text.color: th_accent_ink draw_text.text_style: theme.font_bold{font_size: 8.5}}
             }
+        }
+    }
+
+    // OctoBuddy's own (on the host): its rows can be changed. (Visibility
+    // set on a list item's child does not take: a template each.)
+    let OwnPrimaryRow = ProviderRowView{card +: {row_test +: {visible: true} row_remove +: {visible: true}}}
+    let OwnFallbackRow = ProviderRowView{card +: {row_primary +: {visible: true} row_test +: {visible: true} row_remove +: {visible: true}}}
+
+    // Settings › AI Providers on the host: the add wizard's rows.
+    let WizardHeader = View{
+        width: Fill height: Fit padding: Inset{top: 10 bottom: 4}
+        label := Label{text: "" draw_text.color: muted draw_text.text_style: theme.font_bold{font_size: 9.5}}
+    }
+    let WizardFamily = View{
+        width: Fill height: Fit padding: Inset{top: 3 bottom: 3}
+        card := HoverRow{
+            width: Fill height: Fit new_batch: true flow: Right spacing: 10 align: Align{y: 0.5}
+            padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
+            cursor: MouseCursor.Hand grab_key_focus: false
+            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            View{
+                width: Fill height: Fit flow: Down spacing: 3
+                name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
+                meta := Label{width: Fill text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
+            }
+            tag := Label{text: "" draw_text.color: th_accent draw_text.text_style.font_size: 9}
+        }
+    }
+    let WizardModel = View{
+        width: Fill height: Fit padding: Inset{top: 2 bottom: 2}
+        card := HoverRow{
+            width: Fill height: Fit new_batch: true flow: Right spacing: 10 align: Align{y: 0.5}
+            padding: Inset{left: 14 right: 14 top: 8 bottom: 8}
+            cursor: MouseCursor.Hand grab_key_focus: false
+            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            mark := Label{width: 16 text: "" draw_text.color: th_accent draw_text.text_style: theme.font_bold{font_size: 11}}
+            View{
+                width: Fill height: Fit flow: Down spacing: 2
+                name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style.font_size: 10.5}
+                meta := Label{width: Fill text: "" draw_text.color: muted draw_text.text_style.font_size: 9}
+            }
+            tag := Label{text: "" draw_text.color: th_accent draw_text.text_style.font_size: 9}
         }
     }
 
@@ -1760,13 +1808,82 @@ script_mod! {
                             }
                         }
                         providers_hint := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
-                        provider_list := PortalList{
-                            width: Fill height: 260
-                            Provider := ProviderRowView{}
-                            Empty := ProvidersEmpty{}
+                        // On the host: OctoSense's AI providers found here, and where they come from.
+                        os_found := RoundedView{
+                            width: Fill height: Fit new_batch: true flow: Right spacing: 8 align: Align{y: 0.5} visible: false
+                            padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
+                            draw_bg.color: th_accent_soft draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_accent_line
+                            os_found_text := Label{width: Fill text: "" draw_text.color: th_accent_ink draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                            import_providers := SegOn{text: "Import"}
                         }
-                        inner_model_title := SectionTitle{text: "Inner loop model"}
-                        inner_source := Body{}
+                        own_bar := View{
+                            width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5} visible: false
+                            src_label := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
+                            src_own_on := SegOn{text: "OctoBuddy's own"} src_own := SegOff{text: "OctoBuddy's own"}
+                            src_os_on := SegOn{text: "OctoSense's"} src_os := SegOff{text: "OctoSense's"}
+                            Filler{}
+                            add_provider := SegOn{text: "+ Add a provider"}
+                        }
+                        // (A list's own visibility does not take: its box's does.)
+                        provider_box := View{
+                            width: Fill height: Fill
+                            provider_list := PortalList{
+                                width: Fill height: Fill
+                                Provider := ProviderRowView{}
+                                OwnPrimary := OwnPrimaryRow{}
+                                OwnFallback := OwnFallbackRow{}
+                                Empty := ProvidersEmpty{}
+                            }
+                        }
+                        own_status := Label{width: Fill text: "" visible: false draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                        // The add wizard: pick a provider, connect it, pick its models (as Cindy's).
+                        wizard := RoundedView{
+                            width: Fill height: Fill new_batch: true flow: Down spacing: 8 visible: false
+                            padding: Inset{left: 16 right: 16 top: 12 bottom: 12}
+                            draw_bg.color: th_panel draw_bg.border_radius: 10.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                            View{
+                                width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                wz_title := Label{text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
+                                wz_steps := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
+                                Filler{}
+                                wz_cancel := SegOff{text: "Cancel"}
+                            }
+                            wz_list := PortalList{
+                                width: Fill height: Fill
+                                Header := WizardHeader{}
+                                Family := WizardFamily{}
+                                Model := WizardModel{}
+                            }
+                            // Step 2: its endpoint and key.
+                            wz_connect := View{
+                                width: Fill height: Fit flow: Down spacing: 8 visible: false
+                                wz_base_box := View{
+                                    width: Fill height: Fit flow: Down spacing: 8
+                                    wz_base_label := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
+                                    wz_base := InputStyle{width: Fill height: 32 empty_text: "https://…/v1"}
+                                }
+                                wz_key_label := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
+                                wz_key := InputStyle{width: Fill height: 32 is_password: true empty_text: "API key"}
+                                wz_key_link := SegOff{text: "Get an API key…"}
+                                wz_note := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                            }
+                            View{
+                                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                                wz_back := SegOff{text: "Back"}
+                                wz_test := SegOff{text: "Test connection"}
+                                wz_status := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                                wz_next := SegOn{text: "Next"}
+                                wz_finish := SegOn{text: "Add"}
+                            }
+                        }
+                        // The agents' own logins (a Claude or ChatGPT subscription), used when no provider is picked.
+                        logins_title := SectionTitle{text: "" visible: false}
+                        logins := Label{width: Fill text: "" visible: false draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                        inner_box := View{
+                            width: Fill height: Fit flow: Down spacing: 10
+                            inner_model_title := SectionTitle{text: "Inner loop model"}
+                            inner_source := Body{}
+                        }
                     }
                     plugins_section := View{
                         width: Fill height: Fill flow: Down spacing: 10 visible: false
@@ -2076,6 +2193,21 @@ pub struct OctoBuddyView {
     // What AI providers has enabled, as last read.
     #[rust]
     providers: Providers,
+    // Settings › AI Providers on the host (`providers_view.rs`): the add
+    // wizard while open, what was last done, the row asked to be removed,
+    // the agents' own sign-ins.
+    #[rust]
+    wizard: Option<providers_view::Wizard>,
+    #[rust]
+    wizard_clear: bool,
+    #[rust]
+    own_note: Option<Result<String, String>>,
+    #[rust]
+    confirm_remove: Option<String>,
+    #[rust]
+    logins: Option<Vec<(String, String)>>,
+    #[rust]
+    logins_probing: bool,
     // Where the view was last drawn: a change means a relayout, see draw_walk.
     #[rust]
     last_rect: Rect,
@@ -2594,20 +2726,9 @@ impl OctoBuddyView {
             self.view.button(cx, id).set_visible(cx, show);
         }
 
-        let hint = if system::hosted() {
-            i18n::pick(format!("Enabled in OctoSense's AI providers app ({}). OctoBuddy only reads them: change them there, then press Reload.",
-                self.providers.profile_path.display()), format!("来自 OctoSense 的 AI Providers 应用（{}）。OctoBuddy 只读取：请在那里修改，然后点「重新载入」。",
-                self.providers.profile_path.display()))
-        } else {
-            // On the host: where they come from, said, not assumed.
-            i18n::pick(format!("On its own, OctoBuddy reads the AI providers profile in {} (where OctoSense's AI providers app writes it). It only reads it. Another one: start OctoBuddy with OCTOBUDDY_PROVIDERS=<an octos folder holding profiles/_main.json>, then press Reload.",
-                self.providers.profile_path.display()), format!("单独运行时，OctoBuddy 读取 {} 里的 AI providers 配置（OctoSense 的 AI Providers 应用写在这里），只读不改。要换一份：用 OCTOBUDDY_PROVIDERS=<含 profiles/_main.json 的 octos 目录> 启动 OctoBuddy，再点「重新载入」。",
-                self.providers.profile_path.display()))
-        };
-        self.view.label(cx, ids!(providers_hint)).set_text(cx, &hint);
+        self.sync_providers_page(cx);
         let peer = providers::peer_profile(&self.providers);
         self.view.label(cx, ids!(inner_source)).set_text(cx, &i18n::pick(format!("Inner loops run with {}.", peer.source), format!("Inner 使用 {}。", peer.source)));
-        self.view.portal_list(cx, ids!(provider_list)).redraw(cx);
 
         self.view.label(cx, ids!(about_version)).set_text(cx, &i18n::pick(format!("Version {}", env!("CARGO_PKG_VERSION")), format!("版本 {}", env!("CARGO_PKG_VERSION"))));
         let (claude, octos) = (workspace::find_bin("claude"), workspace::find_bin("octos"));
@@ -2813,7 +2934,7 @@ impl OctoBuddyView {
         for (id, text) in labels {
             self.view.label(cx, id).set_text(cx, text);
         }
-        let buttons: [(&[LiveId], &str); 27] = [
+        let buttons: [(&[LiveId], &str); 33] = [
             (ids!(stop), t("Stop", "停止")),
             (ids!(go_on), t("Go on", "继续")),
             (ids!(send), t("Send", "发送")),
@@ -2828,6 +2949,12 @@ impl OctoBuddyView {
             (ids!(approve_session), t("Always in this session", "本会话内都允许")),
             (ids!(deny), t("Deny", "拒绝")),
             (ids!(reload_providers), t("Reload", "重新载入")),
+            (ids!(src_own_on), t("OctoBuddy's own", "OctoBuddy 自己的")),
+            (ids!(src_own), t("OctoBuddy's own", "OctoBuddy 自己的")),
+            (ids!(src_os_on), t("OctoSense's", "OctoSense 的")),
+            (ids!(src_os), t("OctoSense's", "OctoSense 的")),
+            (ids!(add_provider), t("+ Add a provider", "+ 添加供应商")),
+            (ids!(import_providers), t("Import", "导入")),
             (ids!(nav_plugins_on), t("Plugins", "插件")),
             (ids!(nav_plugins), t("Plugins", "插件")),
             (ids!(nav_tools_on), t("Tools", "工具")),
@@ -4281,8 +4408,11 @@ impl OctoBuddyView {
         }
         if self.view.button(cx, ids!(reload_providers)).clicked(actions) {
             self.providers = providers::read();
+            self.logins = None;
+            self.own_note = None;
             self.relayout(cx);
         }
+        self.providers_page_actions(cx, actions);
         if let Some(on) = self.view.check_box(cx, ids!(use_worktree)).changed(actions) {
             if let Some(session) = self.selected.and_then(|at| self.store.session_mut(at)).filter(|s| s.work_dir.is_none()) {
                 session.worktree = Some(on);
@@ -4617,34 +4747,6 @@ impl OctoBuddyView {
                 };
                 item.label(cx, ids!(took)).set_text(cx, &took);
             }
-            item.draw_all_unscoped(cx);
-        }
-    }
-
-    fn draw_providers(&mut self, cx: &mut Cx2d, list: &mut PortalList) {
-        if self.providers.rows.is_empty() {
-            let why = match &self.providers.error {
-                Some(err) => i18n::pick(format!("Could not read the AI providers profile: {err}"), format!("无法读取 AI Providers 配置：{err}")),
-                None => i18n::pick(format!("No provider is enabled in OctoSense yet. Open Start → Settings → AI providers in OctoSense to add one. Until then the inner loop uses the octos profile “{}”.", providers::fallback_profile()),
-                    format!("OctoSense 里还没有启用任何 provider。请在 OctoSense 的「开始 → 设置 → AI providers」中添加。在此之前 inner 使用 octos 配置“{}”。", providers::fallback_profile())),
-            };
-            list.set_item_range(cx, 0, 1);
-            while let Some(index) = list.next_visible_item(cx) {
-                if index == 0 {
-                    let item = list.item(cx, index, id!(Empty));
-                    item.label(cx, ids!(empty_text)).set_text(cx, &why);
-                    item.draw_all_unscoped(cx);
-                }
-            }
-            return;
-        }
-        list.set_item_range(cx, 0, self.providers.rows.len());
-        while let Some(index) = list.next_visible_item(cx) {
-            let Some(row) = self.providers.rows.get(index) else { continue };
-            let item = list.item(cx, index, id!(Provider));
-            item.label(cx, ids!(name)).set_text(cx, &row.label);
-            item.label(cx, ids!(detail)).set_text(cx, &format!("route: {} · {}", row.route, row.key.label()));
-            item.label(cx, ids!(role)).set_text(cx, &row.role);
             item.draw_all_unscoped(cx);
         }
     }
@@ -5098,6 +5200,7 @@ impl Widget for OctoBuddyView {
         let tree_uid = self.view.portal_list(cx, ids!(tree)).widget_uid();
         let tabs_uid = self.view.portal_list(cx, ids!(tabs)).widget_uid();
         let providers_uid = self.view.portal_list(cx, ids!(provider_list)).widget_uid();
+        let wizard_uid = self.view.portal_list(cx, ids!(wz_list)).widget_uid();
         let peer_messages_uid = self.view.portal_list(cx, ids!(peer_messages)).widget_uid();
         let flow_chat_uid = self.view.portal_list(cx, ids!(flow_chat)).widget_uid();
         let spec_list_uid = self.view.portal_list(cx, ids!(flow_spec_list)).widget_uid();
@@ -5113,6 +5216,8 @@ impl Widget for OctoBuddyView {
                     self.draw_tabs(cx, &mut list);
                 } else if uid == providers_uid {
                     self.draw_providers(cx, &mut list);
+                } else if uid == wizard_uid {
+                    self.draw_wizard(cx, &mut list);
                 } else if uid == peer_messages_uid {
                     self.draw_peer_messages(cx, &mut list);
                 } else if uid == flow_chat_uid {
@@ -5223,6 +5328,11 @@ impl Widget for OctoBuddyView {
                 }
                 self.card_loop_pending(cx);
                 self.factory_pending(cx);
+                if std::mem::take(&mut self.wizard_clear) {
+                    // The wizard's key and URL, used: not kept in the field.
+                    self.view.text_input(cx, ids!(wz_key)).set_text(cx, "");
+                    self.view.text_input(cx, ids!(wz_base)).set_text(cx, "");
+                }
                 if let Some((_, Err(err))) = &self.data_added {
                     let note = self.view.label(cx, ids!(data_note));
                     note.set_text(cx, &i18n::pick(format!("Could not add it: {err}"), format!("没能添加：{err}")));

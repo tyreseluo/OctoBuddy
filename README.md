@@ -179,14 +179,48 @@ As Rinx does, OctoBuddy runs first as an app of its own on this computer, and th
 - **What changes on its own.**
   - There is no system agent. The About page says so, and the picker does not offer OctoSense's agent; octos runs on OctoBuddy's own octos.
   - `octobuddy.status`, `.report` and `.request` are OctoSense's to call, so on the host the Apps page has no requests from outside. Its live watch works as in OctoSense.
-  - AI providers: it reads the profile OctoSense's AI providers app writes (`<OctoSense home>/octos-home/.octos/profiles/_main.json`), read-only. Settings › AI Providers names that file. `OCTOBUDDY_PROVIDERS=<an octos folder>` names another.
+  - AI providers: its own, or OctoSense's (below).
   - The agents' programs are its own copies (above), or yours.
 - **Its data** is in `~/.octobuddy` (`OCTOBUDDY_HOME` names another folder), the same on the host and in OctoSense.
 - **Not done yet:**
   - a release package (a signed `.dmg` with cargo-packager, Linux and Windows installers, a release workflow);
-  - a providers form of its own, so that it need not read OctoSense's profile;
   - octos shipped inside the app.
 - **Verified** on macOS (Apple silicon) on 2026-10-02: `cargo run` started `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`, in a window titled OctoBuddy, and its About and AI Providers pages said it runs on its own and named the profile it reads.
+
+### Its AI providers
+
+On the host, Settings › AI Providers is OctoBuddy's own, set up the way Cindy does it. Inside OctoSense the page shows the shell's AI providers, read-only, as before. The code is in `src/own_providers.rs` (the data) and `src/providers_view.rs` (the page).
+
+- **One format.** It keeps them in `<data>/providers/profiles/_main.json`, written with `octosense-llm-config`, the library OctoSense's AI providers app is built on. Its catalog gives the families, models and endpoints. So the proxy, the agents and the inner loops' octos read this profile the same way they read OctoSense's.
+- **Where they come from** is yours to pick, under the page's title:
+  - **OctoBuddy's own** (the default once it has any);
+  - **OctoSense's**: the profile its AI providers app writes, read-only.
+
+  When OctoSense's has providers OctoBuddy's own does not, a banner offers **Import**. It adds them after OctoBuddy's own and copies their keys. It never replaces a provider or a key OctoBuddy already has, and it leaves OctoSense's as they are. `OCTOBUDDY_PROVIDERS=<an octos folder>` still names another profile, read-only.
+- **Adding one** is a three-step wizard:
+  1. **Provider.** The families in three groups: coding plans first, then more providers, then local servers. Each family says whether it needs a key, how many models it has, and which agents can run on it.
+  2. **Connect.** Pick its endpoint and enter its key (masked). A base URL is asked for only when the endpoint is your own. **Get an API key…** opens the provider's console, for the providers whose console is known. **Test connection** sends one request of a single token and shows what came back. The key is never shown, even in an error.
+  3. **Models.** The models served on that endpoint. The recommended one is checked; check more to add them as fallbacks.
+- **Its rows** are primary first. Each one says which agents run on it, from its endpoint's protocol:
+  - Claude Code and pi on an Anthropic-compatible endpoint;
+  - Codex where there is Chat Completions, through the bridge;
+  - octos on any.
+
+  The buttons are **Make primary**, **Test** and **Remove**. Remove takes a second click, and it deletes the key when no other provider uses it.
+- **Keys.**
+  - On macOS a key goes to the keychain item octos reads (service `octos`), under OctoBuddy's own account `<KEY_ENV>::octobuddy`, so OctoSense's item for the same provider is never touched. The profile holds only the marker `keychain:<account>`.
+  - Elsewhere the key is in the profile itself.
+  - The profile is written `0600`.
+  - The key reaches the keychain (`security -i`) and the test (`curl -K -`) on their standard input, never on a command line.
+  - Agents still get placeholders: OctoBuddy's proxy adds the key upstream. Cindy, by comparison, gives pi the key itself.
+- **The agents' own sign-in.** The page shows whether Claude Code (`claude auth status`) and Codex (`codex login status`) are signed in, without saying who. An agent with no provider picked runs on that.
+- **Not done yet:** signing in from the page (it says which command to run), a custom endpoint for a family the catalog does not list, and fetching a provider's model list.
+- **Verified** on macOS on 2026-10-02 in a hidden window with a data folder of its own and a fake OctoSense profile (`OCTOS_APP_CORE_DIR`):
+  - the page read OctoSense's and offered to import it;
+  - with OctoBuddy's own selected, the wizard added `zai-coding/glm-5.3` and `glm-5.3-flash`. The profile was `0600` and held only the keychain marker, and the key went to the keychain;
+  - a fake key's test showed the provider's `401` with the key masked;
+  - Make primary reordered the rows, and Import added the one it lacked;
+  - removing every row deleted the keychain items, and OctoSense's profile was unchanged.
 
 ## Build and test
 

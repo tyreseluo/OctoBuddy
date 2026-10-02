@@ -16,6 +16,10 @@ pub enum LoopEvent {
     Published { session: String, result: Result<crate::plugins::app_publish::Published, String> },
     /// A request's context pack, built off the UI thread: the request goes on.
     PackReady { session: String, message: String, pack: Option<String> },
+    /// Settings › AI Providers: a test, an add, an import or a removal is done.
+    ProvidersDone { job: crate::providers_view::ProvidersJob, result: Result<String, String> },
+    /// Settings › AI Providers: the agents' own sign-ins (agent, what it says).
+    LoginsProbed(Vec<(String, String)>),
     /// Settings › Tools: the versions found on this machine.
     ToolsProbed(Vec<crate::tools_info::ToolInfo>),
     /// OctoBuddy's copy of an agent's program is installed (its path), or
