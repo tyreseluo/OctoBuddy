@@ -9,16 +9,16 @@
 //! results back to the lead for review.
 pub use makepad_widgets;
 use makepad_widgets::*;
-use makepad_app_module::{
-    AppModule, ExecOutcome, InstanceHandles, InstanceParts, OpenSchema,
-    ServiceExecutor, ValidatedOpen,
-    makepad_ai_services::wire::{ServiceCall, ServiceManifest, ToolResult},
-};
 use makepad_widgets::makepad_platform::file_dialogs::{FileDialog, FileDialogAction};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub mod agents;
+/// The module OctoSense hosts: its pane in the shell (`OCTOBUDDY_MODULE`).
+#[cfg(feature = "octosense-module")]
+mod module;
+#[cfg(feature = "octosense-module")]
+pub use module::{OctoBuddyModule, OCTOBUDDY_MODULE};
 mod chat;
 mod context;
 pub mod flow;
@@ -769,6 +769,7 @@ script_mod! {
             run_now := SegOff{text: "Run now"}
             drill_on := SegOn{text: "Drill"} drill_off := SegOff{text: "Drill"}
             auto_on := SegOn{text: "Auto repair"} auto_off := SegOff{text: "Auto repair"}
+            drill_bad := SegOff{text: "Drill: bad release"}
             open := SegOff{text: "Session"}
             repair := SegOn{text: "Repair"}
             publish_fix := SegOn{text: "Publish fix"}
@@ -2593,9 +2594,16 @@ impl OctoBuddyView {
             self.view.button(cx, id).set_visible(cx, show);
         }
 
-        let hint = i18n::pick(format!("Enabled in OctoSense's AI providers app ({}). OctoBuddy only reads them: change them there, then press Reload.",
-            self.providers.profile_path.display()), format!("来自 OctoSense 的 AI Providers 应用（{}）。OctoBuddy 只读取：请在那里修改，然后点「重新载入」。",
-            self.providers.profile_path.display()));
+        let hint = if system::hosted() {
+            i18n::pick(format!("Enabled in OctoSense's AI providers app ({}). OctoBuddy only reads them: change them there, then press Reload.",
+                self.providers.profile_path.display()), format!("来自 OctoSense 的 AI Providers 应用（{}）。OctoBuddy 只读取：请在那里修改，然后点「重新载入」。",
+                self.providers.profile_path.display()))
+        } else {
+            // On the host: where they come from, said, not assumed.
+            i18n::pick(format!("On its own, OctoBuddy reads the AI providers profile in {} (where OctoSense's AI providers app writes it). It only reads it. Another one: start OctoBuddy with OCTOBUDDY_PROVIDERS=<an octos folder holding profiles/_main.json>, then press Reload.",
+                self.providers.profile_path.display()), format!("单独运行时，OctoBuddy 读取 {} 里的 AI providers 配置（OctoSense 的 AI Providers 应用写在这里），只读不改。要换一份：用 OCTOBUDDY_PROVIDERS=<含 profiles/_main.json 的 octos 目录> 启动 OctoBuddy，再点「重新载入」。",
+                self.providers.profile_path.display()))
+        };
         self.view.label(cx, ids!(providers_hint)).set_text(cx, &hint);
         let peer = providers::peer_profile(&self.providers);
         self.view.label(cx, ids!(inner_source)).set_text(cx, &i18n::pick(format!("Inner loops run with {}.", peer.source), format!("Inner 使用 {}。", peer.source)));
@@ -2607,6 +2615,8 @@ impl OctoBuddyView {
             claude.display(), octos.display(), peer.source), format!("外环和 inner 可以跑在 Claude Code（{}）、Codex 或 pi（用你的 AI providers，经 OctoBuddy 本机代理）、或 octos（{}，使用 {}）上。版本见 设置 › 工具。",
             claude.display(), octos.display(), peer.source));
         let link = match (&self.link, &self.system_link) {
+            (None, _) if !system::hosted() => i18n::t("On its own: OctoBuddy runs on this computer, not in OctoSense. There is no system agent here; octobuddy.status, octobuddy.report and octobuddy.request are OctoSense's to call when OctoBuddy runs in it.",
+                "单独运行：OctoBuddy 运行在这台电脑上，不在 OctoSense 里。这里没有系统 agent；octobuddy.status、octobuddy.report 和 octobuddy.request 要在 OctoSense 里运行时才能被调用。").to_string(),
             (None, _) => i18n::t("System octos: not linked (OctoSense has not granted OctoBuddy an assistant here).", "系统 octos：未接入（OctoSense 在这里没有给 OctoBuddy 授权助手）。").to_string(),
             (Some(_), None) => i18n::t("System octos: linking OctoBuddy's peer…", "系统 octos：正在接入 OctoBuddy 的 peer…").to_string(),
             (Some(_), Some(Ok(()))) => i18n::t("System octos: linked. The system agent sees OctoBuddy as a peer and can call octobuddy.status and octobuddy.send.", "系统 octos：已接入。系统 agent 能看到 OctoBuddy 这个 peer，并可调用 octobuddy.status 和 octobuddy.send。").to_string(),
@@ -5358,47 +5368,9 @@ impl Widget for OctoBuddyView {
     }
 }
 
-pub struct OctoBuddyModule;
-pub static OCTOBUDDY_MODULE: OctoBuddyModule = OctoBuddyModule;
-
 /// Its launcher art (64×64 SVG): the shell's dock and home draw it as they
 /// draw App Hub's (`octosense_app_hub_app::APP_ICON_SVG`).
 pub const APP_ICON_SVG: &str = include_str!("../resources/app-icon.svg");
-
-impl AppModule for OctoBuddyModule {
-    fn id(&self) -> &'static str { "octobuddy" }
-    fn label(&self) -> &'static str { "OctoBuddy" }
-    fn register(&self, vm: &mut ScriptVm) {
-        // The terminal the native TUI plugin shows an agent's CLI in.
-        makepad_terminal::widget::script_mod(vm);
-        script_mod(vm);
-    }
-    fn open_schema(&self) -> OpenSchema { OpenSchema::new(1) }
-    // The assistant services: OctoBuddy's peer on the system octos.
-    fn capabilities(&self) -> &'static [&'static str] { &octosense_app_peers::OCTOS_SERVICES }
-    fn create(&self, vm: &mut ScriptVm, _open: ValidatedOpen, handles: InstanceHandles) -> InstanceParts {
-        system::keep(octosense_app_peers::injection::claim(system::APP_ID, &handles.scope.to_string()));
-        let value = script_eval!(vm, {
-            use mod.widgets.*
-            OctoBuddyView {}
-        });
-        InstanceParts {
-            root: WidgetRef::script_from_value(vm, value),
-            executor: Box::new(OctoBuddyExecutor),
-            shutdown: Box::new(|_| {}),
-        }
-    }
-}
-
-struct OctoBuddyExecutor;
-impl ServiceExecutor for OctoBuddyExecutor {
-    fn manifest(&self) -> ServiceManifest {
-        ServiceManifest::new("octobuddy", "OctoBuddy", "Projects and sessions for the OctoBuddy two-loop workflow.")
-    }
-    fn execute(&mut self, _cx: &mut Cx, call: &ServiceCall) -> ExecOutcome {
-        ExecOutcome::Done(ToolResult::unavailable(&call.call_id, "OctoBuddy has no tools yet"))
-    }
-}
 
 #[cfg(test)]
 mod tests {

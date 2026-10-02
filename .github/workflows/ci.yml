@@ -26,3 +26,5 @@ jobs:
       # The live tests (the agents' CLIs and providers) are #[ignore]d.
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets --no-deps -- -D warnings
+      # The build OctoSense takes: the module alone.
+      - run: cargo clippy --locked --all-targets --no-deps --no-default-features --features octosense-module -- -D warnings

@@ -67,7 +67,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 - **请求。**OctoSense 系统 agent，或被授权的其他应用的 agent，调用 `octobuddy.request {what, for, acceptance, data, name}`。调用立刻返回请求的 id。
 - **等你决定。**请求出现在「应用」页（侧栏底部设置旁边的脉冲按钮；有请求等待时按钮显示为强调色），写明谁请求、为谁做、验收标准和数据来源。点**开始做**之前，什么都不会建，也不花模型的钱。点**不做**则拒绝。
-- **建造。**点「开始做」后，OctoBuddy 在 `<data>/apps/` 下从设计流程的模板建项目，读取它指定的数据 API。然后把请求连同数据结构，作为你的消息交给一个新会话的外环，并打开这个会话。
+- **建造。**点「开始做」后，OctoBuddy 在 `<data>/apps/` 下从设计流程的模板建项目，读取它指定的数据 API，然后打开一个新会话，把请求的说明放在输入框里。在输入框下方的选择器里选好外环和内环用的模型，再发送；数据结构会随这条消息一起交给外环。
 - **发布。**外环停下后，在卡片上点**发布**，把它发布到本地 App Hub。发布后自动开启巡检。
 - **跟进。**`octobuddy.status` 的 `requests` 列出每个请求的状态：等你决定、已拒绝、准备中、建造中（以及外环是否在工作）、已发布（版本号）、失败。
 - **记录**在 `<data>/requests.json`。
@@ -121,6 +121,11 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 **演练。**已发布的副本本身从不改动。
 - **演练断网**（`offline`）：巡检运行时断开应用的 API，设备之前用过它。
 - 在 `watch.json` 里写 `"drill": "offline-fresh"`：按新设备运行，没有任何缓存。
+- **演练：发布坏版本**：故意把应用改坏，作为下一个版本发布，模拟一次没走检查就上线的改动。
+  - 在 `main.splash` 里挑被调用最多的函数，只改它定义处的名字，调用处不变。
+  - 这处改动在项目里单独作为一个提交（`drill: 坏版本演练…`）。
+  - 由此产生的故障会标为这次演练。修复说明会要求外环根据巡检看到的错误找到原因并修好，不要直接回退整个版本。
+  - 发布修复版、并且修复版运行正常后，这次演练结束。
 - `"every"`（秒，至少 30）设置间隔。
 
 **已验证：**2026-10-02 在 macOS 上用已发布的汇率看板（fx-board）0.1.0 验证。
@@ -167,6 +172,26 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 - **选择保存在哪：**`<data>/appearance.json`。
 - **主题怎么定义：**每套主题在 `src/theme.rs` 里只写 11 个颜色（页面、侧栏、面板、文字、次要文字、分隔线、强调色、成功、危险、警告、紫色），其余 token 都由它们混合出来。所以加一套新主题，只要写 11 个颜色。
+
+## 在宿主机上运行
+
+和 Rinx 一样，OctoBuddy 先作为这台电脑上的独立应用运行，再进 OctoSense 里运行。在宿主机上，不用开着 OctoSense，就能用它开发 OctoSense 本身、给 OctoSense 做应用。
+
+- **同一个界面，两种构建。**
+  - `standalone` feature（默认）是宿主机上的应用：界面放在它自己的窗口里。
+  - OctoSense 用 `--no-default-features --features octosense-module` 构建它，并托管它的模块（`OCTOBUDDY_MODULE`，在 `src/module.rs`）。这时不编译窗口部分。
+- **怎么运行。**在 macOS 上 `cargo run` 会以 `OctoBuddy.app` 启动，Dock 里显示它的名字和图标。这个 bundle 生成在二进制旁边，由 `packaging/run-macos.sh` 生成，`.cargo/config.toml` 把它设成 cargo 的 runner。Bundle id 是 `org.octosense.octobuddy`，图标在 `packaging/` 下。
+- **单独运行时有什么不同。**
+  - 没有系统 agent：关于页会说明，选择器也不提供 OctoSense 的 agent；octos 跑在 OctoBuddy 自己的 octos 上。
+  - `octobuddy.status`、`.report`、`.request` 要在 OctoSense 里才能被调用，所以宿主机上的「应用」页不会收到外部请求；巡检照常工作。
+  - AI providers：只读地读取 OctoSense 的 AI Providers 应用写的那份 profile（`<OctoSense home>/octos-home/.octos/profiles/_main.json`）。设置 › AI Providers 会写明是哪个文件；用 `OCTOBUDDY_PROVIDERS=<octos 目录>` 可以换一份。
+  - agent 的程序用它自带的或你自己的（见上文）。
+- **数据**在 `~/.octobuddy`（用 `OCTOBUDDY_HOME` 可以换目录），宿主机上和 OctoSense 里是同一份。
+- **还没做：**
+  - 发布包（用 cargo-packager 打签名的 `.dmg`、Linux 和 Windows 安装包、发布 workflow）；
+  - OctoBuddy 自己的 providers 表单，不必再读 OctoSense 的 profile；
+  - 把 octos 打进应用包里。
+- **已验证：**2026-10-02 在 macOS（Apple silicon）上验证：`cargo run` 启动了 `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`，窗口标题是 OctoBuddy；关于页和 AI Providers 页都说明它是单独运行的，并写明了读取的 profile。
 
 ## 构建与测试
 

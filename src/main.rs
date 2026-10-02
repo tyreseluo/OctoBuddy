@@ -1,8 +1,18 @@
+//! OctoBuddy on the host (feature `standalone`, the default): its view in a
+//! window of its own. Built for OctoSense (`octosense-module` alone), there
+//! is nothing to run here: the shell hosts the module.
+#[cfg(feature = "standalone")]
 pub use makepad_widgets;
+#[cfg(feature = "standalone")]
 use makepad_widgets::*;
 
+#[cfg(feature = "standalone")]
 app_main!(App);
 
+#[cfg(not(feature = "standalone"))]
+fn main() {}
+
+#[cfg(feature = "standalone")]
 script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
@@ -17,12 +27,14 @@ script_mod! {
     }
 }
 
+#[cfg(feature = "standalone")]
 #[derive(Script, ScriptHook)]
 pub struct App {
     #[live]
     ui: WidgetRef,
 }
 
+#[cfg(feature = "standalone")]
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
         makepad_widgets::script_mod(vm);

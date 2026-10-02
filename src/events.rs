@@ -23,6 +23,8 @@ pub enum LoopEvent {
     AgentInstalled { name: String, result: Result<String, String>, awaited: bool },
     /// A requested app's project made, its data read (`app_factory`), or why not.
     FactoryReady { id: String, result: crate::plugins::app_factory::Made },
+    /// The bad-release drill published its version (and the function it broke), or why not.
+    CardLoopDrilled { project: String, result: Result<(String, String), String> },
     /// The production loop ran a published app (`card_loop::probe`).
     CardLoopProbed { project: String, result: Result<crate::plugins::card_loop::Probe, String> },
     /// An external plugin's button ran: what it said, for the session.

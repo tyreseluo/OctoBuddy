@@ -25,6 +25,18 @@ use std::sync::Arc;
 /// The module id the shell offers the service under.
 pub const APP_ID: &str = "octobuddy";
 
+/// Whether OctoSense hosts this OctoBuddy (its module made the instance);
+/// else it runs on the host, in a window of its own, with no system agent.
+static HOSTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn hosted() -> bool {
+    HOSTED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_hosted() {
+    HOSTED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 thread_local! {
     // Claimed in `create`, taken by the view when it starts (same thread).
     static CLAIMED: RefCell<Option<Arc<dyn OctosAppService>>> = const { RefCell::new(None) };

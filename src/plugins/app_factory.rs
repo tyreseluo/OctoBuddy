@@ -6,8 +6,9 @@
 //! A request waits on the Apps page (the sidebar's) for the person: nothing
 //! is made, and no model is paid for, before they press Build. Then
 //! OctoBuddy makes the app project from the design flow's template (under
-//! `<data>/apps/`), reads the data API it names (`app_data`), and hands the
-//! request to a new session's outer loop, as the person's message. Publish
+//! `<data>/apps/`), reads the data API it names (`app_data`), and opens a new
+//! session with the request's brief in its composer: the person picks its
+//! models and sends it to the outer loop, as their message. Publish
 //! on its card publishes it to the local App Hub, and its live watch starts
 //! (`card_loop`). `octobuddy.status` shows where each request is.
 //!
@@ -134,7 +135,9 @@ fn write(requests: &[Request]) {
 fn folder_for(root: &Path, r: &Request) -> PathBuf {
     let ascii: String = r.name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ' || *c == '-').collect();
     let slug = ascii.split_whitespace().collect::<Vec<_>>().join("-").to_ascii_lowercase();
-    let base = if slug.trim_matches('-').is_empty() { format!("app-{}", r.id.trim_start_matches('r')) } else { slug.trim_matches('-').to_string() };
+    // A name with too little ASCII to say what it is (`上海天气 v2`): its id.
+    let letters = slug.chars().filter(char::is_ascii_alphabetic).count();
+    let base = if letters < 3 { format!("app-{}", r.id.trim_start_matches('r')) } else { slug.trim_matches('-').to_string() };
     let mut dir = root.join(&base);
     let mut n = 2;
     while dir.exists() {
@@ -290,7 +293,10 @@ impl OctoBuddyView {
                 details.push(i18n::pick(format!("Name: {}", r.name), format!("名字：{}", r.name)));
             }
             let busy = r.session.as_deref().and_then(|s| self.store.find_session(s)).is_some_and(|at| self.session_busy(at));
+            let unsent = r.session.as_deref().and_then(|s| self.store.find_session(s)).and_then(|at| self.store.session(at)).is_some_and(|s| s.messages.is_empty());
             details.push(match r.status {
+                Status::Building if unsent => i18n::t("Its brief is in its session's composer: pick the models for its outer and inner loops under it, then send.",
+                    "说明已经放在会话的输入框里：在输入框下方选好外环和内环用的模型，然后发送。").to_string(),
                 Status::Waiting => i18n::pick(format!("Waiting for you. Build makes its project in {} and hands it to a new session's outer loop.", data_dir().join("apps").display()),
                     format!("等你决定。点「开始做」会在 {} 下建项目，并交给一个新会话的外环。", data_dir().join("apps").display())),
                 Status::Declined => i18n::t("Declined.", "已拒绝。").to_string(),
@@ -306,7 +312,7 @@ impl OctoBuddyView {
                 (ids!(build), r.status == Status::Waiting, i18n::t("Build", "开始做")),
                 (ids!(decline), r.status == Status::Waiting, i18n::t("Decline", "不做")),
                 (ids!(open), r.session.is_some(), i18n::t("Session", "打开会话")),
-                (ids!(publish), r.status == Status::Building && !busy && self.publishing.is_none(), i18n::t("Publish", "发布")),
+                (ids!(publish), r.status == Status::Building && !busy && !unsent && self.publishing.is_none(), i18n::t("Publish", "发布")),
                 (ids!(dismiss), matches!(r.status, Status::Failed), i18n::t("Dismiss", "移除")),
             ];
             for (b, visible, text) in show {
@@ -333,6 +339,11 @@ impl OctoBuddyView {
                 if let Some(at) = self.factory.requests[i].session.as_deref().and_then(|s| self.store.find_session(s)) {
                     self.selected = Some(at);
                     self.page = crate::Page::Chat;
+                    // Its brief not sent yet: back in the composer.
+                    if self.store.session(at).is_some_and(|s| s.messages.is_empty()) {
+                        let brief = brief(&self.factory.requests[i]);
+                        self.view.text_input(cx, ids!(composer)).set_text(cx, &brief);
+                    }
                 }
             } else if hit(ids!(publish)) {
                 let project = self.factory.requests[i].project.clone().unwrap_or_default();
@@ -407,12 +418,13 @@ impl OctoBuddyView {
             self.factory.requests[i].session = Some(sid);
             self.factory.requests[i].status = Status::Building;
             self.factory_save();
-            // The person pressed Build and waits: the session it goes to is shown.
+            // The person pressed Build and waits: the session is shown, its
+            // brief in its composer, to send once its models are picked.
             if self.page == crate::Page::Live {
                 self.selected = Some(at);
                 self.page = crate::Page::Chat;
+                self.view.text_input(cx, ids!(composer)).set_text(cx, &brief(&r));
             }
-            self.send_text(cx, at, brief(&r));
             self.save();
             self.relayout(cx);
         }
@@ -456,6 +468,7 @@ mod tests {
         let r = |name: &str| Request { id: "r1a".into(), name: name.into(), ..Default::default() };
         assert_eq!(folder_for(&root, &r("News Card")), root.join("news-card-2"));
         assert_eq!(folder_for(&root, &r("新闻卡片")), root.join("app-1a"));
+        assert_eq!(folder_for(&root, &r("上海天气小卡片 v2")), root.join("app-1a"), "two characters of ASCII do not name it");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -28,6 +28,9 @@ impl OctoBuddyView {
     /// Why it cannot, in the person's words.
     fn system_unready(&self) -> String {
         match (&self.link, &self.system_link) {
+            (None, _) if !crate::system::hosted() => i18n::t(
+                "OctoBuddy runs on its own here, not in OctoSense: there is no OctoSense agent to use.",
+                "这里的 OctoBuddy 是单独运行的，不在 OctoSense 里：没有 OctoSense 的 agent 可用。").into(),
             (None, _) => i18n::t(
                 "OctoBuddy may not use OctoSense's agent yet: allow it when OctoSense asks (or in OctoSense Settings › Assistant), then reopen OctoBuddy.",
                 "OctoBuddy 还没获准使用 OctoSense 的 agent：在 OctoSense 询问时允许（或在 OctoSense 设置 › 助手 中打开），然后重新打开 OctoBuddy。").into(),

@@ -34,7 +34,7 @@ impl OctoBuddyView {
             ("octos", false) => {
                 let plain = self.store.is_plain(at);
                 self.octos_choices().into_iter().map(|(label, m)| match (plain, &m) {
-                    (true, None) => {
+                    (true, None) if crate::system::hosted() => {
                         let model = self.system_model().or_else(|| self.providers.primary().map(|p| p.label.clone())).unwrap_or_default();
                         (i18n::pick(format!("default · {model} (OctoSense's agent)"), format!("默认 · {model}（OctoSense 自带的 agent）")), pick(system_chat::ENGINE, None))
                     }
@@ -146,6 +146,8 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(pick_soon)).set_text(cx, "");
         let note = if inner {
             t("New inner loops of this session run on it; the ones already at work keep their engine.", "这个会话之后新开的 inner 用它；已经开过的 inner 保持原来的引擎。").to_string()
+        } else if plain && !crate::system::hosted() {
+            t("octos runs on OctoBuddy's own octos, on the AI providers it reads (Settings › AI Providers).", "octos 在 OctoBuddy 自己的 octos 上运行，用它读取的 AI providers（设置 › AI Providers）。").to_string()
         } else if plain {
             let ready = if self.system_ready() { String::new() } else { format!(" {}", self.system_unready_text()) };
             i18n::pick(format!("octos's default runs on OctoSense's own agent; another model runs on OctoBuddy's octos.{ready}"),

@@ -64,7 +64,7 @@ The plugin `app-factory` builds OctoSense apps asked for from outside OctoBuddy.
 
 - **Asked.** Through `octobuddy.request {what, for, acceptance, data, name}`, called by the OctoSense system agent or another app's agent granted it. The call is answered at once with the request's id.
 - **Waits for you.** The request appears on the Apps page (the pulse button beside Settings, in the accent colour while a request waits), with who asked, what for, when it is done and its data. Nothing is made, and no model is paid for, until you press **Build**. **Decline** turns it down.
-- **Built.** Build makes the app project from the design flow's template under `<data>/apps/`, and reads the data API it names. It then hands the request, with that data's shape, to a new session's outer loop as your message, and opens that session.
+- **Built.** Build makes the app project from the design flow's template under `<data>/apps/`, and reads the data API it names. It then opens a new session with the request's brief in its composer. Pick the models for its outer and inner loops in the picker under it, and send; the data's shape goes with the message.
 - **Published.** **Publish** on its card publishes it to the local App Hub once its outer loop has stopped. Its live watch then starts.
 - **Followed.** `octobuddy.status` lists the requests under `requests`, each with its status: waiting for the person, declined, preparing, building (and whether an outer loop works on it), published (the version), or failed.
 - **Kept** in `<data>/requests.json`.
@@ -118,6 +118,11 @@ A new version is judged by its content against the last version's baseline until
 **Drills.** The published copy itself is never changed.
 - **Drill** (`offline`) cuts the app's API off in the watch's runs, on a device that used the app before.
 - `"drill": "offline-fresh"` in `watch.json` does it on a new device, with nothing kept.
+- **Drill: bad release** breaks the app on purpose and publishes that as its next version, as a change that shipped without its check.
+  - The function `main.splash` calls most has its definition renamed, and its calls are left as they were.
+  - The change is a commit of its own in the project (`drill: 坏版本演练…`).
+  - The incident it causes is marked as this drill. Its brief asks the outer loop to find the cause from what the run showed and fix it, not to revert the whole version.
+  - Publish fix ends it once the fixed version runs well.
 - `"every"` (seconds, 30 or more) sets the pace.
 
 **Verified** on macOS on 2026-10-02, with the published 汇率看板 (fx-board) 0.1.0:
@@ -162,6 +167,26 @@ Settings › Appearance picks its look. **Follow OctoSense** (the default) is Oc
 
 - **Where it is kept:** the choice is in `<data>/appearance.json`.
 - **How a theme is made:** each one names eleven colours in `src/theme.rs` (page, sidebar, panel, text, its quieter shade, lines, accent, success, danger, warning, purple). The other tokens are mixed from them, so adding a theme is adding eleven colours.
+
+## On the host
+
+As Rinx does, OctoBuddy runs first as an app of its own on this computer, and then inside OctoSense. On the host you can use it to work on OctoSense itself and to make apps for it, with no OctoSense running.
+
+- **Two builds of one view.**
+  - The `standalone` feature, the default, is the app on the host: its view in a window of its own.
+  - OctoSense builds it with `--no-default-features --features octosense-module` and hosts its module (`OCTOBUDDY_MODULE`, in `src/module.rs`). The window is not compiled in there.
+- **Running it.** `cargo run` on macOS starts it as `OctoBuddy.app`, with its name and icon in the Dock. It is a bundle next to the binary, made by `packaging/run-macos.sh`, which `.cargo/config.toml` sets as cargo's runner. Bundle id `org.octosense.octobuddy`; the icons are in `packaging/`.
+- **What changes on its own.**
+  - There is no system agent. The About page says so, and the picker does not offer OctoSense's agent; octos runs on OctoBuddy's own octos.
+  - `octobuddy.status`, `.report` and `.request` are OctoSense's to call, so on the host the Apps page has no requests from outside. Its live watch works as in OctoSense.
+  - AI providers: it reads the profile OctoSense's AI providers app writes (`<OctoSense home>/octos-home/.octos/profiles/_main.json`), read-only. Settings › AI Providers names that file. `OCTOBUDDY_PROVIDERS=<an octos folder>` names another.
+  - The agents' programs are its own copies (above), or yours.
+- **Its data** is in `~/.octobuddy` (`OCTOBUDDY_HOME` names another folder), the same on the host and in OctoSense.
+- **Not done yet:**
+  - a release package (a signed `.dmg` with cargo-packager, Linux and Windows installers, a release workflow);
+  - a providers form of its own, so that it need not read OctoSense's profile;
+  - octos shipped inside the app.
+- **Verified** on macOS (Apple silicon) on 2026-10-02: `cargo run` started `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`, in a window titled OctoBuddy, and its About and AI Providers pages said it runs on its own and named the profile it reads.
 
 ## Build and test
 

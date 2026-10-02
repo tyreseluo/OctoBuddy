@@ -1,0 +1,6 @@
+# `cargo run` on macOS starts OctoBuddy as an app bundle (packaging/run-macos.sh).
+[target.aarch64-apple-darwin]
+runner = "packaging/run-macos.sh"
+
+[target.x86_64-apple-darwin]
+runner = "packaging/run-macos.sh"

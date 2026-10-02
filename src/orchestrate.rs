@@ -1597,6 +1597,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::AgentInstalled { name, result, awaited } => self.agent_installed(&name, result, awaited),
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),
             LoopEvent::FactoryReady { id, result } => self.factory_ready(id, result),
+            LoopEvent::CardLoopDrilled { project, result } => self.card_loop_drilled(&project, result),
             LoopEvent::PackReady { session, message, pack } => self.pack_ready(&session, message, pack),
             LoopEvent::PluginSaid { session, plugin, result } => self.plugin_said(&session, &plugin, result),
             LoopEvent::ServeRetry => {

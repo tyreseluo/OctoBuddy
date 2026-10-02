@@ -210,6 +210,48 @@ pub fn published(project: &str) -> Result<(String, PathBuf), String> {
     Ok((version, dir))
 }
 
+/// The bad-release drill's change: of the functions `main.splash` defines,
+/// the one called most has its definition renamed and its calls left, as a
+/// refactor that missed its call sites. Its name, and the source so broken.
+pub fn break_a_function(source: &str) -> Option<(String, String)> {
+    let mut best: Option<(usize, String)> = None;
+    for line in source.lines() {
+        let Some(rest) = line.trim_start().strip_prefix("fn ") else { continue };
+        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        if name.is_empty() {
+            continue;
+        }
+        // Its calls: the name and `(`, not the tail of a longer name, not its definition.
+        let call = format!("{name}(");
+        let calls = source.match_indices(&call)
+            .filter(|(at, _)| !source[..*at].ends_with(|c: char| c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|(at, _)| !source[..*at].ends_with("fn "))
+            .count();
+        if calls > 0 && best.as_ref().is_none_or(|(n, _)| calls > *n) {
+            best = Some((calls, name));
+        }
+    }
+    let (_, name) = best?;
+    let broken = source.replacen(&format!("fn {name}("), &format!("fn {name}_v2("), 1);
+    Some((name, broken))
+}
+
+/// The bad-release drill (blocks: off the UI thread): the project's app
+/// broken by [`break_a_function`], committed as the drill, and published to
+/// the local App Hub as its next version. Its version and the function.
+pub fn bad_release(project: &str) -> Result<(String, String), String> {
+    let path = super::octosense_app::bundle(project).join("main.splash");
+    let source = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let (name, broken) = break_a_function(&source).ok_or("main.splash defines no function it calls: nothing to break")?;
+    std::fs::write(&path, broken).map_err(|e| e.to_string())?;
+    let git = |args: &[&str]| Command::new("git").args(args).current_dir(project).output().map_err(|e| e.to_string())
+        .and_then(|o| if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) });
+    git(&["add", "bundle/main.splash"])?;
+    git(&["commit", "-q", "-m", &format!("drill: 坏版本演练（{name} 的定义改了名，调用处没改）")])?;
+    let published = super::app_publish::publish(project)?;
+    Ok((published.version, name))
+}
+
 /// Runs the published copy once (blocks: seconds, off the UI thread).
 pub fn probe(project: &str, drill: Option<&str>) -> Result<Probe, String> {
     let (version, artifact) = published(project)?;
@@ -420,6 +462,8 @@ pub struct Watch {
     pub incident: Option<Incident>,
     /// The last reports of it (five at most), newest last.
     pub reports: Vec<Report>,
+    /// The version the bad-release drill published, and the function it broke.
+    pub bad_release: Option<(String, String)>,
 }
 
 impl Watch {
@@ -438,6 +482,7 @@ impl Watch {
             warm: v["warm"].as_bool().unwrap_or(false),
             incident: Incident::from_json(&v["incident"]),
             reports: reports_of(&v["reports"]),
+            bad_release: v["bad_release"]["version"].as_str().map(|ver| (ver.to_string(), v["bad_release"]["function"].as_str().unwrap_or("").to_string())),
         })
     }
 
@@ -450,6 +495,7 @@ impl Watch {
             "last": self.last, "texts": self.texts, "drill": self.drill, "auto_repair": self.auto_repair, "warm": self.warm,
             "incident": self.incident.as_ref().map(Incident::to_json),
             "reports": self.reports.iter().map(Report::to_json).collect::<Vec<_>>(),
+            "bad_release": self.bad_release.as_ref().map(|(v, f)| json!({"version": v, "function": f})),
         });
         let _ = std::fs::write(dir.join("watch.json"), serde_json::to_string_pretty(&v).unwrap_or_default());
     }
@@ -503,6 +549,8 @@ fn repair_brief(name: &str, i: &Incident) -> String {
     }
     let shot = i.shot.as_deref().unwrap_or("");
     let drill = match i.drill.as_deref() {
+        Some("bad-release") => i18n::t("\n(This was a drill: OctoBuddy published a version with a bug on purpose, as a change that shipped without its check. Find the cause from what the run showed and fix it; do not just revert the whole version.)",
+            "\n（这是一次演练：OctoBuddy 故意发布了一个带 bug 的版本，模拟一次没走检查就上线的改动。请根据巡检看到的错误找到原因并修好，不要直接回退整个版本。）"),
         Some("offline-fresh") => i18n::t("\n(This was a drill: the watch ran it as on a new device, nothing kept, with its API cut off on purpose. There is no data to show then: check that it says so plainly and offers to try again, and change only what falls short of that.)",
             "\n（这是一次演练：巡检按新设备运行，没有任何缓存，并故意断开了它的 API。这时本来就没有数据可显示：请确认它清楚地说明情况并能重试，只修改做得不够的地方。）"),
         Some(_) => i18n::t("\n(This was a drill: the watch cut its API off on purpose, on a device that used it before. The fix to make: when its API does not answer, the app still gives something to use, such as the last data it fetched and when, not only an error.)",
@@ -523,6 +571,8 @@ pub struct Loops {
     pub running: HashSet<String>,
     /// Incidents to hand to their outer loop (auto repair), on the next event with a `Cx`.
     pub pending_repairs: Vec<String>,
+    /// Bad-release drills under way (their project).
+    pub drilling: HashSet<String>,
     /// `octobuddy.report` calls answered once their run is back (project, asked at).
     pub waiting: Vec<(String, u64, ToolReply)>,
     loaded: bool,
@@ -726,6 +776,7 @@ impl OctoBuddyView {
                 (ids!(run_now), watching && !running, i18n::t("Run now", "立即巡检")),
                 (ids!(drill_on), watching && drill, i18n::t("Drill: API off", "演练：断网中")), (ids!(drill_off), watching && !drill, i18n::t("Drill: cut API", "演练断网")),
                 (ids!(auto_on), watching && auto, i18n::t("Auto repair", "自动修复")), (ids!(auto_off), watching && !auto, i18n::t("Auto repair", "自动修复")),
+                (ids!(drill_bad), watching && incident.is_none() && !self.card_loop.drilling.contains(&project) && self.publishing.is_none(), i18n::t("Drill: bad release", "演练：发布坏版本")),
                 (ids!(open), self.live_session(pi, &project).is_some(), i18n::t("Session", "打开会话")),
                 (ids!(repair), (incident.is_some() || unconfirmed) && !repairing, i18n::t("Repair", "修复")),
                 (ids!(publish_fix), fix_ready && self.publishing.is_none(), i18n::t("Publish fix", "发布修复版")),
@@ -766,6 +817,8 @@ impl OctoBuddyView {
                 self.card_loop_update(&project, |w| { w.drill = Some("offline".into()); w.last = 0; });
             } else if hit(ids!(drill_on)) {
                 self.card_loop_update(&project, |w| { w.drill = None; w.last = 0; });
+            } else if hit(ids!(drill_bad)) {
+                self.card_loop_bad_release(pi, &project);
             } else if hit(ids!(auto_off)) {
                 self.card_loop_update(&project, |w| w.auto_repair = true);
             } else if hit(ids!(auto_on)) {
@@ -878,6 +931,45 @@ impl OctoBuddyView {
         self.relayout(cx);
     }
 
+    /// The bad-release drill started: the project's app broken and published
+    /// off the UI thread (`CardLoopDrilled`).
+    fn card_loop_bad_release(&mut self, pi: usize, project: &str) {
+        self.card_loop.drilling.insert(project.to_string());
+        if let Some(at) = self.live_session(pi, project) {
+            self.system(at, i18n::t("Drill: OctoBuddy breaks a function of the app (its definition renamed, its calls left) and publishes that as the next version, to see the live watch find it…",
+                "演练：OctoBuddy 把应用的一个函数改坏（定义改了名，调用处没改），作为下一个版本发布，看巡检能不能发现……"));
+        }
+        let (inbox, project, lang) = (self.rt.inbox.clone(), project.to_string(), i18n::lang());
+        std::thread::spawn(move || {
+            i18n::set(lang);
+            let result = bad_release(&project);
+            crate::events::post(&inbox, crate::events::LoopEvent::CardLoopDrilled { project, result });
+        });
+    }
+
+    pub(crate) fn card_loop_drilled(&mut self, project: &str, result: Result<(String, String), String>) {
+        self.card_loop.drilling.remove(project);
+        let pi = self.store.projects.iter().position(|p| p.path == project);
+        let at = pi.and_then(|pi| self.live_session(pi, project));
+        match result {
+            Ok((version, name)) => {
+                self.card_loop_update(project, |w| {
+                    w.bad_release = Some((version.clone(), name.clone()));
+                    w.last = 0;
+                });
+                if let Some(at) = at {
+                    self.system(at, &i18n::pick(format!("Drill: published {version} with {name} broken (renamed where it is defined, not where it is called). The live watch runs it now."),
+                        format!("演练：已发布 {version}，其中 {name} 被改坏（定义改了名，调用处没改）。巡检马上运行它。")));
+                }
+            }
+            Err(err) => {
+                if let Some(at) = at {
+                    self.system(at, &i18n::pick(format!("The bad-release drill could not run: {err}"), format!("坏版本演练没能进行：{err}")));
+                }
+            }
+        }
+    }
+
     /// A version of `project` was published (from here or its session): the
     /// watch runs it next, and an open incident records the fix.
     pub(crate) fn card_loop_published(&mut self, project: &str, version: Option<String>) {
@@ -986,7 +1078,8 @@ impl OctoBuddyView {
         w.health = Some(health);
         w.last = p.at;
         w.texts = texts(&p);
-        let drill = if p.drill.is_some() { i18n::t(" (drill: its API cut off)", "（演练：断开了它的 API）") } else { "" };
+        let drill = if p.drill.is_some() { i18n::t(" (drill: its API cut off)", "（演练：断开了它的 API）") }
+            else if w.bad_release.as_ref().is_some_and(|(v, _)| *v == p.version) { i18n::t(" (drill: a bad release)", "（演练：坏版本）") } else { "" };
         let mut text = None;
         match (w.incident.take(), health) {
             // Well, and was: nothing to say (but the first run).
@@ -999,6 +1092,7 @@ impl OctoBuddyView {
             }
             // Well again: the incident's story, start to end.
             (Some(inc), Health::Healthy) => {
+                w.bad_release = None;
                 let mut steps = Vec::new();
                 if let Some((_, at)) = &inc.repair {
                     steps.push(i18n::pick(format!("handed to the outer loop after {}", span(at.saturating_sub(inc.since))), format!("{}后交给外环", span(at.saturating_sub(inc.since)))));
@@ -1024,7 +1118,8 @@ impl OctoBuddyView {
             }
             // It broke: an incident.
             (None, bad) => {
-                let inc = Incident { since: p.at, version: p.version.clone(), health: bad, why: why.clone(), shot: shot_of(project, &p), texts: w.texts, drill: p.drill.clone(), repair: None, published: None, reports: Vec::new() };
+                let bad_release = w.bad_release.as_ref().is_some_and(|(v, _)| *v == p.version).then(|| "bad-release".to_string());
+                let inc = Incident { since: p.at, version: p.version.clone(), health: bad, why: why.clone(), shot: shot_of(project, &p), texts: w.texts, drill: p.drill.clone().or(bad_release), repair: None, published: None, reports: Vec::new() };
                 let lines: Vec<String> = why.iter().map(|l| format!("· {l}")).collect();
                 let shot = inc.shot.clone().unwrap_or_default();
                 text = Some(i18n::pick(
@@ -1209,6 +1304,18 @@ mod tests {
     }
 
     #[test]
+    fn the_bad_release_breaks_the_function_called_most() {
+        let source = "fn once(){ return 1 }\nfn twice(x){ return x }\nfn boot(){\n    once()\n    twice(1)\n    twice(2)\n}\nboot()\n";
+        let (name, broken) = break_a_function(source).unwrap();
+        assert_eq!(name, "twice");
+        assert!(broken.contains("fn twice_v2(x)") && broken.contains("    twice(1)") && broken.contains("fn once()"));
+        assert_eq!(break_a_function("fn lonely(){ return 1 }\n"), None, "a function nobody calls is not the one to break");
+        // `cache(` inside `load_cache(` is not a call of `cache`.
+        let (name, _) = break_a_function("fn cache(){ }\nfn load_cache(){ }\nfn boot(){\n    load_cache()\n    load_cache()\n    cache()\n}\n").unwrap();
+        assert_eq!(name, "load_cache");
+    }
+
+    #[test]
     fn the_newest_published_version_is_watched() {
         let catalog = json!({"entries": [
             {"artifact": "artifacts/fx-board-0.1.0.bundle", "manifest": {"id": "fx-board", "version": "0.1.0"}},
@@ -1253,13 +1360,14 @@ mod tests {
             reports: vec![Report { at: 4, from: "the person".into(), problem: "空白".into(), reproduced: Some(true) }] };
         let w = Watch { watching: true, every: 120, session: "s-1".into(), baseline: Some(Baseline { version: "0.1.0".into(), ids: vec!["a".into()], texts: 3, failure_texts: vec![] }),
             health: Some(Health::Degraded), last: 9, texts: 8, drill: Some("offline".into()), auto_repair: true, warm: true, incident: Some(incident),
-            reports: vec![Report { at: 10, from: String::new(), problem: "打不开".into(), reproduced: None }] };
+            reports: vec![Report { at: 10, from: String::new(), problem: "打不开".into(), reproduced: None }],
+            bad_release: Some(("0.1.1".into(), "fetch".into())) };
         w.write(&project);
         let back = Watch::read(&project).unwrap();
         assert_eq!((back.watching, back.every, back.session.as_str(), back.health, back.last, back.texts, back.drill.as_deref(), back.auto_repair),
             (true, 120, "s-1", Some(Health::Degraded), 9, 8, Some("offline"), true));
         assert!(back.warm);
-        assert_eq!((back.baseline, back.incident, back.reports), (w.baseline, w.incident, w.reports));
+        assert_eq!((back.baseline, back.incident, back.reports, back.bad_release), (w.baseline, w.incident, w.reports, w.bad_release));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

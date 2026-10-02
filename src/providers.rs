@@ -161,7 +161,9 @@ impl Providers {
 /// (`<OCTOSENSE_HOME>/octos-home/.octos` on a desktop); outside a shell, the
 /// same default the kernel would use.
 fn core_dir() -> Option<PathBuf> {
-    octosense_app_peers::octos_core::core_dir().or_else(profile::default_core_dir)
+    // On the host, another profile when the person names one.
+    let named = std::env::var_os("OCTOBUDDY_PROVIDERS").map(PathBuf::from).filter(|_| !crate::system::hosted());
+    named.or_else(octosense_app_peers::octos_core::core_dir).or_else(profile::default_core_dir)
 }
 
 /// Reads what AI providers has enabled. Never returns a key.

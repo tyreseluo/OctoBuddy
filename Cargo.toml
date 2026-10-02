@@ -12,9 +12,18 @@ description = "OctoBuddy: OctoSense's native coding app with an outer loop that 
 # patch a git source with another revision of the same repository, so one
 # Makepad here means App Hub's. Inside OctoSense its [patch] sections resolve
 # all of them to the shell's own checkouts. Move them with OctoSense's.
+# As Rinx: one view, two shapes. On the host (the default) it is an app of
+# its own, in a window of its own; OctoSense builds it with
+# `--no-default-features --features octosense-module` and hosts its module.
+[features]
+default = ["standalone"]
+standalone = []
+octosense-module = ["dep:makepad-app-module"]
+
 [dependencies]
 makepad-widgets = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54" }
-makepad-app-module = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54" }
+# The module OctoSense hosts (feature `octosense-module`).
+makepad-app-module = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54", optional = true }
 # The native TUI plugin: an agent's own terminal UI, in a terminal of
 # Makepad's (its PTY and emulator), as Director embeds it.
 makepad-terminal = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54" }
