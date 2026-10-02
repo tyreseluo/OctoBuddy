@@ -324,6 +324,10 @@ loop (message it) or to a later wave. The listing (listing.json, every placehold
 never http://; no password, PIN, code or login field; no key or token in the bundle. Leave `integrity` alone.\n\
 - Every slice's `check` is `{CHECK}`: a headless run of a copy of the bundle that fails on any script error, \
 then App Hub's gate.\n\
+- An inner loop cannot run the app: its sandbox has no card-host, no window and no GPU, and its shell \
+writes only inside the project (not /tmp). OctoBuddy runs the app for it, outside the sandbox: the check above, and for \
+an inner loop on Claude Code `octobuddy_app_look` (script errors, a screenshot, the widgets). So plan no slice \
+that runs card-host or a probe script itself, and take a passing check as the run's evidence.\n\
 - OctoBuddy runs the app in its Preview panel and reloads it when its files change: the person tries it \
 there. Store screenshots and publishing come later, from the person.\n\
 - Tests come after the app first starts, not before: put an end-to-end test slice in a later wave than the \
