@@ -288,6 +288,71 @@ pub fn model_profiles(data_dir: &std::path::Path, profile: &PeerProfile) -> std:
     Ok(())
 }
 
+/// An inner loop on octos with OctoBuddy's tools: a profile of its own
+/// (`peer-<id>`), the one it would run under (`base`: `_main` or a model's)
+/// with OctoBuddy's MCP server in it. octos refuses an MCP server on a
+/// loopback URL, so the server is a stdio shim (`shim`) that forwards each
+/// line to OctoBuddy's (`url`, the peer's own). octos starts one per profile,
+/// shared by its sessions: hence one profile per inner loop. Its id.
+pub fn peer_profile_with_tools(data_dir: &std::path::Path, base: &str, peer: &str, shim: &std::path::Path, url: &str) -> std::io::Result<String> {
+    let dir = data_dir.join("profiles");
+    let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{base}.json")))?).map_err(std::io::Error::other)?;
+    let id = format!("peer-{peer}");
+    v["id"] = serde_json::Value::String(id.clone());
+    v["name"] = serde_json::Value::String(id.clone());
+    if !v["config"].is_object() {
+        v["config"] = serde_json::json!({});
+    }
+    v["config"]["mcp_servers"] = serde_json::json!([{"command": "python3", "args": [shim], "env": {"OCTOBUDDY_MCP_URL": url}}]);
+    write_private(&dir.join(format!("{id}.json")), &serde_json::to_string_pretty(&v).map_err(std::io::Error::other)?)?;
+    Ok(id)
+}
+
+/// The inner loops' own profiles left from before: each would start its
+/// MCP server with octos.
+pub fn clear_peer_profiles(data_dir: &std::path::Path) {
+    for e in std::fs::read_dir(data_dir.join("profiles")).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().starts_with("peer-") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// The stdio shim octos runs for OctoBuddy's MCP server (it forwards each
+/// JSON-RPC line to `OCTOBUDDY_MCP_URL` and writes the answer back).
+pub const MCP_SHIM: &str = r#"#!/usr/bin/env python3
+# OctoBuddy's MCP server for an inner loop on octos (OctoBuddy rewrites this file).
+import os, sys, urllib.request
+url = os.environ.get("OCTOBUDDY_MCP_URL", "")
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+session = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    req = urllib.request.Request(url, data=line.encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"})
+    if session:
+        req.add_header("Mcp-Session-Id", session)
+    try:
+        with opener.open(req, timeout=660) as r:
+            session = r.headers.get("Mcp-Session-Id") or session
+            body = r.read().decode()
+    except Exception as e:
+        body = ""
+        try:
+            import json
+            m = json.loads(line)
+            if m.get("id") is not None:
+                body = json.dumps({"jsonrpc": "2.0", "id": m["id"], "error": {"code": -32000, "message": "OctoBuddy did not answer: " + repr(e)}})
+        except Exception:
+            pass
+    if body.strip():
+        sys.stdout.write(body.strip() + "
+")
+        sys.stdout.flush()
+"#;
+
 /// A copy of a profile holds what it holds (a key, maybe): only its owner reads it.
 fn write_private(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     std::fs::write(path, text)?;
@@ -335,6 +400,28 @@ fn link_profile(data_dir: &std::path::Path, name: &str, target: &std::path::Path
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_inner_loop_on_octos_gets_a_profile_with_its_tools() {
+        let dir = std::env::temp_dir().join(format!("octobuddy-peer-profile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("profiles")).unwrap();
+        std::fs::write(dir.join("profiles/_main.json"), r#"{"id":"_main","config":{"llm":{"primary":{"family_id":"zai-coding"}}}}"#).unwrap();
+        let id = peer_profile_with_tools(&dir, "_main", "w1", std::path::Path::new("/bin/shim.py"), "http://127.0.0.1:1/mcp/inner:w1/t").unwrap();
+        assert_eq!(id, "peer-w1");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("profiles/peer-w1.json")).unwrap()).unwrap();
+        assert_eq!(v["config"]["mcp_servers"][0]["env"]["OCTOBUDDY_MCP_URL"], "http://127.0.0.1:1/mcp/inner:w1/t", "under config: octos ignores it at the top");
+        assert_eq!(v["config"]["llm"]["primary"]["family_id"], "zai-coding", "its model kept");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(dir.join("profiles/peer-w1.json")).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        clear_peer_profiles(&dir);
+        assert!(!dir.join("profiles/peer-w1.json").exists() && dir.join("profiles/_main.json").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     use super::*;
 
     #[test]
