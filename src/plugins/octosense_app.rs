@@ -36,6 +36,56 @@ lists, forms, storage, dates, money, bars, gotchas and the errors they give). Re
 only for what it lacks, and other apps' sources not at all unless both lack it. When the project has \
 app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated from them (never edit it).";
 
+/// OctoBuddy's tools from a shell, for an agent with no MCP (pi): `look`,
+/// `check`, `probe <file>`, to the endpoint `OCTOBUDDY_MCP_URL` names.
+pub const APP_CLI: &str = r#"#!/usr/bin/env python3
+# octobuddy-app: OctoBuddy's tools for an inner loop, from a shell (OctoBuddy rewrites this file).
+import json, os, sys, urllib.request
+url = os.environ.get("OCTOBUDDY_MCP_URL")
+if not url:
+    print("OCTOBUDDY_MCP_URL is not set: OctoBuddy did not start this agent with its tools")
+    sys.exit(2)
+names = {"look": "octobuddy_app_look", "check": "octobuddy_check", "probe": "octobuddy_app_probe"}
+cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+if cmd not in names or (cmd == "probe" and len(sys.argv) < 3):
+    print("usage: octobuddy-app look | check | probe <file.splash>")
+    sys.exit(2)
+args = {"source": open(sys.argv[2]).read()} if cmd == "probe" else {}
+req = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": names[cmd], "arguments": args}}
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+r = opener.open(urllib.request.Request(url, data=json.dumps(req).encode(), headers={"Content-Type": "application/json", "Accept": "application/json"}), timeout=660)
+res = json.loads(r.read().decode()).get("result", {})
+print("".join(c.get("text", "") for c in res.get("content", [])))
+sys.exit(1 if res.get("isError") else 0)
+"#;
+
+/// Writes `octobuddy-app` into OctoBuddy's commands (`bin_dir`): where.
+pub fn ensure_app_cli() -> Option<PathBuf> {
+    let path = bin_dir().join("octobuddy-app");
+    let _ = std::fs::create_dir_all(bin_dir());
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(APP_CLI) {
+        std::fs::write(&path, APP_CLI).ok()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+    Some(path)
+}
+
+/// The same note for an inner loop with no MCP (pi): the tools as commands.
+pub const INNER_NOTE_CLI: &str = "\nThis project is an OctoSense app. Its hosts (card-host, the shell) cannot run in your \
+shell, so do not look for them or install them: OctoBuddy runs the app for you, outside, through a command. \
+`octobuddy-app look` runs the app headless now and prints its script errors, a screenshot (a PNG under \
+.octobuddy/shots/, which you can read) and the widgets on screen. `octobuddy-app check` runs your slice's own check, \
+the one OctoBuddy runs when you finish. `octobuddy-app probe <file>` runs a small Splash program of yours (a whole \
+main.splash, in a file of your own outside bundle/) and prints its errors and widgets: when unsure how Splash \
+behaves, try it there, in seconds. Look after each meaningful change; run your check until it passes before you \
+report. Start with .octobuddy/docs/SPLASH-COOKBOOK.md (verified patterns and gotchas); SCRIPT-API.md only for what it \
+lacks. When the project has app/parts/, edit only the parts your brief gives you: bundle/main.splash is generated \
+from them (never edit it).";
+
 /// The command a slice of an app is checked with.
 pub const CHECK: &str = "octobuddy-app-check";
 
@@ -529,6 +579,20 @@ mod tests {
 #[cfg(test)]
 mod parts_tests {
     use super::*;
+
+    /// The Python OctoBuddy writes for agents parses (a newline written into
+    /// a string literal broke two of them once).
+    #[test]
+    fn its_python_scripts_parse() {
+        for (name, source) in [("octobuddy-app", APP_CLI), ("octobuddy-mcp-shim", crate::providers::MCP_SHIM)] {
+            let mut child = Command::new("python3").args(["-c", "import ast, sys; ast.parse(sys.stdin.read())"])
+                .stdin(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).spawn().unwrap();
+            use std::io::Write;
+            child.stdin.take().unwrap().write_all(source.as_bytes()).unwrap();
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success(), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+        }
+    }
 
     #[test]
     fn parts_become_main_splash_and_errors_name_their_part() {

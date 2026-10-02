@@ -1411,7 +1411,13 @@ What the person says to you after it stays between you and them.");
                 // it, through its tools, as it works (on octos too: see `tools_profile`).
                 if crate::plugins::active(crate::plugins::OCTOSENSE_APP, &p.dir) {
                     let tools = self.on_claude(peer) || (self.mcp.is_some() && p.reviews_for.is_none());
-                    text.push_str(if tools { crate::plugins::octosense_app::INNER_NOTE_TOOLS } else { crate::plugins::octosense_app::INNER_NOTE });
+                    let note = match (tools, p.agent.as_deref()) {
+                        // pi has no MCP: the same tools as a command.
+                        (true, Some(crate::rpc_lead::PI)) => crate::plugins::octosense_app::INNER_NOTE_CLI,
+                        (true, _) => crate::plugins::octosense_app::INNER_NOTE_TOOLS,
+                        (false, _) => crate::plugins::octosense_app::INNER_NOTE,
+                    };
+                    text.push_str(note);
                 }
                 text
             }
