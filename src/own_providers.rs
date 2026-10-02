@@ -40,9 +40,21 @@ pub fn profile_path() -> PathBuf {
     profile::profile_path(&dir())
 }
 
-/// OctoSense's: where its AI providers app writes.
+/// OctoSense's: where its AI providers app writes. In OctoSense, its
+/// kernel's; on the host, under OctoSense's home (`OCTOSENSE_HOME`, else
+/// `~/.octosense`, as the shell resolves it): `<home>/octos-home/.octos`.
+/// (On the host the kernel library is not configured, and names a default
+/// of its own that is not OctoSense's.)
 pub fn octosense_dir() -> Option<PathBuf> {
-    octosense_app_peers::octos_core::core_dir().or_else(profile::default_core_dir)
+    if crate::system::hosted() {
+        return octosense_app_peers::octos_core::core_dir();
+    }
+    if let Some(dir) = std::env::var_os("OCTOS_APP_CORE_DIR").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(dir));
+    }
+    let home = std::env::var_os("OCTOSENSE_HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".octosense")))?;
+    Some(home.join("octos-home/.octos"))
 }
 
 pub fn source() -> Source {

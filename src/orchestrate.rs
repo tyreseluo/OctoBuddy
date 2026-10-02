@@ -45,6 +45,9 @@ pub struct Runtime {
     pub(crate) lines: HashMap<String, Line>,
     /// Peers whose octos session is open in the current server.
     pub(crate) opened: HashSet<String>,
+    /// Peers the outer loop runs again from their brief (`rerun`): their
+    /// next turn is a first one.
+    pub(crate) fresh: HashSet<String>,
     /// Peer id → the message its running turn answers (to re-queue a refused start).
     pub(crate) inflight: HashMap<String, Delivery>,
     /// Peer id → (approval id, title, body) waiting for the person.
@@ -278,16 +281,40 @@ impl OctoBuddyView {
     /// The models a slice may name: the providers' other models (the
     /// primary is the default). None when there is no choice.
     pub(crate) fn models_line(&self, at: SessionRef) -> Option<String> {
+        let session = self.store.session(at)?;
+        // The person picked the session's inner agent: every slice runs on it.
+        let agents = match &session.inner {
+            Some(pick) => format!("AGENTS: every inner loop of this session runs on {} (the person's choice): leave `agent` out.", Self::agent_name(&pick.engine)),
+            None => {
+                let each: Vec<String> = self.inner_agents().into_iter().map(|(name, fits)| match name {
+                    "octos" => "octos: any of the MODELS".to_string(),
+                    "claude" if fits.is_empty() => "claude: the person's own Claude login (leave `model` out)".to_string(),
+                    "claude" => format!("claude: {}, or the person's own Claude login (leave `model` out)", fits.join(", ")),
+                    _ if fits.is_empty() => format!("{name}: its own sign-in (leave `model` out)"),
+                    _ => format!("{name}: {}", fits.join(", ")),
+                }).collect();
+                format!("AGENTS the inner loops can run on (a slice's `agent`, with a `model` from its list; leave it out for octos): {}", each.join(" · "))
+            }
+        };
         // The person pinned this session's inner model: every slice runs on it.
-        if let Some(pinned) = self.store.session(at).and_then(|s| s.inner_model().map(String::from)) {
-            return Some(format!("MODELS: every inner loop of this session runs on {pinned} (the person's choice): leave `model` out."));
+        if let Some(pinned) = session.inner_model() {
+            return Some(format!("MODELS: every inner loop of this session runs on {pinned} (the person's choice): leave `model` out.\n{agents}"));
         }
         let others: Vec<&str> = self.providers.rows.iter().filter(|r| r.role != "primary").map(|r| r.label.as_str()).collect();
-        if others.is_empty() {
-            return None;
-        }
         let default = self.providers.primary().map(|r| r.label.as_str()).unwrap_or("the profile's own");
-        Some(format!("MODELS the inner loops can run on (a slice's `model`): {} ; default (leave it out): {default}", others.join(", ")))
+        if others.is_empty() {
+            return (self.inner_agents().len() > 1).then_some(agents);
+        }
+        Some(format!("MODELS the inner loops can run on (a slice's `model`): {} ; default (leave it out): {default}\n{agents}", others.join(", ")))
+    }
+
+    /// The agents an inner loop can run on here, each with the person's
+    /// models it can run on (by their endpoints' protocols): octos first.
+    pub(crate) fn inner_agents(&self) -> Vec<(&'static str, Vec<String>)> {
+        [("octos", "octos"), ("codex", "Codex"), ("pi", "pi"), ("claude", "Claude Code")].into_iter()
+            .filter(|(name, _)| crate::picker::installed(name))
+            .map(|(name, shown)| (name, self.providers.rows.iter().filter(|r| r.agents.contains(&shown)).map(|r| r.label.clone()).collect()))
+            .collect()
     }
 
     pub(crate) fn status_block(&mut self, at: SessionRef) -> Option<String> {
@@ -948,17 +975,49 @@ impl OctoBuddyView {
         let primary = self.providers.primary().map(|r| r.label.clone());
         let mut unknown = Vec::new();
         let pinned = self.store.session(at).is_some_and(|s| s.inner_model().is_some());
-        let picks: Vec<Option<String>> = slices.iter().map(|slice| match &slice.model {
-            None => None,
-            // The session's own pick wins (the person's choice).
-            Some(_) if pinned => None,
-            Some(m) if Some(m) == primary.as_ref() => None,
-            Some(m) if models.contains(m) => Some(m.clone()),
-            Some(m) => {
-                unknown.push(format!("{} ({m})", slice.slug));
-                None
-            }
-        }).collect();
+        // The person picked what the session's inner loops run on: no slice names its agent.
+        let person_engine = self.store.session(at).is_some_and(|s| s.inner.is_some());
+        let agents = self.inner_agents();
+        let mut named: Vec<Option<String>> = Vec::new();
+        let mut picks: Vec<Option<String>> = Vec::new();
+        for slice in &slices {
+            let agent = slice.agent.clone().filter(|_| !person_engine).filter(|a| {
+                let known = agents.iter().any(|(name, _)| *name == a.as_str());
+                if !known {
+                    unknown.push(format!("{} (agent {a})", slice.slug));
+                }
+                known
+            });
+            let pick = match agent.as_deref() {
+                // Codex, pi or Claude Code: a model of the person's it can run on
+                // (none fits: its own sign-in or settings).
+                Some(a) if crate::rpc_lead::lead_engine(a) => {
+                    let fits = agents.iter().find(|(name, _)| *name == a).map(|(_, f)| f.clone()).unwrap_or_default();
+                    match &slice.model {
+                        Some(m) if fits.contains(m) => Some(m.clone()),
+                        other => {
+                            if let Some(m) = other {
+                                unknown.push(format!("{} ({m} on {a})", slice.slug));
+                            }
+                            primary.clone().filter(|p| fits.contains(p)).or_else(|| fits.first().cloned())
+                        }
+                    }
+                }
+                _ => match &slice.model {
+                    None => None,
+                    // The session's own pick wins (the person's choice).
+                    Some(_) if pinned => None,
+                    Some(m) if Some(m) == primary.as_ref() => None,
+                    Some(m) if models.contains(m) => Some(m.clone()),
+                    Some(m) => {
+                        unknown.push(format!("{} ({m})", slice.slug));
+                        None
+                    }
+                },
+            };
+            named.push(agent);
+            picks.push(pick);
+        }
         let session = self.store.session_mut(at).unwrap();
         // What its inner loops run on, for their cards from the start (a
         // pinned Claude model shows as theirs while they wait).
@@ -969,7 +1028,7 @@ impl OctoBuddyView {
         let branch = session.work_branch.clone();
         let taken: Vec<String> = session.peers().iter().map(|p| p.slug.clone()).collect();
         let mut started = Vec::new();
-        for (slice, pick) in slices.iter().zip(&picks) {
+        for ((slice, pick), named) in slices.iter().zip(&picks).zip(&named) {
             // Slugs name peers across rounds: keep them unique in the session.
             let mut slug = slice.slug.clone();
             let mut n = 2;
@@ -979,18 +1038,18 @@ impl OctoBuddyView {
             }
             let id = model::new_id("w");
             session.peers_mut().push(Peer {
-                id: id.clone(), slug: slug.clone(), role: slice.role.clone(), agent: Some(agent.clone()),
+                id: id.clone(), slug: slug.clone(), role: slice.role.clone(), agent: Some(named.clone().unwrap_or_else(|| agent.clone())),
                 brief: slice.brief.clone(), status: "queued".into(), dir: dir.clone(), branch: None,
                 round, started_at: now_secs(), finished_at: None, activity: Some("preparing".into()), result: None,
-                session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: slice.check.clone(), verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: slice.rounds, wave: slice.wave, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: pick.clone().or_else(|| pinned.clone()), accepted: None, review_wanted: slice.independent_review, reviews_for: None, by_person: None, claude_session: None, specs: None,
+                session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: slice.check.clone(), verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: slice.rounds, wave: slice.wave, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: pick.clone().or_else(|| pinned.clone()), agent_named: named.is_some().then_some(true), accepted: None, review_wanted: slice.independent_review, reviews_for: None, by_person: None, claude_session: None, specs: None,
             });
             started.push((id, slug, slice.brief.clone()));
         }
         if !unknown.is_empty() {
             let list = unknown.join(", ");
-            self.system(at, &i18n::pick(format!("Not one of the models: {list}; those slices run on the default model."), format!("不是可用的模型：{list}；这些切片用默认模型。")));
+            self.system(at, &i18n::pick(format!("Not one of the models or agents: {list}; those slices run on the default."), format!("不是可用的模型或 agent：{list}；这些切片用默认的。")));
             let id = self.store.session(at).map(|s| s.id.clone()).unwrap_or_default();
-            self.rt.notes.entry(id).or_default().push(format!("these slices named a model that is not one of the MODELS and run on the default: {list}"));
+            self.rt.notes.entry(id).or_default().push(format!("these slices named a model or agent that is not one of the MODELS or AGENTS (or a model their agent cannot run on) and run on the default: {list}"));
         }
         let names: Vec<_> = started.iter().map(|(_, s, _)| s.as_str()).collect();
         let place = match &branch {
@@ -1181,7 +1240,7 @@ impl OctoBuddyView {
         }
         self.rt.slot_wait.retain(|w| w != peer);
         let key = p.session_key.clone().unwrap_or_else(|| session_key(peer));
-        let first = p.log().is_empty();
+        let first = p.log().is_empty() || self.rt.fresh.remove(peer);
         let session = self.store.find_peer(peer).and_then(|at| self.store.session(at));
         let work_branch = session.and_then(|s| s.work_branch.clone());
         let context = session.map(|s| crate::context::relative(&s.id)).unwrap_or_default();
@@ -1305,7 +1364,13 @@ What the person says to you after it stays between you and them.");
             }
         }
         self.rt.pending.remove(peer);
-        self.rt.unreported.entry(session_id).or_default().push((peer.to_string(), format!("Failed: {error}"), true));
+        // It could not start: its agent's failure, said as that.
+        let note = self.store.peer_mut(peer).cloned().and_then(|p| self.agent_failed(at, &p, "failed", error));
+        let said = match note {
+            Some(note) => format!("{note}\nFailed: {error}"),
+            None => format!("Failed: {error}"),
+        };
+        self.rt.unreported.entry(session_id).or_default().push((peer.to_string(), said, true));
         self.maybe_review(at);
     }
 
@@ -2315,6 +2380,99 @@ It works for you now: message it, review its work, or close it.)\n"));
         Ok(())
     }
 
+    /// What `p` ran on: its agent and model.
+    fn ran_on(&self, p: &Peer) -> String {
+        let agent = p.agent.as_deref().unwrap_or("octos");
+        let model = p.model_pick.clone().unwrap_or_else(|| match agent {
+            "octos" => self.providers.primary().map(|r| r.label.clone()).unwrap_or_else(|| "its profile's model".into()),
+            _ => "its own sign-in".into(),
+        });
+        format!("{} · {model}", Self::agent_name(agent))
+    }
+
+    /// A turn of `p` that failed with nothing changed is its agent's (or its
+    /// model's) failure, not its work's: the person hears it at once, with
+    /// what else it can run on, and the outer loop gets the note it reports with.
+    fn agent_failed(&mut self, at: SessionRef, p: &Peer, outcome: &str, error: &str) -> Option<String> {
+        if outcome != "failed" || p.touched.as_ref().is_some_and(|t| !t.is_empty()) {
+            return None;
+        }
+        let on = self.ran_on(p);
+        let said: String = error.trim().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(300).collect();
+        let others: Vec<String> = self.inner_agents().into_iter()
+            .flat_map(|(name, fits)| {
+                let fits = if name == "octos" { self.providers.rows.iter().map(|r| r.label.clone()).collect() } else { fits };
+                fits.into_iter().map(move |m| format!("{} · {m}", Self::agent_name(name)))
+            })
+            .filter(|o| *o != on).take(6).collect();
+        self.system(at, &i18n::pick(
+            format!("{} could not run on {on}: it failed before any work (no file changed): {said}. This is its agent's or model's failure, not the slice's. The outer loop will look into it, run it on another agent or model and tell you. It can run on: {}.", p.slug, others.join(", ")),
+            format!("{} 在 {on} 上没能运行：还没开始干活就失败了（没改任何文件）：{said}。这是 agent 或模型的问题，不是这个切片的工作问题。外环会查明原因、换一个 agent 或模型重跑，并告诉你。可换的：{}。", p.slug, others.join("、"))));
+        Some(format!("(It could not run: its agent failed before doing any work — the agent's or the model's failure, not the slice's work. It ran on {on}. Its error is below. Find out why if it is not plain, then run it again on another of the AGENTS and MODELS with octobuddy-send's `rerun` ({{\"to\":\"{}\",\"agent\":…,\"model\":…}}), and tell the person in your reply what failed, why, and what you switched it to.)", p.slug))
+    }
+
+    /// The outer loop runs a slice again from its brief on another agent or
+    /// model (its agent failed): a fresh start, its history kept. One still
+    /// waiting for its wave only changes what it will run on.
+    fn rerun_peer(&mut self, at: SessionRef, r: &plan::Rerun) {
+        let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == r.to && p.status != "closed").cloned());
+        let Some(p) = target else {
+            self.system(at, &i18n::pick(format!("The outer loop asked to run \"{}\" again, but no open inner loop has that name.", r.to), format!("outer 要重跑“{}”，但没有这个名字的 inner。", r.to)));
+            return;
+        };
+        let session_id = self.store.session(at).map(|s| s.id.clone()).unwrap_or_default();
+        let refuse = |me: &mut Self, why: String| {
+            me.system(at, &i18n::pick(format!("Not running {} again: {why}", p.slug), format!("没有重跑 {}：{why}", p.slug)));
+            me.rt.notes.entry(session_id.clone()).or_default().push(format!("{} was not run again: {why}", p.slug));
+        };
+        if p.status == "running" {
+            return refuse(self, "it is at work (interrupt it first)".into());
+        }
+        let agents = self.inner_agents();
+        let agent = r.agent.clone().or_else(|| p.agent.clone()).unwrap_or_else(|| "octos".into());
+        let Some((_, fits)) = agents.iter().find(|(name, _)| *name == agent.as_str()) else {
+            return refuse(self, format!("{agent} is not one of the AGENTS"));
+        };
+        let labels: Vec<String> = self.providers.rows.iter().map(|r| r.label.clone()).collect();
+        let primary = self.providers.primary().map(|r| r.label.clone());
+        let model = r.model.clone().or_else(|| if r.agent.is_none() { p.model_pick.clone() } else { None });
+        let pick = if crate::rpc_lead::lead_engine(&agent) {
+            match &model {
+                Some(m) if fits.contains(m) => Some(m.clone()),
+                Some(m) => return refuse(self, format!("{} cannot run on {m} (it can: {})", Self::agent_name(&agent), fits.join(", "))),
+                None => primary.clone().filter(|p| fits.contains(p)).or_else(|| fits.first().cloned()),
+            }
+        } else {
+            match &model {
+                Some(m) if Some(m) == primary.as_ref() => None,
+                Some(m) if labels.contains(m) => Some(m.clone()),
+                Some(m) => return refuse(self, format!("{m} is not one of the MODELS")),
+                None => None,
+            }
+        };
+        let peer = p.id.clone();
+        // Its process and its conversation go: the new agent starts afresh.
+        self.rt.claude_inners.remove(&peer);
+        self.rt.opened.remove(&peer);
+        if let Some(q) = self.store.peer_mut(&peer) {
+            q.agent = Some(agent.clone());
+            q.agent_named = Some(true);
+            q.model_pick = pick;
+            q.model = None;
+            q.claude_session = None;
+            q.session_key = Some(format!("{}:r{}", session_key(&peer), now_secs()));
+        }
+        let on = self.store.peer_mut(&peer).cloned().map(|q| self.ran_on(&q)).unwrap_or_default();
+        if self.rt.held.contains_key(&peer) {
+            self.system(at, &i18n::pick(format!("{} will run on {on} when its wave comes (the outer loop's change).", p.slug), format!("{} 轮到它的 wave 时改用 {on}（外环的调整）。", p.slug)));
+            return;
+        }
+        self.system(at, &i18n::pick(format!("The outer loop runs {} again from its brief, now on {on}.", p.slug), format!("外环让 {} 改用 {on}，从它的任务重新开始。", p.slug)));
+        self.rt.fresh.insert(peer.clone());
+        let brief = p.log().iter().find(|e| e.from == "lead").map(|e| e.input.clone()).unwrap_or_else(|| p.brief.clone());
+        self.deliver(&peer, Delivery::new(From::Lead, brief), Mode::Interrupt);
+    }
+
     /// Starts the held peers whose earlier waves (same round) are all
     /// accepted by the lead, or closed.
     fn release_waves(&mut self, at: SessionRef) {
@@ -2409,7 +2567,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None,
             model: None, effort: None, touched: None, base: workspace::git(&dir, &["rev-parse", "HEAD"]).ok(), commits: None, subagents: None,
             estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None,
-            inflight: None, uncommitted: None, model_pick: model.clone(), accepted: None, review_wanted: None, reviews_for: None, by_person: Some(true), claude_session: None, specs: None,
+            inflight: None, uncommitted: None, model_pick: model.clone(), agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: Some(true), claude_session: None, specs: None,
         });
         let mut line = Line::default();
         line.ready = true;
@@ -2694,6 +2852,9 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
                 None => self.system(at, &i18n::pick(format!("The outer loop asked to close \"{slug}\", but no open inner loop has that name."), format!("outer 要关闭“{slug}”，但没有这个名字的 inner。"))),
             }
         }
+        for r in &reply.reruns {
+            self.rerun_peer(at, r);
+        }
         // Accepting (or closing) the last of a wave starts the next.
         self.release_waves(at);
         for op in reply.queue_ops {
@@ -2858,6 +3019,12 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
                 self.rt.pending.remove(peer);
                 let tail: String = text.chars().rev().take(8000).collect::<Vec<_>>().into_iter().rev().collect();
                 self.store.push_meta(at, Role::Peer, &p.slug, &format!("(forwarded: it did not report)\n{}", short(&tail, 4000)), p.role());
+                // Its agent or model failed before any work: said as that, to
+                // the person and to the outer loop, which can run it elsewhere.
+                let tail = match self.agent_failed(at, &p, outcome, &tail) {
+                    Some(note) => format!("{note}\n{tail}"),
+                    None => tail,
+                };
                 self.queue_report(at, &session_id, peer, &p, tail, true, outcome, next.is_some(), commit);
             }
             // The person cut in on a task from the lead, which still waits for

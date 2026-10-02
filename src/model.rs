@@ -175,6 +175,9 @@ pub struct Peer {
     pub uncommitted: Option<Vec<String>>,
     /// The model its slice named (`family/model`); none: the default.
     pub model_pick: Option<String>,
+    /// Its slice named its agent (`agent`): it runs there, whatever its
+    /// session's engine for inner loops is or becomes.
+    pub agent_named: Option<bool>,
     /// Its files as the outer loop accepted them: a later change by another
     /// loop makes that review stale.
     pub accepted: Option<Vec<FileHash>>,    /// Its slice asked for an independent reviewer.
@@ -881,7 +884,7 @@ mod tests {
             store.session_mut(at).unwrap().peers_mut().push(Peer {
                 id: id.into(), slug: id.into(), role: None, agent: None, brief: String::new(), status: status.into(), dir: String::new(),
                 branch: None, round: 1, started_at: 0, finished_at: None, activity: Some("x".into()), result: None,
-                session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None,
+                session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None,
             });
         }
         store.mark_interrupted();

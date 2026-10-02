@@ -148,7 +148,8 @@ fn tools() -> Value {
         "brief": {"type": "string", "description": "the agent-spec task contract (spec: task …)"},
         "check": {"type": "string", "description": "shell command OctoBuddy runs when it is done"},
         "rounds": {"type": "number"}, "wave": {"type": "integer"}, "reviews": {"type": "integer"},
-        "model": {"type": "string", "description": "one of STATUS's MODELS; leave out for the default"},
+        "model": {"type": "string", "description": "one of STATUS's MODELS (for its agent: STATUS's AGENTS); leave out for the default"},
+        "agent": {"type": "string", "enum": ["octos", "codex", "pi", "claude"], "description": "one of STATUS's AGENTS; leave out for the session's"},
         "independent_review": {"type": "boolean"}
     }});
     json!([
@@ -161,6 +162,7 @@ fn tools() -> Value {
          "inputSchema": {"type": "object", "properties": {
             "messages": {"type": "array", "items": {"type": "object", "required": ["to", "message"], "properties": {"to": {"type": "string"}, "mode": {"type": "string", "enum": ["queue", "steer", "interrupt"]}, "message": {"type": "string"}}}},
             "close": {"type": "array", "items": {"type": "string"}},
+            "rerun": {"type": "array", "description": "run a slice again from its brief on another agent or model (its agent or model failed): one of STATUS's AGENTS, with a model from its list", "items": {"type": "object", "required": ["to"], "properties": {"to": {"type": "string"}, "agent": {"type": "string", "enum": ["octos", "codex", "pi", "claude"]}, "model": {"type": "string"}}}},
             "queue_ops": {"type": "array", "items": {"type": "object", "required": ["op", "to"], "properties": {"op": {"type": "string", "enum": ["cancel", "replace", "merge"]}, "to": {"type": "string"}, "id": {"type": "string"}, "ids": {"type": "array", "items": {"type": "string"}}, "message": {"type": "string"}}}}}}},
         {"name": "octobuddy_review", "description": "Your verdict on inner loops' reported work: accept (done) or fix (send the fix with octobuddy_send). Accepting the last of a wave starts the next.",
          "inputSchema": {"type": "object", "required": ["reviews"], "properties": {

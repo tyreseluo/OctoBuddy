@@ -24,6 +24,10 @@ impl OctoBuddyView {
     pub(crate) fn on_claude(&self, peer: &str) -> bool {
         let Some(session) = self.store.find_peer(peer).and_then(|at| self.store.session(at)) else { return false };
         let Some(p) = session.peers().iter().find(|p| p.id == peer) else { return false };
+        // Its slice named its agent: there.
+        if p.agent_named == Some(true) {
+            return p.agent.as_deref().is_some_and(crate::rpc_lead::lead_engine);
+        }
         p.claude_session.is_some() || self.rt.claude_inners.contains_key(peer)
             || (crate::rpc_lead::lead_engine(session.inner_engine()) && !self.rt.opened.contains(peer) && p.log().iter().all(|e| e.outcome.is_none() && e.reply.is_none()))
     }
@@ -32,7 +36,7 @@ impl OctoBuddyView {
     fn inner_engine_of(&self, p: &crate::model::Peer) -> String {
         let session = self.store.find_peer(&p.id).and_then(|at| self.store.session(at)).map(|s| s.inner_engine().to_string()).unwrap_or_else(|| ENGINE.into());
         match p.agent.as_deref() {
-            Some(a) if p.claude_session.is_some() && crate::rpc_lead::lead_engine(a) => a.to_string(),
+            Some(a) if (p.claude_session.is_some() || p.agent_named == Some(true)) && crate::rpc_lead::lead_engine(a) => a.to_string(),
             _ if crate::rpc_lead::lead_engine(&session) => session,
             _ => ENGINE.into(),
         }

@@ -78,6 +78,15 @@ contract short (about 30 lines): its own Intent, Decisions, Boundaries and 2-4 s
 MODELS. A slice may name the model it runs on (`model`, one of the MODELS STATUS lists; leave it out for \
 the default): a cheaper one for routine work (copy, docs, simple tests), a stronger one for hard code.
 
+AGENTS. A slice may also name the agent it runs on (`agent`, one of the AGENTS STATUS lists: octos, codex, pi, \
+claude), with a `model` from that agent's list; leave it out for octos. Name them when the person asks for \
+particular agents, or when one suits a slice better. Each slice still owns its files.
+
+WHEN AN AGENT FAILS. A slice whose agent or model failed before doing any work (OctoBuddy says so in its \
+report, with the error) is not a failure of the work. Find out why if the error is not plain, then run it again \
+on another of the AGENTS and MODELS with octobuddy-send's `rerun` ({\"to\":\"slug\",\"agent\":\"…\",\"model\":\"…\"}): \
+it starts afresh from its brief. In your reply tell the person what failed, why, and what you switched it to.
+
 INDEPENDENT REVIEW. For risky slices set `\"independent_review\": true`: when the slice reports with its \
 checks passed, it is reviewed with fresh eyes before you accept it. OctoBuddy writes its task, its report and its \
 diff to a file and names it; hand that path to your `reviewer` subagent (the Agent tool, subagent_type \
