@@ -5259,6 +5259,11 @@ impl Widget for OctoBuddyView {
         if self.clock.is_event(event).is_some() && !self.rt.batch_since.is_empty() {
             self.flush_batches();
         }
+        // A steer counted as the next turn whose turn never came.
+        if self.clock.is_event(event).is_some() && !self.rt.carried.is_empty() {
+            self.carried_overdue();
+            self.relayout(cx);
+        }
         // An outer loop asked to stop that has not: ended.
         if self.clock.is_event(event).is_some() && !self.stopping.is_empty() {
             self.stop_overdue(cx);

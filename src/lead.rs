@@ -503,6 +503,13 @@ impl Lead {
         Ok(())
     }
 
+    /// Messages written whose echo never came: none is waited for any more.
+    pub fn forget_unechoed(&self) {
+        if let Ok(mut sent) = self.sent.lock() {
+            sent.clear();
+        }
+    }
+
     /// Ends the lead's running turn; queued messages stay queued.
     pub fn interrupt(&self) -> Result<(), String> {
         if let Some(rpc) = &self.rpc {

@@ -97,6 +97,9 @@ pub struct Runtime {
     /// Session id → when its outer loop took the current turn up (its first
     /// event after the send): the timeline and "took" start there.
     pub(crate) lead_began: HashMap<String, u64>,
+    /// Steers counted as the next turn when a turn ended (`LeadSteerCarried`):
+    /// when, and how many. A turn that never comes frees the lead again.
+    pub(crate) carried: HashMap<String, (u64, u32)>,
     /// Session id → how many times its budget was extended this request.
     pub(crate) extended: HashMap<String, u32>,
     /// Peers the outer loop interrupted, or told not to commit: their next
@@ -355,6 +358,38 @@ impl OctoBuddyView {
         self.rt.lead_pending.get(session).copied().unwrap_or(0) > 0 || self.rt.packing.contains(session)
             // Its own CLI holds it (the native TUI plugin): what is for it waits.
             || self.tui_holds_outer(session)
+    }
+
+    /// A steer counted as the next turn whose turn never came (its echo was
+    /// lost, or the turn that ended had taken it already): after a quiet
+    /// `CARRIED_SECS` the lead is free again, and what waited goes to it.
+    pub(crate) fn carried_overdue(&mut self) {
+        const CARRIED_SECS: u64 = 20;
+        let now = now_secs();
+        let overdue: Vec<(String, u32)> = self.rt.carried.iter()
+            .filter(|(_, (at, _))| now.saturating_sub(*at) >= CARRIED_SECS)
+            .map(|(s, (_, n))| (s.clone(), *n)).collect();
+        for (session, turns) in overdue {
+            self.rt.carried.remove(&session);
+            log!("octobuddy: {session}: the carried steer's turn never came; the outer loop is free again");
+            if let Some(lead) = self.rt.leads.get(&session) {
+                lead.forget_unechoed();
+            }
+            let pending = self.rt.lead_pending.entry(session.clone()).or_insert(0);
+            *pending = pending.saturating_sub(turns);
+            if *pending > 0 {
+                continue;
+            }
+            self.lead_status.remove(&session);
+            if let Some(at) = self.store.find_session(&session) {
+                self.system(at, i18n::t("The outer loop had already taken the steer in its last turn: it is free again, and what waited goes to it now.",
+                    "外环在上一轮里已经处理了这次插话：恢复空闲，排队的内容现在交给它。"));
+                self.drain_outer(at);
+                if !self.store.is_plain(at) {
+                    self.maybe_review(at);
+                }
+            }
+        }
     }
 
     fn queue_outer(&mut self, session: &str, work: OuterWork) {
@@ -1567,6 +1602,8 @@ It works for you now: message it, review its work, or close it.)\n"));
             if self.rt.lead_started.contains_key(session) && !self.rt.lead_began.contains_key(session) {
                 self.rt.lead_began.insert(session.clone(), now_secs());
             }
+            // The carried steer's turn came.
+            self.rt.carried.remove(session);
         }
         match event {
             LoopEvent::Published { session, result } => {
@@ -1833,7 +1870,8 @@ It works for you now: message it, review its work, or close it.)\n"));
             }
             LoopEvent::LeadSteerCarried { session, turns } => {
                 // They make its next turns: the one ending now does not free it.
-                *self.rt.lead_pending.entry(session).or_insert(0) += turns as u32;
+                *self.rt.lead_pending.entry(session.clone()).or_insert(0) += turns as u32;
+                self.rt.carried.insert(session, (now_secs(), turns as u32));
             }
             LoopEvent::LeadExited { session, error, gen } => {
                 // A process already replaced (another engine or model
