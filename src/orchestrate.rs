@@ -55,6 +55,9 @@ pub struct Runtime {
     /// Peers OctoBuddy told to go on (their turn ended on what they were
     /// about to do): once, until they report.
     pub(crate) nudged: HashSet<String>,
+    /// Peer id → how many times OctoBuddy sent its failed check back to it
+    /// (before its outer loop reviews it): see `SELF_FIX`.
+    pub(crate) self_fix: HashMap<String, u32>,
     /// Rounds whose rework went to the project's memory: (session, round).
     pub(crate) rework_saved: HashSet<(String, u64)>,
     /// Peer id → the message its running turn answers (to re-queue a refused start).
@@ -204,6 +207,31 @@ impl Runtime {
 
 fn session_key(peer: &str) -> String {
     format!("local:octobuddy:{peer}")
+}
+
+/// How many times a failed check goes back to its inner loop before its
+/// outer loop reviews it.
+const SELF_FIX: u32 = 2;
+
+/// What a check's known errors mean, for the inner loop that fixes them.
+fn check_hints(output: &str) -> String {
+    let mut out = Vec::new();
+    if output.contains("not found in tree") {
+        out.push("`widget 'x' not found in tree`: `ui.x` reaches a widget only when it and every container above it, up to \
+the root, are named with `:=` (a `:=` id is a field of its direct parent only). Check every `ui.` reference in the file at \
+once (`grep -n 'ui\\.' bundle/main.splash`) against the names of its parents, not only the one reported.");
+    }
+    if output.contains("on_render closure failed") || output.contains("callback error") {
+        out.push("A closure raised while it ran (often an index past the end, a nil field, or a value of the wrong type): \
+guard each access in it, and check the other closures of the same kind.");
+    }
+    if output.contains("refused") {
+        out.push("`refused`: the app used something its manifest does not grant (a capability or a host): declare it, or do not use it.");
+    }
+    if !output.contains("PASSED") && output.contains("gate") && output.contains("FAILED") {
+        out.push("App Hub's gate refused the bundle: its lines above say which field or file.");
+    }
+    if out.is_empty() { String::new() } else { format!("\n\nWhat these mean:\n- {}", out.join("\n- ")) }
 }
 
 /// A reply that ends on what its agent is about to do ("Let me rewrite the
@@ -2226,6 +2254,25 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
                 let head = verdict.lines().filter(|l| l.starts_with('[')).collect::<Vec<_>>().join(" · ");
                 self.system(at, &format!("{slug}: {head}"));
+                // Its check failed: it fixes that first (a few times), its
+                // report held, before its outer loop spends a review on it.
+                let tries = self.rt.self_fix.get(&peer).copied().unwrap_or(0);
+                if passed == Some(false) && tries < SELF_FIX && !self.rt.pending.contains(&peer) && self.store.peer_mut(&peer).is_some_and(|p| p.status != "closed") {
+                    let n = tries + 1;
+                    self.rt.self_fix.insert(peer.clone(), n);
+                    if let Some(entry) = self.rt.unreported.get_mut(&session_id) {
+                        entry.retain(|(id, _, _)| id != &peer);
+                    }
+                    self.system(at, &i18n::pick(format!("{slug}'s check failed: OctoBuddy sends it back to fix it ({n}/{SELF_FIX}) before the outer loop reviews it."),
+                        format!("{slug} 的检查没过：OctoBuddy 先把检查结果交回它修（第 {n}/{SELF_FIX} 次），修好再交外环审。")));
+                    let text = format!("OctoBuddy ran your check and it failed (attempt {n} of {SELF_FIX} before your lead reviews your work). \
+Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end with your octobuddy-report block again.", check_hints(&verdict));
+                    self.deliver(&peer, Delivery::new(From::Lead, text), Mode::Queue);
+                    return;
+                }
+                if passed == Some(true) {
+                    self.rt.self_fix.remove(&peer);
+                }
                 let entry = self.rt.unreported.entry(session_id).or_default();
                 match entry.iter_mut().find(|(id, _, _)| id == &peer) {
                     Some((_, report, _)) => report.push_str(&format!("\n\n{verdict}")),
@@ -2917,6 +2964,10 @@ your role, the task you were given, what the outer loop that gave it (\"{}\") se
         let mut calibration = Vec::new();
         for review in reply.reviews {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == review.slug).map(|p| p.id.clone()));
+            // Reviewed: its next failed check goes back to it again first.
+            if let Some(id) = &target {
+                self.rt.self_fix.remove(id);
+            }
             if let Some(p) = target.and_then(|id| self.store.peer_mut(&id)) {
                 // How it went against its estimate: the project's memory, for the next one.
                 if review.verdict.starts_with("accept") {
@@ -3223,6 +3274,13 @@ fn short(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_check_says_what_its_errors_mean() {
+        let hints = check_hints("[E] splash:1:313:8 - widget 'month_label' not found in tree\nthe app logged script errors (above)");
+        assert!(hints.contains("every `ui.` reference"), "{hints}");
+        assert_eq!(check_hints("it starts and draws with no script errors"), "");
+    }
 
     #[test]
     fn a_turn_that_stops_on_what_it_will_do_is_unfinished() {
