@@ -48,6 +48,15 @@ pub struct Runtime {
     /// Peers the outer loop runs again from their brief (`rerun`): their
     /// next turn is a first one.
     pub(crate) fresh: HashSet<String>,
+    /// Peer id → the uncommitted files of its directory (and their hashes)
+    /// when its turn began: what its turn changed besides its edit tools (a
+    /// shell's `cat > file`) is told from them when it ends.
+    pub(crate) turn_snap: HashMap<String, Vec<(String, String)>>,
+    /// Peers OctoBuddy told to go on (their turn ended on what they were
+    /// about to do): once, until they report.
+    pub(crate) nudged: HashSet<String>,
+    /// Rounds whose rework went to the project's memory: (session, round).
+    pub(crate) rework_saved: HashSet<(String, u64)>,
     /// Peer id → the message its running turn answers (to re-queue a refused start).
     pub(crate) inflight: HashMap<String, Delivery>,
     /// Peer id → (approval id, title, body) waiting for the person.
@@ -195,6 +204,23 @@ impl Runtime {
 
 fn session_key(peer: &str) -> String {
     format!("local:octobuddy:{peer}")
+}
+
+/// A reply that ends on what its agent is about to do ("Let me rewrite the
+/// file:", "Now I'll …", "接下来…"): its turn stopped short.
+fn unfinished(text: &str) -> bool {
+    let last = text.trim().lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let low = last.to_lowercase();
+    let starts = ["let me", "now let me", "now i'll", "now i will", "i'll ", "i will ", "next, i", "next i", "first, i", "okay, let", "ok, let",
+        "让我", "我先", "接下来", "现在我", "下面我", "我来"];
+    last.ends_with(':') || last.ends_with('：') || starts.iter().any(|s| low.starts_with(s))
+}
+
+/// The octos session `peer` runs in now: its own key (a reviewer's, one run
+/// again afresh), else the one its id names.
+fn key_of(store: &crate::model::Store, peer: &str) -> String {
+    store.find_peer(peer).and_then(|at| store.session(at)).and_then(|s| s.peers().iter().find(|p| p.id == peer))
+        .and_then(|p| p.session_key.clone()).unwrap_or_else(|| session_key(peer))
 }
 
 fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str) -> String {
@@ -1028,7 +1054,47 @@ impl OctoBuddyView {
         let branch = session.work_branch.clone();
         let taken: Vec<String> = session.peers().iter().map(|p| p.slug.clone()).collect();
         let mut started = Vec::new();
+        let mut reused = Vec::new();
         for ((slice, pick), named) in slices.iter().zip(&picks).zip(&named) {
+            // The same slice planned again (its slug): the inner loop that had
+            // it, when its work was not accepted and it is not at work. It
+            // runs on what the plan says now, from the new brief; its history
+            // stays (one lane, one card), and no second inner loop is opened.
+            let again = session.peers().iter().rposition(|p| p.slug == slice.slug && p.status != "running"
+                && !p.review.as_deref().is_some_and(|r| r.starts_with("accept"))
+                && !started.iter().any(|(id, _, _): &(String, String, String)| *id == p.id));
+            if let Some(i) = again {
+                let p = &mut session.peers_mut()[i];
+                let id = p.id.clone();
+                p.role = slice.role.clone();
+                p.agent = Some(named.clone().unwrap_or_else(|| agent.clone()));
+                p.agent_named = named.is_some().then_some(true);
+                p.model_pick = pick.clone().or_else(|| pinned.clone());
+                p.model = None;
+                p.brief = slice.brief.clone();
+                p.status = "queued".into();
+                p.dir = dir.clone();
+                p.round = round;
+                p.started_at = now_secs();
+                p.finished_at = None;
+                p.activity = Some("preparing".into());
+                p.result = None;
+                p.session_key = Some(format!("{}:r{}", session_key(&id), now_secs()));
+                p.check = slice.check.clone();
+                (p.verdict, p.review, p.landed, p.accepted, p.contract) = (None, None, None, None, None);
+                p.estimate = slice.rounds;
+                p.wave = slice.wave;
+                (p.rounds_used, p.over_budget, p.flow, p.claude_session) = (None, None, None, None);
+                p.review_wanted = slice.independent_review;
+                // Its old process and conversation go: its next turn is a first one.
+                self.rt.claude_inners.remove(&id);
+                self.rt.opened.remove(&id);
+                self.rt.pending.remove(&id);
+                self.rt.fresh.insert(id.clone());
+                reused.push(slice.slug.clone());
+                started.push((id, slice.slug.clone(), slice.brief.clone()));
+                continue;
+            }
             // Slugs name peers across rounds: keep them unique in the session.
             let mut slug = slice.slug.clone();
             let mut n = 2;
@@ -1073,8 +1139,11 @@ impl OctoBuddyView {
         self.rt.budget_said.remove(&session_id);
         let est_text = est.map(|e| i18n::pick(format!(" Estimate (agent-estimation): {e}."), format!(" 估算（agent-estimation）：{e}。"))).unwrap_or_default();
         let (count, names, budget) = (started.len(), names.join(", "), left.max(budget));
-        self.system(at, &i18n::pick(format!("Round {round}: {count} slice(s) ({names}), {place}, on {}.{est_text} Review budget: {budget} report(s).", octos.source),
-            format!("第 {round} 轮：{count} 个切片（{names}），{place}，使用 {}。{est_text} 审查预算：{budget} 次汇报。", octos.source)));
+        let again = if reused.is_empty() { String::new() } else {
+            i18n::pick(format!(" Run again in the inner loops that had them: {}.", reused.join(", ")), format!(" 复用原来的 inner 重新开始：{}。", reused.join(", ")))
+        };
+        self.system(at, &i18n::pick(format!("Round {round}: {count} slice(s) ({names}), {place}, on {}.{est_text} Review budget: {budget} report(s).{again}", octos.source),
+            format!("第 {round} 轮：{count} 个切片（{names}），{place}，使用 {}。{est_text} 审查预算：{budget} 次汇报。{again}", octos.source)));
         // Every brief kept as a file (the Spec tab lists them); those written
         // as agent-spec contracts are linted now and checked when done.
         let spec_dir = model::data_dir().join("specs").join(&session_id);
@@ -1182,7 +1251,7 @@ impl OctoBuddyView {
         match line.deliver(d, mode) {
             Step::Start(d) => self.start_peer_turn(peer, d),
             Step::Interrupt(turn) => {
-                let key = session_key(peer);
+                let key = key_of(&self.store, peer);
                 let claude = self.on_claude(peer);
                 let result = if claude { self.claude_inner_interrupt(peer) } else { self.serve().and_then(|s| s.interrupt(&key, &turn)) };
                 if let Err(err) = result {
@@ -1196,7 +1265,7 @@ impl OctoBuddyView {
                 }
             }
             Step::Steer(d) => {
-                let key = session_key(peer);
+                let key = key_of(&self.store, peer);
                 let prompt = later_prompt(d.from, &d.text, self.rt.pending.contains(peer));
                 let result = self.serve().and_then(|s| s.steer(peer, &key, &prompt));
                 match result {
@@ -1281,6 +1350,8 @@ What the person says to you after it stays between you and them.");
         };
         match result {
             Ok(turn) => {
+                let dirty = workspace::uncommitted(&p.dir);
+                self.rt.turn_snap.insert(peer.to_string(), workspace::file_hashes(&p.dir, &dirty));
                 self.rt.opened.insert(peer.to_string());
                 if let Some(line) = self.rt.lines.get_mut(peer) {
                     line.started(turn.unwrap_or_default(), d.from);
@@ -1528,7 +1599,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             if let Some(lead) = self.rt.claude_inners.get(&p.id) {
                 let _ = lead.interrupt();
             } else if let (Some(turn), Some(serve)) = (turn, self.rt.serve.as_ref()) {
-                let _ = serve.interrupt(&session_key(&p.id), &turn);
+                let _ = serve.interrupt(&p.session_key.clone().unwrap_or_else(|| session_key(&p.id)), &turn);
             }
         }
         self.system(at, i18n::t("Stopped by the person.", "已由你停止。"));
@@ -1596,7 +1667,7 @@ It works for you now: message it, review its work, or close it.)\n"));
         // A peer waiting on a question gets the text as its answer.
         if let Some((question_id, _, options)) = self.rt.questions.remove(&peer) {
             if let Some(serve) = self.rt.serve.as_ref() {
-                let _ = serve.answer_question(&session_key(&peer), &question_id, &options, &text);
+                let _ = serve.answer_question(&key_of(&self.store, &peer), &question_id, &options, &text);
             }
             if let Some(p) = self.store.peer_mut(&peer) {
                 p.activity = Some(i18n::t("answered", "已回答").into());
@@ -1619,7 +1690,7 @@ It works for you now: message it, review its work, or close it.)\n"));
         let Some(peer) = self.shown_peer(at).map(|p| p.id.clone()) else { return };
         let Some((approval_id, _, _)) = self.rt.approvals.remove(&peer) else { return };
         if let Some(serve) = self.rt.serve.as_ref() {
-            let _ = serve.answer_approval(&session_key(&peer), &approval_id, approve, scope);
+            let _ = serve.answer_approval(&key_of(&self.store, &peer), &approval_id, approve, scope);
         }
         self.sync(cx);
     }
@@ -1638,7 +1709,8 @@ It works for you now: message it, review its work, or close it.)\n"));
         for peer in &peers {
             if on {
                 if let Some((approval_id, _, _)) = self.rt.approvals.remove(peer) {
-                    let _ = self.serve().and_then(|s| s.answer_approval(&session_key(peer), &approval_id, true, Some("session")));
+                    let key = key_of(&self.store, peer);
+                    let _ = self.serve().and_then(|s| s.answer_approval(&key, &approval_id, true, Some("session")));
                 }
             }
         }
@@ -2189,7 +2261,8 @@ It works for you now: message it, review its work, or close it.)\n"));
                 // is not; the sandbox applies either way.
                 let auto = self.store.find_peer(&peer).and_then(|at| self.store.session(at)).is_some_and(|s| s.auto());
                 if auto {
-                    let _ = self.serve().and_then(|s| s.answer_approval(&session_key(&peer), &approval_id, true, Some("session")));
+                    let key = key_of(&self.store, &peer);
+                    let _ = self.serve().and_then(|s| s.answer_approval(&key, &approval_id, true, Some("session")));
                     if let Some(open) = self.store.peer_mut(&peer).and_then(|p| p.open_exchange()) {
                         let what = body.lines().next().unwrap_or("").chars().take(120).collect::<String>();
                         open.steps.get_or_insert_with(Vec::new).push(crate::model::Step { id: approval_id, name: "auto-approved".into(), detail: format!("{title}: {what}"), status: "ok".into() });
@@ -2378,6 +2451,26 @@ It works for you now: message it, review its work, or close it.)\n"));
         self.rt.notes.entry(session_id).or_default().push(format!("the person moved slice {slug} from wave {from} to wave {wave}: it now runs after wave {} is accepted", wave.saturating_sub(1)));
         self.release_waves(at);
         Ok(())
+    }
+
+    /// A round all accepted: what was done again in it, and why, goes to
+    /// the project's memory (room "rework"), so later plans start from it.
+    fn save_rework(&mut self, at: SessionRef) {
+        let Some(session) = self.store.session(at).cloned() else { return };
+        let Some(round) = session.peers().iter().map(|p| p.round).max() else { return };
+        let mine: Vec<&Peer> = session.peers().iter().filter(|p| p.round == round && p.status != "closed").collect();
+        let accepted = |p: &Peer| p.review.as_deref().is_some_and(|r| r.starts_with("accept"));
+        if mine.is_empty() || !mine.iter().all(|p| accepted(p)) || !self.rt.rework_saved.insert((session.id.clone(), round)) {
+            return;
+        }
+        let tl = crate::timeline::build(&session, now_secs(), false, &|p| p.map(|p| self.ran_on(p)).unwrap_or_default());
+        let lines = tl.rework_lines();
+        if lines.is_empty() {
+            return;
+        }
+        let project = self.store.projects[at.0].path.clone();
+        let text = format!("Rework in \"{}\", round {round} (agent · model in brackets):\n- {}\n", session.title, lines.join("\n- "));
+        crate::memory::remember(&project, "rework", text);
     }
 
     /// What `p` ran on: its agent and model.
@@ -2699,7 +2792,7 @@ your role, the task you were given, what the outer loop that gave it (\"{}\") se
         let Some(at) = self.store.find_peer(peer) else { return };
         let running = self.rt.lines.get_mut(peer).and_then(Line::clear);
         if let Some(turn) = running {
-            let key = session_key(peer);
+            let key = key_of(&self.store, peer);
             let _ = self.serve().and_then(|s| s.interrupt(&key, &turn));
         }
         self.claude_inner_stop(peer);
@@ -2857,6 +2950,7 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
         }
         // Accepting (or closing) the last of a wave starts the next.
         self.release_waves(at);
+        self.save_rework(at);
         for op in reply.queue_ops {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == op.to).map(|p| p.id.clone()));
             // Closed (this reply, say): what waited for it went with it.
@@ -2962,7 +3056,27 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
         }
     }
 
+    /// Files `peer`'s turn changed that its edit tools did not report (it
+    /// wrote them from a shell): changed since its turn began, and no other
+    /// inner loop's of its directory. They are its own, as an edit's are.
+    fn track_shell_writes(&mut self, peer: &str, before: Vec<(String, String)>) {
+        let Some(p) = self.store.find_peer(peer).and_then(|at| self.store.session(at)).and_then(|s| s.peers().iter().find(|p| p.id == peer)).cloned() else { return };
+        let others: HashSet<String> = self.store.find_peer(peer).and_then(|at| self.store.session(at)).map(|s| s.peers().iter()
+            .filter(|o| o.id != peer && o.dir == p.dir && o.status != "closed").flat_map(|o| o.touched.clone().unwrap_or_default()).collect()).unwrap_or_default();
+        let dirty = workspace::uncommitted(&p.dir);
+        for (path, hash) in workspace::file_hashes(&p.dir, &dirty) {
+            let mine = p.touched.as_ref().is_some_and(|t| t.contains(&path));
+            if mine || others.contains(&path) || before.iter().any(|(f, h)| *f == path && *h == hash) {
+                continue;
+            }
+            self.apply_event(LoopEvent::PeerFileChanged { peer: peer.to_string(), path });
+        }
+    }
+
     fn on_peer_turn_ended(&mut self, peer: &str, outcome: &str, text: String) {
+        if let Some(before) = self.rt.turn_snap.remove(peer) {
+            self.track_shell_writes(peer, before);
+        }
         self.rt.inflight.remove(peer);
         self.rt.diffs.remove(peer);
         self.rt.worktrees.clear();
@@ -3009,12 +3123,25 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
             }
             // It reported: that is what the lead gets.
             (_, _, Some(report)) => {
+                self.rt.nudged.remove(peer);
                 self.rt.pending.remove(peer);
                 self.store.push_meta(at, Role::Peer, &p.slug, &report, p.role());
                 self.queue_report(at, &session_id, peer, &p, report, false, outcome, next.is_some(), commit);
             }
             // A task from the lead ended without a report: forward the reply,
             // marked as such, so the lead never waits for a report that will not come.
+            // Its turn ended on what it was about to do, with nothing done
+            // and no report: it goes on (once), without a review of nothing.
+            (_, Some(From::Lead), None) if from_lead_task && outcome == "completed" && next.is_none() && !self.rt.nudged.contains(peer)
+                && self.store.peer_mut(peer).is_some_and(|q| q.touched.as_ref().is_none_or(|t| t.is_empty()))
+                && unfinished(&text) => {
+                self.rt.nudged.insert(peer.to_string());
+                let said = text.trim().lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(160).collect::<String>();
+                self.system(at, &i18n::pick(format!("{}'s turn ended before it did what it said (\"{said}\"), with no file changed and no report: OctoBuddy told it to go on.", p.slug),
+                    format!("{} 这一轮在说完「{said}」后就结束了，没改文件也没汇报：OctoBuddy 让它接着做。", p.slug)));
+                self.deliver(peer, Delivery::new(From::Lead, "Your turn ended right after saying what you would do next, with no file changed and no report. \
+Go on now: do it (write the files), run your check, then end with your octobuddy-report block.".to_string()), Mode::Queue);
+            }
             (_, Some(From::Lead), None) if from_lead_task => {
                 self.rt.pending.remove(peer);
                 let tail: String = text.chars().rev().take(8000).collect::<Vec<_>>().into_iter().rev().collect();
@@ -3096,6 +3223,14 @@ fn short(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turn_that_stops_on_what_it_will_do_is_unfinished() {
+        assert!(unfinished("I read the docs.\n\nNow let me rewrite the entire file carefully:"));
+        assert!(unfinished("接下来我把首页写进去"));
+        assert!(!unfinished("Done: wrote bundle/main.splash (547 lines). Commit: feat: core"));
+        assert!(!unfinished(""));
+    }
 
     #[test]
     fn an_auto_commit_is_conventional() {

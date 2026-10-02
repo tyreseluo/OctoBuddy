@@ -15,6 +15,14 @@
 //! The model is built from what the store already keeps (messages, each
 //! peer's exchanges): the timeline is the conversations' state on an axis,
 //! not a second record of them.
+//!
+//! Rework is read from the same record (`Rework`): a turn the outer loop sent
+//! back, one that ended without a report or a commit, a failed turn tried
+//! again, a slice started afresh (another agent or model), an inner loop
+//! closed and replaced, a reference several inner loops each learned on their
+//! own. Each is marked where it happened, with why (the outer loop's own words
+//! when it said why), and the attempts it replaced are drawn as history:
+//! hatched, apart from the work that stood.
 use crate::i18n;
 use crate::model::{Peer, Role, Session};
 use makepad_widgets::*;
@@ -37,6 +45,9 @@ pub struct Lane {
     pub sub: String,
     pub kind: Kind,
     pub closed: bool,
+    /// Its work did not stand (closed unaccepted, or replaced): why. Drawn
+    /// as history.
+    pub history: Option<String>,
 }
 
 /// One turn of one loop.
@@ -62,6 +73,8 @@ pub struct Span {
     pub reply: String,
     /// An outer turn's last message, to open it in the conversation.
     pub message: Option<usize>,
+    /// Its work was done again later (or thrown away): drawn as history.
+    pub redone: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,6 +87,21 @@ pub enum MarkKind {
     Report,
     /// OctoBuddy committed an inner loop's files.
     Commit,
+    /// Work done again: why is its text.
+    Rework,
+}
+
+/// One piece of rework, for the list under the timeline (and the project's memory).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rework {
+    pub lane: usize,
+    /// Seconds from the timeline's start.
+    pub at: f64,
+    /// `sent back`, `no result`, `failed`, `restarted`, `replaced`, `relearned`.
+    pub kind: &'static str,
+    pub why: String,
+    /// The time the work it replaced took (seconds), when known.
+    pub lost: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -96,6 +124,7 @@ pub struct Timeline {
     /// The epoch second time 0 stands for.
     pub origin: u64,
     pub end: f64,
+    pub rework: Vec<Rework>,
 }
 
 fn first_line(text: &str, n: usize) -> String {
@@ -122,12 +151,12 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
     let mut tl = Timeline { origin: first, ..Default::default() };
     let detached = session.is_detached();
     if !detached {
-        tl.lanes.push(Lane { key: format!("s:{}", session.id), name: "Outer".into(), sub: sub(None), kind: Kind::Outer, closed: false });
+        tl.lanes.push(Lane { key: format!("s:{}", session.id), name: "Outer".into(), sub: sub(None), kind: Kind::Outer, closed: false, history: None });
     }
     let base = tl.lanes.len();
     for p in &peers {
         let kind = if p.reviews_for.is_some() { Kind::Review } else { Kind::Inner };
-        tl.lanes.push(Lane { key: format!("p:{}", p.id), name: p.slug.clone(), sub: sub(Some(p)), kind, closed: p.status == "closed" });
+        tl.lanes.push(Lane { key: format!("p:{}", p.id), name: p.slug.clone(), sub: sub(Some(p)), kind, closed: p.status == "closed", history: replaced(p, &peers) });
     }
     let lane_of = |slug: &str| peers.iter().position(|p| p.slug == slug).map(|i| base + i);
 
@@ -159,7 +188,7 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
             tl.spans.push(Span {
                 lane: 0, start, end: end.max(start + 1.0), open, turn: n, from: from.into(), outcome: String::new(),
                 steps: steps.len(), failed: steps.iter().filter(|s| s.status == "failed").count(), cost: last.cost,
-                input, reply, message: Some(z),
+                input, reply, message: Some(z), redone: false,
             });
             turn.clear();
         };
@@ -229,7 +258,7 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
             tl.spans.push(Span {
                 lane, start, end: end.max(start + 1.0), open, turn: k + 1, from: from.into(), outcome: e.outcome.clone().unwrap_or_default(),
                 steps: steps.len(), failed: steps.iter().filter(|s| s.status == "failed").count(), cost,
-                input: e.input.chars().take(400).collect(), reply: reply.chars().take(400).collect(), message: None,
+                input: e.input.chars().take(400).collect(), reply: reply.chars().take(400).collect(), message: None, redone: false,
             });
         }
     }
@@ -247,13 +276,132 @@ pub fn build(session: &Session, now: u64, outer_busy: bool, sub: &dyn Fn(Option<
     if rounds.len() > 1 {
         tl.rounds = rounds;
     }
+    rework(&mut tl, &peers, base, &rel);
     tl.marks.sort_by(|a, b| a.at.total_cmp(&b.at));
     let open = tl.spans.iter().any(|s| s.open);
     tl.end = tl.spans.iter().map(|s| s.end).chain(tl.marks.iter().map(|m| m.at)).fold(if open { now_rel } else { 0.0 }, f64::max).max(1.0);
     tl
 }
 
+/// Why `p`'s work did not stand: closed unaccepted (replaced by a later
+/// inner loop for the same slice, when one has its slug's stem).
+fn replaced(p: &Peer, peers: &[&Peer]) -> Option<String> {
+    let accepted = p.review.as_deref().is_some_and(|r| r.starts_with("accept"));
+    if p.status != "closed" || accepted {
+        return None;
+    }
+    let stem = |slug: &str| slug.rsplit_once('-').filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit())).map(|(s, _)| s.to_string()).unwrap_or_else(|| slug.to_string());
+    let after = peers.iter().find(|o| o.id != p.id && stem(&o.slug) == stem(&p.slug) && o.started_at >= p.started_at);
+    Some(match after {
+        Some(o) => i18n::pick(format!("replaced by {}", o.slug), format!("被 {} 取代", o.slug)),
+        None => i18n::t("closed, its work not accepted", "已关闭，工作未被接受").to_string(),
+    })
+}
+
+/// Words the outer loop sends back work with.
+fn sent_back(input: &str) -> bool {
+    let low = input.to_lowercase();
+    ["fix", "redo", "again", "did not", "didn't", "not deliver", "still", "nothing was", "ended before", "broken", "fails", "wrong", "missing",
+        "修", "重做", "退回", "没有", "未", "仍", "还是", "不对", "失败"].iter().any(|w| low.contains(w))
+}
+
+/// A reference an inner loop reads to learn how to write an app (a doc of
+/// the design flow, another app's source), by a step's detail.
+fn reference(detail: &str) -> Option<String> {
+    let names = ["SCRIPT-API.md", "AGENTS.md", "CAPABILITIES.md", "FLOW.md", "HOST-SERVICES.md", "QUICKSTART.md", "PUBLISHING.md"];
+    if let Some(n) = names.iter().find(|n| detail.contains(*n)) {
+        return Some(n.to_string());
+    }
+    // Another app's entry: `…/apps/<name>/bundle/main.splash`.
+    let at = detail.find("/apps/")?;
+    let rest = &detail[at + 6..];
+    let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '*').collect();
+    (rest[name.len()..].starts_with("/bundle/") && !name.is_empty()).then(|| format!("apps/{name} (source)"))
+}
+
+/// The rework in `tl`'s inner lanes (`peers` from lane `base` on).
+fn rework(tl: &mut Timeline, peers: &[&Peer], base: usize, rel: &dyn Fn(u64) -> f64) {
+    let mut found: Vec<Rework> = Vec::new();
+    let mut learned: std::collections::BTreeMap<String, (std::collections::BTreeSet<usize>, usize)> = Default::default();
+    for (j, p) in peers.iter().enumerate() {
+        let lane = base + j;
+        let spans: Vec<usize> = tl.spans.iter().enumerate().filter(|(_, s)| s.lane == lane).map(|(i, _)| i).collect();
+        let log = p.log();
+        for (k, e) in log.iter().enumerate() {
+            for st in e.steps.iter().flatten() {
+                if let Some(r) = reference(&st.detail) {
+                    let entry = learned.entry(r).or_default();
+                    entry.0.insert(lane);
+                    entry.1 += 1;
+                }
+            }
+            let Some(prev) = k.checked_sub(1).map(|i| &log[i]) else { continue };
+            let reply = prev.reply.as_deref().unwrap_or("");
+            let no_result = prev.outcome.as_deref() == Some("completed") && !reply.contains("octobuddy-report") && has_commit(reply).is_none();
+            let (kind, why) = if e.from == "lead" && e.input.trim_start().starts_with("spec: task") {
+                ("restarted", i18n::t("started afresh from its brief (another agent or model, or a new plan)", "从任务重新开始（换了 agent 或模型，或重新规划）").to_string())
+            } else if prev.outcome.as_deref() == Some("failed") {
+                ("failed", i18n::pick(format!("its turn failed: {}", first_line(reply, 140)), format!("上一轮失败：{}", first_line(reply, 140))))
+            } else if e.from == "lead" && no_result {
+                ("no result", first_line(&e.input, 160))
+            } else if e.from == "lead" && sent_back(&e.input) {
+                ("sent back", first_line(&e.input, 160))
+            } else {
+                continue;
+            };
+            let lost = prev.took.unwrap_or(0) as f64;
+            if let Some(&i) = spans.get(k - 1) {
+                tl.spans[i].redone = true;
+            }
+            let at = rel(e.began.unwrap_or(e.at));
+            tl.marks.push(Mark { lane, to: None, at, kind: MarkKind::Rework, text: why.clone() });
+            found.push(Rework { lane, at, kind, why, lost });
+        }
+        // Closed unaccepted: the whole lane is history.
+        if let Some(why) = tl.lanes[lane].history.clone() {
+            for &i in &spans {
+                tl.spans[i].redone = true;
+            }
+            let at = spans.last().map(|&i| tl.spans[i].end).unwrap_or(0.0);
+            let lost = spans.iter().map(|&i| tl.spans[i].end - tl.spans[i].start).sum();
+            found.push(Rework { lane, at, kind: "replaced", why, lost });
+        }
+    }
+    // The same reference learned by several inner loops, each on its own.
+    for (r, (lanes, times)) in learned {
+        if lanes.len() > 1 {
+            let lane = *lanes.iter().next().unwrap();
+            found.push(Rework { lane, at: 0.0, kind: "relearned", lost: 0.0,
+                why: i18n::pick(format!("{} inner loops each read {r} ({times} reads): a shared, short reference would spare it", lanes.len()),
+                    format!("{} 个 inner 各自读了 {r}（共 {times} 次）：给一份共享的精简参考就能省掉", lanes.len())) });
+        }
+    }
+    found.sort_by(|a, b| a.at.total_cmp(&b.at));
+    tl.rework = found;
+}
+
 impl Timeline {
+    /// The rework found, as lines (for the list, and for the project's memory).
+    pub fn rework_lines(&self) -> Vec<String> {
+        self.rework.iter().map(|r| {
+            let lane = self.lanes.get(r.lane).map(|l| format!("{} ({})", l.name, l.sub)).unwrap_or_default();
+            let kind = match r.kind {
+                "sent back" => i18n::t("sent back", "退回重做"),
+                "no result" => i18n::t("turn with no result", "白跑一轮"),
+                "failed" => i18n::t("failed, tried again", "失败后重来"),
+                "restarted" => i18n::t("started afresh", "从头重来"),
+                "replaced" => i18n::t("replaced", "被取代"),
+                _ => i18n::t("learned again", "重复学习"),
+            };
+            let lost = if r.lost >= 1.0 { i18n::pick(format!(" · {} lost", span_len(r.lost)), format!(" · 浪费 {}", span_len(r.lost))) } else { String::new() };
+            if r.kind == "relearned" {
+                format!("{kind}: {}", r.why)
+            } else {
+                format!("{} {kind} · {lane}{lost}: {}", clock(r.at), r.why)
+            }
+        }).collect()
+    }
+
     /// How long something ran, all lanes together (overlaps once).
     pub fn busy(&self) -> f64 {
         let mut iv: Vec<(f64, f64)> = self.spans.iter().map(|s| (s.start, s.end)).collect();
@@ -301,6 +449,7 @@ impl Timeline {
                 MarkKind::Dispatch => i18n::pick(format!("outer → {}: {}", name(m.to.unwrap_or(0)), m.text), format!("outer → {}：{}", name(m.to.unwrap_or(0)), m.text)),
                 MarkKind::Report => i18n::pick(format!("{} → outer: report", name(m.lane)), format!("{} → outer：汇报", name(m.lane))),
                 MarkKind::Commit => i18n::pick(format!("{} committed: {}", name(m.lane), m.text), format!("{} 已提交：{}", name(m.lane), m.text)),
+                MarkKind::Rework => i18n::pick(format!("{} rework: {}", name(m.lane), m.text), format!("{} 返工：{}", name(m.lane), m.text)),
             };
             out.push((m.at, line));
         }
@@ -658,6 +807,9 @@ impl TimelineCanvas {
         if !input.is_empty() {
             lines.push(input);
         }
+        if s.redone {
+            lines.push(i18n::t("Done again later: see Rework below", "这段工作后来重做了：见下方「返工」").to_string());
+        }
         lines
     }
 }
@@ -786,12 +938,24 @@ impl Widget for TimelineCanvas {
         let mut texts: Vec<(DVec2, String, f32, Vec4f)> = Vec::new();
 
         self.draw_vector.begin();
-        // Lanes: a light stripe every other one.
+        // Lanes: a light stripe every other one; a lane whose work did not
+        // stand (history) hatched, apart from the work that did.
         for i in 0..lanes {
             if i % 2 == 1 && self.lane_visible(i) {
                 self.draw_vector.set_color_hex(crate::theme::hex("panel"), 1.0);
                 self.draw_vector.rect(rect.pos.x as f32, self.lane_y(i) as f32, rect.size.x as f32, lane_h as f32);
                 self.draw_vector.fill();
+            }
+            if self.tl.lanes[i].history.is_some() && self.lane_visible(i) {
+                let (y, h) = (self.lane_y(i), lane_h);
+                let mut x = x0 - h;
+                while x < x1 {
+                    self.draw_vector.set_color_hex(crate::theme::hex("faint"), 0.28);
+                    self.draw_vector.move_to(x.max(x0) as f32, (y + h - (x.max(x0) - x)) as f32);
+                    self.draw_vector.line_to((x + h).min(x1) as f32, (y + h - ((x + h).min(x1) - x)) as f32);
+                    self.draw_vector.stroke(1.0);
+                    x += 9.0;
+                }
             }
         }
         // Idle squeezed away: a band, and how long it was.
@@ -834,9 +998,15 @@ impl Widget for TimelineCanvas {
             self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, r.size.x as f32, r.size.y as f32, 3.0);
             self.draw_vector.fill();
             if cut > r.pos.x + 0.5 {
-                self.draw_vector.set_color_hex(color, if s.open { 0.75 } else { 1.0 });
+                self.draw_vector.set_color_hex(color, if s.redone { 0.38 } else if s.open { 0.75 } else { 1.0 });
                 self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, (cut - r.pos.x).max(2.0) as f32, r.size.y as f32, 3.0);
                 self.draw_vector.fill();
+            }
+            // Done again later: its outline says so.
+            if s.redone {
+                self.draw_vector.set_color_hex(crate::theme::hex("warning"), 0.9);
+                self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, r.size.x as f32, r.size.y as f32, 3.0);
+                self.draw_vector.stroke(1.0);
             }
             if self.selected == Some(i) || self.hover == Some(i) {
                 self.draw_vector.set_color_hex(if self.selected == Some(i) { crate::theme::hex("ink") } else { crate::theme::hex("muted_strong") }, 1.0);
@@ -891,6 +1061,16 @@ impl Widget for TimelineCanvas {
                     let y = self.lane_y(m.lane) + 4.0;
                     self.draw_vector.set_color_hex(crate::theme::hex("warning"), alpha);
                     self.draw_vector.circle(x as f32, y as f32, 3.2);
+                    self.draw_vector.fill();
+                }
+                (MarkKind::Rework, _) if self.lane_visible(m.lane) => {
+                    // A warning triangle at the lane's top: work done again here.
+                    let y = self.lane_y(m.lane) + 2.0;
+                    self.draw_vector.set_color_hex(crate::theme::hex("warning"), alpha);
+                    self.draw_vector.move_to(x as f32, y as f32);
+                    self.draw_vector.line_to((x + 4.5) as f32, (y + 8.0) as f32);
+                    self.draw_vector.line_to((x - 4.5) as f32, (y + 8.0) as f32);
+                    self.draw_vector.close();
                     self.draw_vector.fill();
                 }
                 (MarkKind::Commit, _) if self.lane_visible(m.lane) => {
@@ -1005,7 +1185,11 @@ impl Widget for TimelineCanvas {
             let name: String = lane.name.chars().take(18).collect();
             if lane_h >= 30.0 {
                 self.text(cx, dvec2(rect.pos.x + 18.0, y + 4.0), &name, 8.5, ink);
-                let sub: String = lane.sub.chars().take(24).collect();
+                let sub = match &lane.history {
+                    Some(why) => format!("{} · {why}", i18n::t("history", "历史")),
+                    None => lane.sub.clone(),
+                };
+                let sub: String = sub.chars().take(24).collect();
                 self.text(cx, dvec2(rect.pos.x + 18.0, y + 18.0), &sub, 7.0, rgb(crate::theme::hex("muted"), 1.0));
             } else {
                 self.text(cx, dvec2(rect.pos.x + 18.0, y + lane_h * 0.5 - 6.0), &name, 8.0, ink);
@@ -1173,6 +1357,42 @@ mod tests {
         assert!((axis.real(axis.vis(150.0)) - 150.0).abs() < 1e-6, "the mapping goes both ways");
         assert!(tl.state_at(35.0)[1].contains("1"), "{:?}", tl.state_at(35.0));
         assert!(!tl.events_until(100.0, 10).is_empty());
+    }
+
+    #[test]
+    fn rework_is_found_with_why_and_old_attempts_are_history() {
+        let mut store = Store::default();
+        let dir = std::env::temp_dir();
+        let pi = store.add_project(&dir.to_string_lossy()).unwrap();
+        let at = store.add_session(pi).unwrap();
+        let s = store.session_mut(at).unwrap();
+        s.messages.push(msg("user", "make it", 1000, None));
+        let read = |d: &str| crate::model::Step { id: "x".into(), name: "Bash".into(), detail: d.into(), status: "ok".into() };
+        // The first attempt: failed, closed, replaced by app-core-2.
+        let mut old = crate::chat::tests::peer(Vec::new());
+        old.slug = "app-core".into();
+        old.status = "closed".into();
+        old.started_at = 1001;
+        old.log_mut().push(Exchange { from: "lead".into(), input: "spec: task core".into(), reply: Some("400: model not supported".into()), outcome: Some("failed".into()), at: 1010, steps: Some(vec![read("cat docs/SCRIPT-API.md")]), took: Some(4), cost_total: None, began: None });
+        // The second: a turn with nothing done, sent on, then done.
+        let mut new = crate::chat::tests::peer(Vec::new());
+        new.id = "w2".into();
+        new.slug = "app-core-2".into();
+        new.started_at = 1100;
+        new.log_mut().push(Exchange { from: "lead".into(), input: "spec: task core".into(), reply: Some("Now let me rewrite the file:".into()), outcome: Some("completed".into()), at: 1100, steps: Some(vec![read("cat .octobuddy/docs/SCRIPT-API.md")]), took: Some(300), cost_total: None, began: None });
+        new.log_mut().push(Exchange { from: "lead".into(), input: "Your last turn ended before any write: write the file now".into(), reply: Some("done\nCommit: feat: core".into()), outcome: Some("completed".into()), at: 1500, steps: None, took: Some(200), cost_total: None, began: None });
+        s.peers_mut().push(old);
+        s.peers_mut().push(new);
+        let tl = build(store.session(at).unwrap(), 2000, false, &|p| p.map(|p| p.slug.clone()).unwrap_or_else(|| "claude".into()));
+        let kinds: Vec<&str> = tl.rework.iter().map(|r| r.kind).collect();
+        assert!(kinds.contains(&"replaced") && kinds.contains(&"no result") && kinds.contains(&"relearned"), "{kinds:?}");
+        let sent = tl.rework.iter().find(|r| r.kind == "no result").unwrap();
+        assert!(sent.why.contains("ended before any write"), "why is the outer loop's own words: {}", sent.why);
+        assert_eq!(sent.lost, 300.0, "the turn it replaced");
+        assert!(tl.lanes[1].history.as_deref().is_some_and(|h| h.contains("app-core-2")), "{:?}", tl.lanes[1].history);
+        assert!(tl.spans.iter().filter(|s| s.lane == 1).all(|s| s.redone), "a replaced lane's turns are history");
+        assert!(tl.marks.iter().any(|m| m.kind == MarkKind::Rework));
+        assert_eq!(tl.rework_lines().len(), tl.rework.len());
     }
 
     #[test]

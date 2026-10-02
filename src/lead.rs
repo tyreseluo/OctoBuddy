@@ -87,6 +87,10 @@ report, with the error) is not a failure of the work. Find out why if the error 
 on another of the AGENTS and MODELS with octobuddy-send's `rerun` ({\"to\":\"slug\",\"agent\":\"…\",\"model\":\"…\"}): \
 it starts afresh from its brief. In your reply tell the person what failed, why, and what you switched it to.
 
+RUNNING A SLICE AGAIN. A slice that failed, stalled or was stopped runs again in its own inner loop: \
+`rerun` (same brief, another agent or model), or plan it again under the same slug (a new brief): OctoBuddy \
+reuses the inner loop that had it, keeping its history. Do not close it and start a new slug for the same work.
+
 INDEPENDENT REVIEW. For risky slices set `\"independent_review\": true`: when the slice reports with its \
 checks passed, it is reviewed with fresh eyes before you accept it. OctoBuddy writes its task, its report and its \
 diff to a file and names it; hand that path to your `reviewer` subagent (the Agent tool, subagent_type \

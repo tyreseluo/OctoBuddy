@@ -9,6 +9,11 @@
 //! free-form tools (`custom`, like `apply_patch`) as a function taking one
 //! `input` string, given back as `custom_tool_call`. What does not: hosted
 //! tools (web search, a local shell), reasoning items from earlier turns.
+//!
+//! A model that writes its own tool-call markup into the text at times
+//! (MiniMax: `]<]minimax[>[<invoke name="exec_command"><cmd>…</cmd>…`) has it
+//! read as the calls it means (`markup_calls`): Codex would show it as text
+//! and end its turn there.
 use serde_json::{json, Map, Value};
 
 /// A Responses request as a Chat Completions one, and the names of the
@@ -141,12 +146,68 @@ pub struct Translator {
     calls: Vec<(u64, Call)>,
     done: Vec<Value>,
     usage: Value,
+    /// Text not passed on yet: it may be the start of a model's own tool-call markup.
+    held: String,
+    /// The markup began: the rest of the text is read as calls at the end.
+    markup: bool,
+}
+
+/// Where a model's own tool-call markup begins.
+const MARKUP: [&str; 3] = ["]<]minimax[>[", "<tool_call>", "<invoke name=\""];
+
+/// The calls written as markup in `text` (MiniMax's `<invoke name="…">` with
+/// one tag per argument, or `<parameter name="…">`): each name and its
+/// arguments (a value that reads as JSON is that, else its text).
+pub fn markup_calls(text: &str) -> Vec<(String, Map<String, Value>)> {
+    let clean = text.replace("]<]minimax[>[", "");
+    let mut out = Vec::new();
+    let mut rest = clean.as_str();
+    while let Some(i) = rest.find("<invoke name=\"") {
+        let after = &rest[i + 14..];
+        let Some(q) = after.find('"') else { break };
+        let name = after[..q].to_string();
+        let open = after[q..].find('>').map(|g| q + g + 1).unwrap_or(after.len());
+        let all = &after[open..];
+        let end = all.find("</invoke>").unwrap_or(all.len());
+        let mut body = &all[..end];
+        let mut args = Map::new();
+        while let Some(o) = body.find('<') {
+            let Some(t) = body[o..].find('>').map(|t| o + t) else { break };
+            let tag = &body[o + 1..t];
+            let (key, close) = match tag.strip_prefix("parameter name=\"").and_then(|k| k.strip_suffix('"')) {
+                Some(k) => (k.to_string(), "</parameter>".to_string()),
+                None if !tag.starts_with('/') && !tag.contains(' ') && !tag.is_empty() => (tag.to_string(), format!("</{tag}>")),
+                None => {
+                    body = &body[t + 1..];
+                    continue;
+                }
+            };
+            let from = t + 1;
+            let to = body[from..].find(&close).map(|e| from + e).unwrap_or(body.len());
+            let raw = body[from..to].trim_matches(|c| c == '\n' || c == '\r');
+            let value = serde_json::from_str::<Value>(raw.trim()).ok().filter(|v| !v.is_string()).unwrap_or_else(|| Value::String(raw.to_string()));
+            args.insert(key, value);
+            body = &body[(to + close.len()).min(body.len())..];
+        }
+        if !name.is_empty() {
+            out.push((name, args));
+        }
+        rest = &all[(end + 9).min(all.len())..];
+    }
+    out
+}
+
+/// The longest end of `text` that could begin one of the markup's openers.
+fn markup_prefix(text: &str) -> usize {
+    (1..=MARKUP.iter().map(|m| m.len()).max().unwrap_or(0)).rev()
+        .find(|&n| n <= text.len() && text.is_char_boundary(text.len() - n) && MARKUP.iter().any(|m| m.starts_with(&text[text.len() - n..])))
+        .unwrap_or(0)
 }
 
 impl Translator {
     pub fn new(model: &str, custom: Vec<String>) -> Translator {
         let id = format!("resp_{}", crate::model::new_id("o"));
-        Translator { id, model: model.into(), custom, started: false, next: 0, text: None, calls: Vec::new(), done: Vec::new(), usage: Value::Null }
+        Translator { id, model: model.into(), custom, started: false, next: 0, text: None, calls: Vec::new(), done: Vec::new(), usage: Value::Null, held: String::new(), markup: false }
     }
 
     fn response(&self, status: &str, output: Vec<Value>) -> Value {
@@ -174,6 +235,51 @@ impl Translator {
         }
     }
 
+    /// `text` passed on as the assistant message's (it opens when it has none).
+    fn text_delta(&mut self, text: &str, out: &mut Vec<(String, Value)>) {
+        if text.is_empty() {
+            return;
+        }
+        if self.text.is_none() {
+            let (index, id) = (self.next, format!("msg_{}", crate::model::new_id("m")));
+            self.next += 1;
+            out.push(("response.output_item.added".into(), json!({"type": "response.output_item.added", "output_index": index,
+                "item": {"type": "message", "id": id, "role": "assistant", "status": "in_progress", "content": []}})));
+            out.push(("response.content_part.added".into(), json!({"type": "response.content_part.added", "item_id": id, "output_index": index, "content_index": 0,
+                "part": {"type": "output_text", "text": "", "annotations": []}})));
+            self.text = Some((index, id, String::new()));
+        }
+        let (index, id, all) = self.text.as_mut().unwrap();
+        all.push_str(text);
+        out.push(("response.output_text.delta".into(), json!({"type": "response.output_text.delta", "item_id": id, "output_index": *index, "content_index": 0, "delta": text})));
+    }
+
+    /// The calls a model wrote as markup, as the calls they are.
+    fn markup_to_calls(&mut self, out: &mut Vec<(String, Value)>) {
+        let held = std::mem::take(&mut self.held);
+        let calls = markup_calls(&held);
+        if calls.is_empty() {
+            // Not calls after all: it was text.
+            self.text_delta(&held, out);
+            return;
+        }
+        self.end_text(out);
+        for (name, args) in calls {
+            let custom = self.custom.contains(&name);
+            let call = Call { index: self.next, id: format!("fc_{}", crate::model::new_id("f")), call_id: format!("call_{}", crate::model::new_id("c")),
+                arguments: Value::Object(args).to_string(), name, custom };
+            self.next += 1;
+            let item = if custom {
+                json!({"type": "custom_tool_call", "id": call.id, "call_id": call.call_id, "name": call.name, "input": "", "status": "in_progress"})
+            } else {
+                json!({"type": "function_call", "id": call.id, "call_id": call.call_id, "name": call.name, "arguments": "", "status": "in_progress"})
+            };
+            out.push(("response.output_item.added".into(), json!({"type": "response.output_item.added", "output_index": call.index, "item": item})));
+            let n = u64::MAX - self.calls.len() as u64;
+            self.calls.push((n, call));
+        }
+    }
+
     /// One chunk of the chat stream (its `data:` JSON).
     pub fn feed(&mut self, chunk: &Value) -> Vec<(String, Value)> {
         let mut out = Vec::new();
@@ -188,18 +294,25 @@ impl Translator {
         let Some(choice) = chunk.get("choices").and_then(Value::as_array).and_then(|c| c.first()) else { return out };
         let delta = choice.get("delta").cloned().unwrap_or(Value::Null);
         if let Some(text) = delta.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()) {
-            if self.text.is_none() {
-                let (index, id) = (self.next, format!("msg_{}", crate::model::new_id("m")));
-                self.next += 1;
-                out.push(("response.output_item.added".into(), json!({"type": "response.output_item.added", "output_index": index,
-                    "item": {"type": "message", "id": id, "role": "assistant", "status": "in_progress", "content": []}})));
-                out.push(("response.content_part.added".into(), json!({"type": "response.content_part.added", "item_id": id, "output_index": index, "content_index": 0,
-                    "part": {"type": "output_text", "text": "", "annotations": []}})));
-                self.text = Some((index, id, String::new()));
+            self.held.push_str(text);
+            if !self.markup {
+                // Passed on up to where markup may begin; from there, held.
+                let at = MARKUP.iter().filter_map(|m| self.held.find(m)).min();
+                let upto = match at {
+                    Some(at) => {
+                        self.markup = true;
+                        at
+                    }
+                    None => self.held.len() - markup_prefix(&self.held),
+                };
+                let say: String = self.held.drain(..upto).collect();
+                self.text_delta(&say, &mut out);
             }
-            let (index, id, all) = self.text.as_mut().unwrap();
-            all.push_str(text);
-            out.push(("response.output_text.delta".into(), json!({"type": "response.output_text.delta", "item_id": id, "output_index": *index, "content_index": 0, "delta": text})));
+        }
+        if delta.get("tool_calls").and_then(Value::as_array).is_some_and(|c| !c.is_empty()) && !self.markup {
+            // Text before the calls is all said.
+            let say = std::mem::take(&mut self.held);
+            self.text_delta(&say, &mut out);
         }
         for tc in delta.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
             let n = tc.get("index").and_then(Value::as_u64).unwrap_or(0);
@@ -237,6 +350,12 @@ impl Translator {
     pub fn finish(&mut self) -> Vec<(String, Value)> {
         let mut out = Vec::new();
         self.begin(&mut out);
+        if self.markup {
+            self.markup_to_calls(&mut out);
+        } else {
+            let say = std::mem::take(&mut self.held);
+            self.text_delta(&say, &mut out);
+        }
         self.end_text(&mut out);
         for (_, call) in std::mem::take(&mut self.calls) {
             let item = if call.custom {
@@ -298,6 +417,32 @@ mod tests {
         assert_eq!(chat["tools"].as_array().unwrap().len(), 2, "hosted tools do not cross");
         assert_eq!(custom, ["apply_patch"]);
         assert_eq!(chat["stream"], true);
+    }
+
+    #[test]
+    fn minimax_markup_in_the_text_becomes_calls() {
+        let mut t = Translator::new("MiniMax-M3", Vec::new());
+        let mut events = Vec::new();
+        for piece in ["Let me check the gate:]<]mini", "max[>[\n<tool_call>\n]<]minimax[>[<invoke name=\"exec_command\">]<]minimax[>[<cmd>octo check bundle", " 2>&1 | tail -30]<]minimax[>[</cmd>]<]minimax[>[<yield_time_ms>30000]<]minimax[>[</yield_time_ms>]<]minimax[>[</invoke>]<]minimax[>[</tool_call>"] {
+            events.extend(t.feed(&json!({"choices": [{"delta": {"content": piece}}]})));
+        }
+        events.extend(t.finish());
+        let said: String = events.iter().filter(|(n, _)| n == "response.output_text.delta").map(|(_, d)| d["delta"].as_str().unwrap().to_string()).collect();
+        assert_eq!(said, "Let me check the gate:", "the markup is not said as text");
+        let output = &events.last().unwrap().1["response"]["output"];
+        assert_eq!(output[1]["type"], "function_call");
+        assert_eq!(output[1]["name"], "exec_command");
+        let args: Value = serde_json::from_str(output[1]["arguments"].as_str().unwrap()).unwrap();
+        assert_eq!(args, json!({"cmd": "octo check bundle 2>&1 | tail -30", "yield_time_ms": 30000}));
+    }
+
+    #[test]
+    fn text_that_only_looks_like_markup_is_said() {
+        let mut t = Translator::new("m", Vec::new());
+        let mut events = t.feed(&json!({"choices": [{"delta": {"content": "a <tool_call> is how it starts"}}]}));
+        events.extend(t.finish());
+        let said: String = events.iter().filter(|(n, _)| n == "response.output_text.delta").map(|(_, d)| d["delta"].as_str().unwrap().to_string()).collect();
+        assert_eq!(said, "a <tool_call> is how it starts");
     }
 
     #[test]

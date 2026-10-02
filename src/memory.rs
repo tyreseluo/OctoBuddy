@@ -30,8 +30,9 @@ pub fn outer_rules(project: &str) -> String {
     let wing = wing(project);
     format!("\n\nPROJECT MEMORY. This project's memory is mempal's wing \"{wing}\" (tools mempal_search, mempal_ingest; \
 always pass wing \"{wing}\"). OctoBuddy searches it for you with each request's words (MEMORY in the CONTEXT \
-ahead of the request: decisions, conventions, pitfalls, and room \"calibration\", how accepted slices went \
-against their estimates); search it yourself only for what that lacks. When you settle a decision or a convention, or learn a pitfall, save it in one \
+ahead of the request: decisions, conventions, pitfalls, room \"calibration\", how accepted slices went \
+against their estimates, and room \"rework\", what earlier rounds did again and why: plan around it); search it \
+yourself only for what that lacks. When you settle a decision or a convention, or learn a pitfall, save it in one \
 or two sentences with its reason (room \"decisions\", \"conventions\" or \"pitfalls\"). Do not save what the code \
 or git history already says. Sessions the person archived are in room \"archive\": what was asked, answered and done \
 there.")
