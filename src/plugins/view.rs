@@ -238,7 +238,7 @@ impl OctoBuddyView {
                 self.store.disabled_plugins = (!off.is_empty()).then_some(off);
             }
             // A slot whose plugin went off closes.
-            if !plugins::enabled(plugins::APP_PREVIEW) {
+            if !plugins::enabled(plugins::OCTOSENSE_APP) {
                 self.show_preview = false;
             }
             if !plugins::enabled(plugins::APP_DATA) {

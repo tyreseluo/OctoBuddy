@@ -52,6 +52,7 @@ mod claude_inner;
 mod card_tabs;
 mod picker;
 mod provider_icons;
+use plugins::workbench::Workbench;
 mod appearance;
 pub mod plugins;
 mod tools_info;
@@ -590,6 +591,47 @@ script_mod! {
                 }
             }
         }
+    }
+    // The app workbench's Files: a row of the project's tree.
+    let FileItem = View{
+        width: Fill height: Fit
+        row := HoverRow{
+            width: Fill height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3}
+            cursor: MouseCursor.Hand grab_key_focus: false new_batch: true
+            draw_bg.color: #x00000000 draw_bg.border_radius: 4.0
+            name := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_code{font_size: 9}}
+        }
+    }
+    // The app workbench's App Hub form: a section's title, a field's name, a tick.
+    let HubSection = Label{width: Fill text: "" margin: Inset{top: 12} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
+    let HubLabel = Label{width: Fill text: "" margin: Inset{top: 4} draw_text.color: muted draw_text.text_style.font_size: 9}
+    let HubDrop = DropDown{
+        height: 34 padding: Inset{left: 10 right: 24 top: 8 bottom: 8}
+        draw_text +: {color: th_ink color_hover: th_ink color_focus: th_ink color_down: th_ink text_style: theme.font_regular{font_size: 10}}
+        draw_bg +: {
+            color: th_raised color_hover: th_raised color_focus: th_raised color_down: th_raised
+            border_color: th_line border_color_hover: th_line_strong border_color_focus: th_accent border_color_down: th_accent
+            border_color_2: th_line border_color_2_hover: th_line_strong border_color_2_focus: th_accent border_color_2_down: th_accent
+        }
+    }
+    let HubCheck = CheckBox{
+        text: ""
+        draw_text +: {
+            color: th_ink color_hover: th_ink color_down: th_ink color_focus: th_ink color_active: th_ink
+            text_style: theme.font_regular{font_size: 9.5}
+        }
+    }
+    // The app workbench's Permissions: a capability, what the store says it does.
+    let CapRow = View{
+        width: Fill height: Fit flow: Down spacing: 2 padding: Inset{top: 4 bottom: 4}
+        check := CheckBox{
+            text: ""
+            draw_text +: {
+                color: th_ink color_hover: th_ink color_down: th_ink color_focus: th_ink color_active: th_ink
+                text_style: theme.font_bold{font_size: 9.5}
+            }
+        }
+        note := Label{width: Fill text: "" margin: Inset{left: 26} draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
     }
     // A theme in Settings › Appearance: a swatch in its own colours (set by
     // the code), its name, whether it is light or dark, a mark when in use.
@@ -1569,7 +1611,7 @@ script_mod! {
                     // An OctoSense app, running from the project's files.
                     preview_divider := View{width: Fit height: Fill visible: false preview_handle := ResizeHandle{}}
                     preview_panel := SolidView{
-                        width: 400 height: Fill flow: Down new_batch: true visible: false
+                        width: 420 height: Fill flow: Down new_batch: true visible: false
                         draw_bg.color: th_panel
                         View{
                             width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
@@ -1579,6 +1621,16 @@ script_mod! {
                             reload_preview := SegOff{text: "Reload" height: 24}
                             close_preview := SmallButton{text: "x"}
                         }
+                        // The workbench's tabs: the app running, its files, its permissions, App Hub.
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 4 padding: Inset{left: 16 right: 16 bottom: 8}
+                            wb_t0 := SegOff{text: "Preview"} wb_t0_on := SegOn{text: "Preview" visible: false}
+                            wb_t1 := SegOff{text: "Files"} wb_t1_on := SegOn{text: "Files" visible: false}
+                            wb_t2 := SegOff{text: "Permissions"} wb_t2_on := SegOn{text: "Permissions" visible: false}
+                            wb_t3 := SegOff{text: "App Hub"} wb_t3_on := SegOn{text: "App Hub" visible: false}
+                        }
+                        wb_preview := View{
+                        width: Fill height: Fill flow: Down
                         View{
                             width: Fill height: Fit padding: Inset{left: 16 right: 16 bottom: 8}
                             preview_info := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
@@ -1603,6 +1655,122 @@ script_mod! {
                             width: Fill height: Fill new_batch: true
                             draw_bg.color: th_raised
                             preview := Splash{width: Fill height: Fill}
+                        }
+                        }
+                        // Its files: the project's tree, then the file picked.
+                        wb_files := View{
+                            width: Fill height: Fill flow: Down visible: false
+                            View{
+                                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5} padding: Inset{left: 16 right: 16 bottom: 6}
+                                files_root := Label{width: Fill text: "" max_lines: 1 draw_text.color: muted draw_text.text_style: theme.font_code{font_size: 8.5}}
+                                files_reveal := SegOff{text: "Finder"}
+                            }
+                            View{
+                                width: Fill height: 230 padding: Inset{left: 8 right: 8}
+                                files_list := PortalList{
+                                    width: Fill height: Fill
+                                    File := FileItem{}
+                                }
+                            }
+                            SolidView{width: Fill height: 1 draw_bg.color: line}
+                            View{
+                                width: Fill height: Fit padding: Inset{left: 16 right: 16 top: 8 bottom: 6}
+                                source_path := Label{width: Fill text: "" max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                            }
+                            SolidView{
+                                width: Fill height: Fill new_batch: true draw_bg.color: th_raised
+                                ScrollXYView{
+                                    width: Fill height: Fill flow: Down padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+                                    source_text := Label{width: Fit text: "" draw_text.color: th_ink2 draw_text.text_style: theme.font_code{font_size: 8.5}}
+                                }
+                            }
+                        }
+                        // Its permissions: what its manifest asks the person for.
+                        wb_perms := ScrollYView{
+                            width: Fill height: Fill flow: Down spacing: 4 visible: false
+                            padding: Inset{left: 16 right: 16 bottom: 16}
+                            perms_hint := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                            cap_storage := CapRow{} cap_net := CapRow{} cap_images := CapRow{} cap_web := CapRow{}
+                            cap_camera := CapRow{} cap_microphone := CapRow{} cap_library := CapRow{} cap_location := CapRow{} cap_mail := CapRow{}
+                            perms_other := Label{width: Fill text: "" draw_text.color: th_warning draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                            perms_hosts_label := Label{width: Fill text: "" margin: Inset{top: 8} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                            perms_hosts := InputStyle{width: Fill height: Fit empty_text: "api.example.org, cdn.example.org"}
+                            perms_storage_label := Label{width: Fill text: "" margin: Inset{top: 8} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                            perms_storage := InputStyle{width: 160 height: Fit empty_text: "16"}
+                            View{
+                                width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5} margin: Inset{top: 10}
+                                perms_save := SegOn{text: "Save"}
+                                perms_status := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                            }
+                        }
+                        // App Hub: its listing and the submission (on the host), or the local publish (in OctoSense).
+                        wb_hub := ScrollYView{
+                            width: Fill height: Fill flow: Down spacing: 4 visible: false
+                            padding: Inset{left: 16 right: 16 bottom: 24}
+                            hub_hint := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                            // Inside OctoSense: to this device's App Hub, to install.
+                            hub_local := View{
+                                width: Fill height: Fit flow: Down spacing: 8 visible: false
+                                hub_publish := SegOn{text: "Publish to this device's App Hub"}
+                            }
+                            // On the host: what the store shows, who publishes it, the submission.
+                            hub_form := View{
+                                width: Fill height: Fit flow: Down spacing: 4
+                                hub_sec_app := HubSection{}
+                                hub_name_l := HubLabel{} hub_name := InputStyle{width: Fill height: Fit}
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 10
+                                    View{width: 110 height: Fit flow: Down spacing: 4 hub_version_l := HubLabel{} hub_version := InputStyle{width: Fill height: Fit empty_text: "1.0.0"}}
+                                    View{width: Fill height: Fit flow: Down spacing: 4 hub_category_l := HubLabel{} hub_category := HubDrop{width: Fill labels: ["productivity" "utilities" "photo-video" "news" "weather" "travel" "finance" "health" "education" "entertainment" "games" "social" "shopping" "lifestyle" "developer"]}}
+                                }
+                                hub_subtitle_l := HubLabel{} hub_subtitle := InputStyle{width: Fill height: Fit}
+                                hub_description_l := HubLabel{} hub_description := InputStyle{width: Fill height: 96 is_multiline: true}
+                                hub_keywords_l := HubLabel{} hub_keywords := InputStyle{width: Fill height: Fit}
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 10
+                                    View{width: 110 height: Fit flow: Down spacing: 4 hub_age_l := HubLabel{} hub_age := HubDrop{width: Fill labels: ["all" "12+" "16+" "18+"]}}
+                                    View{width: Fill height: Fit flow: Down spacing: 4 hub_license_l := HubLabel{} hub_license := InputStyle{width: Fill height: Fit empty_text: "Apache-2.0"}}
+                                }
+                                hub_notes_l := HubLabel{} hub_notes := InputStyle{width: Fill height: Fit}
+                                hub_platforms_l := HubLabel{}
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 10
+                                    plat_macos := HubCheck{text: "macOS"} plat_ios := HubCheck{text: "iOS"} plat_android := HubCheck{text: "Android"} plat_windows := HubCheck{text: "Windows"}
+                                }
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 10
+                                    plat_linux := HubCheck{text: "Linux"} plat_openharmony := HubCheck{text: "OpenHarmony"} plat_web := HubCheck{text: "Web"}
+                                }
+                                hub_sec_pub := HubSection{}
+                                hub_pub_name_l := HubLabel{} hub_pub_name := InputStyle{width: Fill height: Fit}
+                                hub_support_l := HubLabel{} hub_support := InputStyle{width: Fill height: Fit empty_text: "mailto:… or https://…"}
+                                hub_privacy_l := HubLabel{} hub_privacy := InputStyle{width: Fill height: Fit empty_text: "https://…"}
+                                hub_sign := HubCheck{text: "Sign it"}
+                                hub_pub_id_l := HubLabel{} hub_pub_id := InputStyle{width: Fill height: Fit empty_text: "your-publisher-id"}
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 6 margin: Inset{top: 8}
+                                    hub_save := SegOff{text: "Save"}
+                                    hub_prepare := SegOn{text: "Screenshots & check"}
+                                }
+                                hub_check_out := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+                                hub_sec_review := HubSection{}
+                                hub_questions := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                                hub_answers := InputStyle{width: Fill height: 150 is_multiline: true empty_text: "Answer each review question truthfully, citing the source"}
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 6
+                                    hub_draft := SegOff{text: "Ask the outer loop to draft them"}
+                                    hub_answers_save := SegOff{text: "Save the answers"}
+                                }
+                                hub_sec_submit := HubSection{}
+                                hub_submit := SegOn{text: "Submit for review…"}
+                                hub_plan := Label{width: Fill text: "" draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+                                hub_confirm_row := View{
+                                    width: Fill height: Fit flow: Right spacing: 6 visible: false
+                                    hub_confirm := SegOn{text: "Submit"}
+                                    hub_cancel := SegOff{text: "Cancel"}
+                                }
+                            }
+                            hub_status := Label{width: Fill text: "" margin: Inset{top: 6} draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
                         }
                     }
 
@@ -2198,6 +2366,9 @@ pub struct OctoBuddyView {
     /// Which mark each provider icon shows (`provider_icons::show`).
     #[rust]
     icons_shown: HashMap<WidgetUid, usize>,
+    /// The app workbench beside the conversation (`plugins/workbench.rs`).
+    #[rust]
+    wb: Workbench,
     #[rust]
     store: Store,
     #[rust]
@@ -2663,8 +2834,7 @@ impl OctoBuddyView {
         let project_path = selected.map(|at| self.store.projects[at.0].path.clone()).unwrap_or_default();
         let is_app = selected.is_some() && plugins::active(plugins::OCTOSENSE_APP, &project_path);
         let has_data = selected.is_some() && plugins::active(plugins::APP_DATA, &project_path);
-        let has_preview = selected.is_some() && plugins::active(plugins::APP_PREVIEW, &project_path);
-        let has_publish = selected.is_some() && plugins::active(plugins::APP_PUBLISH, &project_path);
+        let has_preview = selected.is_some() && plugins::active(plugins::OCTOSENSE_APP, &project_path);
         self.sync_plugin_buttons(cx, selected.map(|_| project_path.as_str()));
         self.view.view(cx, ids!(data_btn)).set_visible(cx, has_data);
         self.view.label(cx, ids!(data_btn.name)).set_text(cx, i18n::t("Data", "数据"));
@@ -2692,19 +2862,17 @@ impl OctoBuddyView {
             let modal = self.renaming.is_some() || self.confirm_delete.is_some() || self.side_menu.is_some();
             list.selectable = !(has_data && self.show_data) && !self.pressing_overlay && !modal;
         }
+        // The app workbench: preview, files, permissions, App Hub (publishing is its last tab).
         self.view.view(cx, ids!(preview_btn)).set_visible(cx, has_preview && !self.show_preview);
         self.view.view(cx, ids!(preview_btn_on)).set_visible(cx, has_preview && self.show_preview);
-        // An app: published to this device's App Hub, to install and run in OctoSense.
-        self.view.view(cx, ids!(publish_btn)).set_visible(cx, has_publish);
-        self.view.label(cx, ids!(publish_btn.name)).set_text(cx, i18n::t("Publish", "发布"));
-        let sub = if self.publishing.is_some() { i18n::t("publishing…", "发布中…") } else { "" };
-        self.view.label(cx, ids!(publish_btn.sub)).set_text(cx, sub);
+        self.view.view(cx, ids!(publish_btn)).set_visible(cx, false);
         for id in [ids!(preview_btn), ids!(preview_btn_on)] {
             self.view.label(cx, &[id[0], live_id!(name)]).set_text(cx, i18n::t("App", "应用"));
-            self.view.label(cx, &[id[0], live_id!(sub)]).set_text(cx, "");
+            self.view.label(cx, &[id[0], live_id!(sub)]).set_text(cx, i18n::t("workbench", "工作台"));
         }
         let show_preview = self.show_preview && has_preview && chat;
         self.view.view(cx, ids!(preview_panel)).set_visible(cx, show_preview);
+        self.sync_workbench(cx, show_preview.then_some(project_path.as_str()));
         self.view.view(cx, ids!(preview_divider)).set_visible(cx, show_preview);
         let plain = selected.is_some_and(|at| self.store.is_plain(at));
         // At work on an engine that can be steered: how to steer it.
@@ -3042,7 +3210,7 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(b_queued.label)).set_text(cx, status_word("queued"));
         self.view.label(cx, ids!(b_failed.label)).set_text(cx, status_word("failed"));
         self.view.text_input(cx, ids!(composer)).set_empty_text(cx, t("Message the outer loop  (Enter to send, Shift+Enter for a new line)", "给 outer 发消息（Enter 发送，Shift+Enter 换行）").into());
-        self.view.label(cx, ids!(preview_title)).set_text(cx, t("Preview", "预览"));
+        self.view.label(cx, ids!(preview_title)).set_text(cx, t("App workbench", "应用工作台"));
         self.view.button(cx, ids!(reload_preview)).set_text(cx, t("Reload", "重新加载"));
         self.view.button(cx, ids!(preview_fix)).set_text(cx, t("Ask the outer loop to fix it", "让 outer 修复"));
         self.view.button(cx, ids!(a_project)).set_text(cx, t("Open a project folder…", "打开项目文件夹…"));
@@ -3286,7 +3454,7 @@ impl OctoBuddyView {
     fn sync_preview(&mut self, cx: &mut Cx) {
         let project = self.selected.filter(|at| self.store.session(*at).is_some())
             .map(|at| self.store.projects[at.0].path.clone())
-            .filter(|path| plugins::active(plugins::APP_PREVIEW, path));
+            .filter(|path| plugins::active(plugins::OCTOSENSE_APP, path));
         let splash = self.view.splash(cx, ids!(preview));
         let Some(project) = project.filter(|_| self.show_preview && self.page == Page::Chat) else {
             if self.preview.take().is_some() {
@@ -4432,9 +4600,7 @@ impl OctoBuddyView {
         self.plugin_button_actions(cx, actions);
         self.resize_actions(cx, actions);
         self.tui_actions(cx, actions);
-        if tapped(&self.view.view(cx, ids!(publish_btn)), actions) {
-            self.publish_app(cx);
-        }
+        self.workbench_actions(cx, actions);
         self.live_page_actions(cx, actions);
         if tapped(&self.view.view(cx, ids!(data_btn)), actions) {
             self.show_data = !self.show_data;
@@ -5275,6 +5441,7 @@ impl Widget for OctoBuddyView {
         let flow_chat_uid = self.view.portal_list(cx, ids!(flow_chat)).widget_uid();
         let spec_list_uid = self.view.portal_list(cx, ids!(flow_spec_list)).widget_uid();
         let plugin_list_uid = self.view.portal_list(cx, ids!(plugin_list)).widget_uid();
+        let files_uid = self.view.portal_list(cx, ids!(files_list)).widget_uid();
 
         while let Some(step) = self.view.draw_walk(cx, scope, walk).step() {
             if let Some(mut list) = step.as_portal_list().borrow_mut() {
@@ -5296,6 +5463,8 @@ impl Widget for OctoBuddyView {
                     self.draw_spec_list(cx, &mut list);
                 } else if uid == plugin_list_uid {
                     self.draw_plugin_list(cx, &mut list);
+                } else if uid == files_uid {
+                    self.draw_files(cx, &mut list);
 
                 } else {
                     self.draw_messages(cx, &mut list);
@@ -5460,7 +5629,7 @@ impl Widget for OctoBuddyView {
             self.sync_preview(cx);
         }
         // A CSV file dropped on an app project's window: data for its app.
-        let is_app = self.selected.filter(|at| self.store.session(*at).is_some()).is_some_and(|at| plugins::active(plugins::APP_PREVIEW, &self.store.projects[at.0].path));
+        let is_app = self.selected.filter(|at| self.store.session(*at).is_some()).is_some_and(|at| plugins::active(plugins::OCTOSENSE_APP, &self.store.projects[at.0].path));
         if is_app {
             let csv = |items: &[DragItem]| items.iter().find_map(|i| match i {
                 DragItem::FilePath { path, .. } if path.to_ascii_lowercase().ends_with(".csv") => Some(PathBuf::from(path)),

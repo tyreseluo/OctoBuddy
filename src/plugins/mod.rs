@@ -35,6 +35,7 @@
 //! }
 //! ```
 pub mod app_data;
+pub mod app_hub;
 pub mod design_flow;
 pub mod app_factory;
 pub mod app_preview;
@@ -42,6 +43,7 @@ pub mod app_publish;
 pub mod card_loop;
 pub(crate) mod native_tui;
 pub mod octosense_app;
+pub mod workbench;
 pub(crate) mod view;
 
 use serde_json::Value;
@@ -49,14 +51,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
-/// An OctoSense app project (`bundle/manifest.json`): the outer loop's
-/// design-flow rules, the app check for its slices, `octobuddy_app_look`.
+/// An OctoSense app project (`bundle/manifest.json`), everything about it
+/// in one plugin: the outer loop's design-flow rules and the docs it plans
+/// with (bundled), the app check for its slices, the agents' app tools, and
+/// the app workbench beside the conversation (preview, files, permissions,
+/// and getting it to App Hub).
 pub const OCTOSENSE_APP: &str = "octosense-app";
-/// The app running beside the conversation (reloaded as it changes), and
-/// published to this device's App Hub: one plugin, two slots.
-pub const APP_STUDIO: &str = "app-preview-publish";
-pub const APP_PREVIEW: &str = APP_STUDIO;
-pub const APP_PUBLISH: &str = APP_STUDIO;
 /// Data for the app: a CSV or an API it is built on.
 pub const APP_DATA: &str = "app-data";
 /// The production loop: the published app watched, its breakage said.
@@ -136,23 +136,12 @@ pub fn builtins() -> Vec<Plugin> {
     vec![
         Plugin {
             id: OCTOSENSE_APP.into(), name: tr("OctoSense apps", "OctoSense 应用"), version: version.clone(),
-            description: tr("A project with bundle/manifest.json is an OctoSense app: the outer loop follows the OctoScript design flow, slices are checked by running the app headless (octobuddy-app-check), and inner loops can look at the running app.",
-                "带 bundle/manifest.json 的项目就是 OctoSense 应用：外环按 OctoScript 设计流程规划，切片用 headless 运行应用来检查（octobuddy-app-check），inner 可以查看运行中的应用。"),
+            description: tr("A project with bundle/manifest.json is an OctoSense app. The outer loop follows OctoScript App Design Flow (its docs and template come with OctoBuddy), slices are checked by running the app headless, and every agent can look at, drive and probe the running app. The app workbench beside the conversation runs it as you build (reloaded as it changes), shows its files and sources, sets its permissions, and gets it to App Hub: on this computer it fills in its listing and submits it for review; inside OctoSense it publishes it to the local App Hub to install.",
+                "带 bundle/manifest.json 的项目就是 OctoSense 应用。外环按 OctoScript App Design Flow 规划（文档和模板随 OctoBuddy 自带），切片用 headless 运行应用来检查，每种 agent 都能查看、操作、试运行这个应用。对话旁的应用工作台：边做边运行（文件一改就重载）、看它的文件和源码、设置权限，并把它送上 App Hub——在这台电脑上填好上架信息、提交审批；在 OctoSense 里发布到本机 App Hub 安装。"),
             when_to_use: "Building or changing an OctoSense app.".into(),
             applies_to: app.clone(), requires: Vec::new(),
             tools: vec![tool("octobuddy_app_look", "run the app headless: script errors, a screenshot, the widgets on screen")],
-            buttons: Vec::new(), external: None, broken: None,
-        },
-        Plugin {
-            id: APP_STUDIO.into(), name: tr("App preview & publish", "应用预览与发布"), version: version.clone(),
-            description: tr("Runs the app beside the conversation and reloads it when its files change (script errors can go to the outer loop to fix); signs it with this device's keys and publishes it to the local App Hub, to install and run in OctoSense.",
-                "在对话旁运行应用，文件一改就热重载（脚本错误可以一键交给外环修）；用本机密钥签名，发布到本地 App Hub，之后可在 OctoSense 里安装运行。"),
-            when_to_use: String::new(), applies_to: app.clone(), requires: vec![OCTOSENSE_APP.into()],
-            tools: Vec::new(),
-            buttons: vec![
-                Button { id: "preview".into(), name: tr("App", "应用"), sub: tr("preview", "预览") },
-                Button { id: "publish".into(), name: tr("Publish", "发布"), sub: "App Hub".into() },
-            ],
+            buttons: vec![Button { id: "app".into(), name: tr("App", "应用"), sub: tr("workbench", "工作台") }],
             external: None, broken: None,
         },
         Plugin {
@@ -382,16 +371,13 @@ mod tests {
     fn the_app_slots_follow_their_plugins() {
         let dir = scratch("slots");
         let project = dir.to_string_lossy().into_owned();
-        assert!(!active(APP_PREVIEW, &project), "not an app: no preview");
+        assert!(!active(OCTOSENSE_APP, &project), "not an app: no workbench");
         std::fs::create_dir_all(dir.join("bundle")).unwrap();
         std::fs::write(dir.join("bundle/manifest.json"), "{}").unwrap();
-        assert!(active(OCTOSENSE_APP, &project) && active(APP_PREVIEW, &project) && active(APP_PUBLISH, &project));
+        assert!(active(OCTOSENSE_APP, &project) && active(APP_DATA, &project));
         // Switching the app plugin off takes what requires it along.
         set_disabled(&[OCTOSENSE_APP.to_string()]);
-        assert!(!active(APP_PREVIEW, &project) && !active(APP_PUBLISH, &project));
-        // Preview and publishing are one plugin: off together.
-        set_disabled(&[APP_STUDIO.to_string()]);
-        assert!(!active(APP_PREVIEW, &project) && !active(APP_PUBLISH, &project) && active(APP_DATA, &project));
+        assert!(!active(OCTOSENSE_APP, &project) && !active(APP_DATA, &project));
         set_disabled(&[]);
         let _ = std::fs::remove_dir_all(&dir);
     }

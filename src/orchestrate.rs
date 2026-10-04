@@ -1924,6 +1924,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             }
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
             LoopEvent::ProvidersDone { job, result } => self.providers_done(job, result),
+            LoopEvent::HubDone { project, step, result } => self.hub_done(&project, step, result),
             LoopEvent::LoginsProbed(logins) => self.logins_probed(logins),
             LoopEvent::AgentInstalled { name, result, awaited } => self.agent_installed(&name, result, awaited),
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),

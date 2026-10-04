@@ -18,6 +18,8 @@ pub enum LoopEvent {
     PackReady { session: String, message: String, pack: Option<String> },
     /// Settings › AI Providers: a test, an add, an import or a removal is done.
     ProvidersDone { job: crate::providers_view::ProvidersJob, result: Result<String, String> },
+    /// The app workbench's App Hub tab: a step done (its output, or why not).
+    HubDone { project: String, step: crate::plugins::workbench::HubStep, result: Result<String, String> },
     /// Settings › AI Providers: the agents' own sign-ins (agent, what it says).
     LoginsProbed(Vec<(String, String)>),
     /// Settings › Tools: the versions found on this machine.
