@@ -1893,7 +1893,7 @@ script_mod! {
                                 View{
                                     width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
                                     d_title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11.5}}
-                                    close_peer := SegOff{text: "Close" height: 22 padding: Inset{left: 8 right: 8}}
+                                    close_peer := SegOff{text: "End" height: 22 padding: Inset{left: 8 right: 8}}
                                     b_queued := Badge{label.text: "queued"}
                                     b_running := Badge{draw_bg.color: th_accent_soft label +: {text: "running" draw_text.color: th_accent}}
                                     b_done := Badge{draw_bg.color: th_success_bg label +: {text: "done" draw_text.color: th_success}}
@@ -3167,7 +3167,7 @@ impl OctoBuddyView {
             }
         }
         let confirm = self.confirm_close.as_deref() == Some(p.id.as_str());
-        self.view.button(cx, ids!(close_peer)).set_text(cx, if confirm { i18n::t("Stop it and close", "停止并关闭") } else { i18n::t("Close", "关闭") });
+        self.view.button(cx, ids!(close_peer)).set_text(cx, if confirm { i18n::t("Stop it and end it", "停止并结束") } else { i18n::t("End", "结束") });
         let done = matches!(p.status.as_str(), "done" | "idle" | "merged");
         let halted = !matches!(p.status.as_str(), "queued" | "running" | "checking" | "done" | "idle" | "merged" | "failed");
         for (status, id) in [("queued", ids!(b_queued)), ("failed", ids!(b_failed))] {
@@ -3889,8 +3889,8 @@ impl OctoBuddyView {
             };
             self.view.text_input(cx, ids!(flow_input)).set_empty_text(cx, hint.into());
             self.view.label(cx, ids!(flow_popup_note)).set_text(cx, note);
-            // Delete an outer loop, close an inner one: a dialog asks first.
-            let label = if inner { i18n::t("Close", "关闭") } else { i18n::t("Delete", "删除") };
+            // Delete an outer loop, end an inner one: a dialog asks first.
+            let label = if inner { i18n::t("End", "结束") } else { i18n::t("Delete", "删除") };
             self.view.button(cx, ids!(flow_popup_delete)).set_text(cx, label);
             // What waits for it, to reorder or drop.
             let waiting: Vec<(String, String, String)> = match &self.flow_open {
@@ -4019,9 +4019,9 @@ impl OctoBuddyView {
         } else {
             let id = key.trim_start_matches("p:");
             let slug = self.store.find_peer(id).and_then(|at| self.store.session(at)).and_then(|s| s.peers().iter().find(|p| p.id == id)).map(|p| p.slug.clone()).unwrap_or_default();
-            (i18n::pick(format!("Close the inner loop “{slug}”?"), format!("关闭 inner「{slug}」？")),
+            (i18n::pick(format!("End the inner loop “{slug}”?"), format!("结束 inner「{slug}」？")),
                 i18n::pick("It stops (if it works) and takes no more messages; its conversation stays.".to_string(), "它会停下（如果还在工作），之后不能再给它发消息；对话记录保留。".to_string()),
-                i18n::t("Close", "确认关闭"))
+                i18n::t("End", "确认结束"))
         };
         self.view.label(cx, ids!(confirm_title)).set_text(cx, &title);
         self.view.label(cx, ids!(confirm_text)).set_text(cx, &text);
@@ -4081,7 +4081,7 @@ impl OctoBuddyView {
             (ids!(m_budget), inner.is_some(), t("Set its budget…", "设置预算…")),
             (ids!(m_new_outer), card.is_none(), t("New outer loop here", "在这里新建外环")),
             (ids!(m_new_free), card.is_none(), t("New peer agent on its own", "新建 peer（不挂外环）")),
-            (ids!(m_delete), card.is_some(), if inner.is_some() { t("Close this inner loop…", "关闭这个 inner…") } else { t("Delete this outer loop…", "删除这个外环…") }),
+            (ids!(m_delete), card.is_some(), if inner.is_some() { t("End this inner loop…", "结束这个 inner…") } else { t("Delete this outer loop…", "删除这个外环…") }),
         ];
         let shown = items.iter().filter(|i| i.1).count() as f64;
         for (id, show, text) in items {
@@ -5271,7 +5271,7 @@ impl PeerCounts {
         add(self.halted, "stopped", "已停止");
         add(self.merged, "merged", "已合并");
         add(self.discarded, "discarded", "已丢弃");
-        add(self.closed, "closed", "已关闭");
+        add(self.closed, "ended", "已结束");
         parts.join(" · ")
     }
 
@@ -5536,7 +5536,8 @@ mod steps_tests {
 
 fn status_word(status: &str) -> &str {
     if !i18n::zh() {
-        return status;
+        // An inner loop the person or the outer loop closed has ended.
+        return if status == "closed" { "ended" } else { status };
     }
     match status {
         "idle" => "空闲",
@@ -5547,7 +5548,7 @@ fn status_word(status: &str) -> &str {
         "failed" => "失败",
         "interrupted" => "已中断",
         "stopped" => "已停止",
-        "closed" => "已关闭",
+        "closed" => "已结束",
         "merged" => "已合并",
         "discarded" => "已丢弃",
         "thinking" => "思考中",

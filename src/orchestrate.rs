@@ -1295,7 +1295,7 @@ impl OctoBuddyView {
     pub(crate) fn deliver(&mut self, peer: &str, d: Delivery, mode: Mode) {
         if let Some(p) = self.store.peer_mut(peer).filter(|p| matches!(p.status.as_str(), "discarded" | "closed")).map(|p| p.slug.clone()) {
             if let Some(at) = self.store.find_peer(peer) {
-                self.system(at, &i18n::pick(format!("{p} is closed: it takes no more work. Start a new slice instead."), format!("{p} 已关闭，不再接收任务，请新建切片。")));
+                self.system(at, &i18n::pick(format!("{p} has ended: it takes no more work. Start a new slice instead."), format!("{p} 已结束，不再接收任务，请新建切片。")));
             }
             return;
         }
@@ -2941,7 +2941,7 @@ first task and on what you send it, while what the person says to it after stays
         let mut moved = self.store.session_mut(from).unwrap().peers_mut().remove(index);
         if moved.status == "closed" {
             self.store.session_mut(from).unwrap().peers_mut().insert(index, moved);
-            return Err(i18n::t("it is closed", "它已关闭").into());
+            return Err(i18n::t("it has ended", "它已结束").into());
         }
         moved.joined_from = Some(source.title.clone());
         moved.flow = None;
@@ -2995,11 +2995,11 @@ your role, the task you were given, what the outer loop that gave it (\"{}\") se
             self.selected_peer = None;
         }
         let who = match by {
-            "by you" => i18n::t("by you", "由你关闭"),
+            "by you" => i18n::t("by you", "由你结束"),
             "reviewed" => i18n::t("its review is done", "审查已完成"),
-            _ => i18n::t("by the outer loop", "由 outer 关闭"),
+            _ => i18n::t("by the outer loop", "由 outer 结束"),
         };
-        self.system(at, &i18n::pick(format!("{slug} closed ({who})."), format!("{slug} 已关闭（{who}）。")));
+        self.system(at, &i18n::pick(format!("{slug} ended ({who})."), format!("{slug} 已结束（{who}）。")));
         self.release_waves(at);
         if by == "by you" {
             self.rt.notes.entry(session_id).or_default().push(format!("the person closed {slug}"));

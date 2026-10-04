@@ -62,7 +62,7 @@ impl OctoBuddyView {
         } else if failed {
             (t("its check failed", "检查未通过"), false, false)
         } else if p.status == "closed" {
-            (t("closed", "已关闭"), false, false)
+            (t("ended", "已结束"), false, false)
         } else {
             (t("done, awaiting review", "已完成，待审查"), false, false)
         }

@@ -479,7 +479,7 @@ fn replaced(p: &Peer, peers: &[&Peer]) -> Option<String> {
     let after = peers.iter().find(|o| o.id != p.id && stem(&o.slug) == stem(&p.slug) && o.started_at >= p.started_at);
     Some(match after {
         Some(o) => i18n::pick(format!("replaced by {}", o.slug), format!("被 {} 取代", o.slug)),
-        None => i18n::t("closed, its work not accepted", "已关闭，工作未被接受").to_string(),
+        None => i18n::t("ended, its work not accepted", "已结束，工作未被接受").to_string(),
     })
 }
 
