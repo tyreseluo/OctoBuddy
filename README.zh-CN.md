@@ -73,9 +73,44 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - **终端**只属于打开它的那个对话（或内环）。切到别的对话、删掉这个对话、关掉插件或退出 OctoBuddy 时，它都会结束，里面的 CLI 也一起结束。
   - **实时视图。**只读地显示外环或某个内环此刻在做什么：它写的话、每次工具调用、它的子代理。它照常工作，不接管任何东西。记录在 `<data>/live/`。这一轮结束后，「接管终端」会在同一个会话上打开 agent 自己的终端。
   - **时间轴。**环与环之间的每条线，都从发出它的那一轮连到接手它的那一轮。每段等待画成点线并写明原因：等 agent 启动、等前一个 wave 验收、排队、OctoBuddy 在检查、等你、重启。汇总按原因累计，几条泳道同时等待的时段只算一次。没有留下来的工作会单独标出：被后来的内环取代的泳道画成斜线（历史），后来重做过的一轮只画轮廓，每处返工有一个圆环并注明可能的原因，下方的面板列出它们和浪费的时间。「从中学习」让外环从中总结经验（见下文）。
-- **插件。**内置的有：OctoSense 应用类型、应用预览与发布到 App Hub、应用数据、应用工厂和生产回路（见下文）、原生 TUI（默认关闭）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
+- **插件。**内置的有：OctoSense 应用（一个应用项目的全部功能，包括应用工作台，见下文）、应用数据、原生 TUI（默认关闭）；只在 OctoSense 里有的：应用工厂和生产回路（见下文）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
 
 ## 做 OctoSense 应用
+
+一个应用项目（带 `bundle/manifest.json` 的文件夹）的全部功能，都在 **OctoSense 应用**这一个插件里。
+
+- **应用工作台。**点**应用 · 工作台**按钮，在对话旁边打开，有四个标签：
+  - **预览**：从项目文件运行应用，文件一改就重新加载；脚本出错可以一键交给外环修。
+  - **文件**：项目文件夹的目录树（`bundle/` 和 `app/parts/` 默认展开），选中文件后显示带行号的源码；**在访达中显示**可以定位到它。
+  - **权限**：manifest 向用户申请的权限。商店应用目前能用的能力每项一个勾选框：存储、网络、网络图片、网页、相机、麦克风、相册、定位、邮件，每项附商店里显示的说明；另有可访问的域名和存储上限。**保存到 manifest** 时会检查域名（必须是纯域名，且已勾选「网络」），manifest 里原有的其他能力原样保留并给出提醒。
+  - **上架**：在这台电脑上是提交 App Hub 审批（见下文）；在 OctoSense 里是发布到本机 App Hub 安装。
+- **OctoScript App Design Flow 随 OctoBuddy 自带：**它的文档、`tools/octo` 和脚本应用模板（`resources/design-flow`，Apache-2.0，来自 `63d3dbda`）。找不到 Design Flow 的检出时，OctoBuddy 把它们写到 `<data>/design-flow/` 下使用。只装了 OctoBuddy 的电脑也能新建应用，并按 Design Flow 的文档来规划。无界面运行、检查和提交，仍然需要 App Hub 的 `hub` 和 `card-host`（`OCTOSENSE_APP_HUB`）。
+
+### 提交应用到 App Hub
+
+在这台电脑上，工作台的**上架**标签按 App Hub 维护者现在接收应用的方式（App Hub 的 PUBLISHING，「Submitting」一节）提交应用：
+
+1. **商店展示的信息和发布者**：名称、版本、分类、副标题、描述、关键词、年龄分级、许可证、更新说明、实际运行过的平台；发布者名称、支持联系方式、隐私政策（https）。表单会指出缺什么（占位文字、副标题超过 80 字、隐私页不是 https 等），保存时写入 `bundle/manifest.json` 和 `bundle/listing.json`。
+2. **截图并检查**：用一次真实的无界面运行，拍下 listing 里列出的截图；然后盖戳，跑 App Hub 的检查（`hub check`），生成审查包（`hub scan`）。审查包的七个问题会显示在标签里。
+3. **审查问题**：在标签里回答；也可以点**让外环起草回答**，外环会写到 `build/REVIEW-ANSWERS.md`，由你来核对。
+4. **提交审批…**：先列出提交要做的每一步和要开的 issue 正文，此时什么都不做。点**确认提交**后才会依次：
+   - 勾选了签名就签名（发布者密钥只生成一次，保存在 `<data>/publisher/`，不进项目）；
+   - 对最终的文件再跑一次检查；
+   - 提交 `bundle/`，打 tag `v<版本>`；
+   - 推送到应用仓库（没有仓库时用 `gh` 在你的 GitHub 上建一个公开仓库）；
+   - 在 `OctoSense-org/OctoSense-App-Hub` 开 `Submit <id> <版本>` issue，写明仓库、tag、commit、发布者、检查输出和你的回答。
+
+   issue 链接会显示在标签和会话里。
+
+需要装好 GitHub 的 `gh` 并登录。`OCTOBUDDY_APP_HUB_REPO` 可以把 issue 开到另一个仓库。
+
+**已验证：**2026-10-04 在小账本的副本上验证：
+- 表单写入成功，截图拍好，检查 `PASSED`（未签名），七个审查问题都在。
+- 预演列出了：建 `github.com/<你>/pocket-ledger`、提交并打 tag `v9.9.9`、开 issue，并给出 issue 正文；实际什么都没有做。
+
+**还没实际跑过：**真正的提交。
+
+### agent 拿到的东西
 
 OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直接交给它们。
 
@@ -216,14 +251,16 @@ OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直
   - `standalone` feature（默认）是宿主机上的应用：界面放在它自己的窗口里。
   - OctoSense 用 `--no-default-features --features octosense-module` 构建它，并托管它的模块（`OCTOBUDDY_MODULE`，在 `src/module.rs`）。这时不编译窗口部分。
 - **怎么运行。**在 macOS 上 `cargo run` 会以 `OctoBuddy.app` 启动，Dock 里显示它的名字和图标。这个 bundle 生成在二进制旁边，由 `packaging/run-macos.sh` 生成，`.cargo/config.toml` 把它设成 cargo 的 runner。Bundle id 是 `org.octosense.octobuddy`，图标在 `packaging/` 下。
-- **单独运行时有什么不同。**
-  - 没有系统 agent：关于页会说明，选择器也不提供 OctoSense 的 agent；octos 跑在 OctoBuddy 自己的 octos 上。
-  - `octobuddy.status`、`.report`、`.request` 要在 OctoSense 里才能被调用，所以宿主机上的「应用」页不会收到外部请求；巡检照常工作。
-  - AI providers：用它自己的，或 OctoSense 的（见下文）。
+- **单独运行时有什么不同。**宿主机版不显示只有 OctoSense 才有的东西：
+  - 没有系统 agent：选择器不提供 OctoSense 的 agent，octos 跑在 OctoBuddy 自己的 octos 上。
+  - 应用工厂和生产回路（以及侧栏的「应用」按钮）属于 OctoSense：`octobuddy.status`、`.report`、`.request` 要由 OctoSense 里的 agent 调用，生产回路守护的是装进 OctoSense 的应用。
+  - AI providers：只用它自己的，做法参照 Cindy（见下文）。
+  - 应用上 App Hub 走提交审批（工作台的「上架」标签），不发布到本机 App Hub。
+  - 外观跟随 macOS 的浅色或深色，不跟随 OctoSense 的样式。
   - agent 的程序用它自带的或你自己的（见上文）。
 - **数据**在 `~/.octobuddy`（用 `OCTOBUDDY_HOME` 可以换目录），宿主机上和 OctoSense 里是同一份。
 - **还没做：**
-  - 发布包（用 cargo-packager 打签名的 `.dmg`、Linux 和 Windows 安装包、发布 workflow）；
+  - 经过公证的安装包，以及 Linux 和 Windows 安装包（现在的 DMG 只做了 ad-hoc 签名，见上文「下载」）；
   - 把 octos 打进应用包里。
 - **已验证：**2026-10-02 在 macOS（Apple silicon）上验证：`cargo run` 启动了 `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`，窗口标题是 OctoBuddy；关于页和 AI Providers 页都说明它是单独运行的，并写明了读取的 profile。
 
@@ -232,11 +269,7 @@ OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直
 在宿主机上，设置 › AI Providers 是 OctoBuddy 自己的，做法参照 Cindy。在 OctoSense 里，这一页和以前一样只读地显示 shell 的 AI Providers。代码在 `src/own_providers.rs`（数据）和 `src/providers_view.rs`（页面）。
 
 - **同一种格式。**它存在 `<data>/providers/profiles/_main.json`，用 `octosense-llm-config` 写。OctoSense 的 AI Providers 应用就是基于这个库做的，供应商、模型和接入点都来自它的目录。所以本机代理、各 agent 和 inner 的 octos 读这份配置，和读 OctoSense 的一样。
-- **来源由你选**，就在页面标题下面：
-  - **OctoBuddy 自己的**（有了之后默认用它）；
-  - **OctoSense 的**：它的 AI Providers 应用写的那份，只读。
-
-  OctoSense 的里有 OctoBuddy 自己没有的 provider 时，会出现横幅，提供 **导入**。导入会把它们加在 OctoBuddy 自己的后面，并复制它们的 key。它不会替换 OctoBuddy 已有的 provider 或 key，也不改动 OctoSense 的。`OCTOBUDDY_PROVIDERS=<octos 目录>` 仍可指定另一份配置，只读。
+- **只用自己的。**在宿主机上不读别的配置：OctoSense 的 AI Providers 属于 OctoSense，OctoBuddy 只在 OctoSense 里才读它。`OCTOBUDDY_PROVIDERS=<octos 目录>` 仍可指定另一份配置，只读（测试用）。
 - **添加**分三步：
   1. **选择供应商。**分三组：Coding Plan 在前，然后是更多供应商，最后是本机和自托管。每一项都写明要不要 key、有几个模型、哪些 agent 能跑在它上面。
   2. **连接。**选接入点，填 key（输入时显示为圆点）。只有接入点是你自己的服务时才要填接入地址。对已知控制台的供应商，**获取 API Key…** 会打开它的控制台。**测试连接**只发一个 1 token 的请求，并显示返回结果。Key 从不显示，报错里也没有。
@@ -255,12 +288,11 @@ OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直
   - Agent 拿到的仍然是占位符，由 OctoBuddy 的代理在上游加上 key。相比之下，Cindy 会把 key 本身交给 pi。
 - **Agent 自己的登录。**页面会显示 Claude Code（`claude auth status`）和 Codex（`codex login status`）有没有登录，但不显示登录的是谁。没选 provider 时，agent 就用它自己的登录。
 - **还没做：**在页面上登录（目前只提示要运行的命令）；目录里没有的供应商的自定义接入点；从供应商拉取模型列表。
-- **已验证：**2026-10-02 在 macOS 上，用隐藏窗口、单独的数据目录和一份假的 OctoSense 配置（`OCTOS_APP_CORE_DIR`）验证：
-  - 页面读出了 OctoSense 的配置，并提示可以导入；
-  - 选「OctoBuddy 自己的」后，向导添加了 `zai-coding/glm-5.3` 和 `glm-5.3-flash`。配置文件权限是 `0600`，里面只有钥匙串标记，key 进了钥匙串；
+- **已验证：**2026-10-02 在 macOS 上，用隐藏窗口和单独的数据目录验证：
+  - 向导添加了 `zai-coding/glm-5.3` 和 `glm-5.3-flash`。配置文件权限是 `0600`，里面只有钥匙串标记，key 进了钥匙串；
   - 用假 key 测试，显示了供应商返回的 `401`，key 被遮住；
-  - 「设为主模型」调整了顺序，「导入」补上了缺的那个；
-  - 删除全部行后，钥匙串条目也被删掉，OctoSense 的配置没有变化。
+  - 「设为主模型」调整了顺序；
+  - 删除全部行后，钥匙串条目也被删掉。
 
 ## 构建与测试
 

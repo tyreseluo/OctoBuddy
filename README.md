@@ -70,9 +70,33 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
   - **The terminal** belongs to the conversation (or inner loop) it was opened on. Another one picked, that one deleted, the plugin turned off or OctoBuddy closed: it ends, with the CLI in it.
   - **Live view.** A read-only view of what the outer loop or an inner loop does now: what it writes, each tool call, its subagents. It works as usual; nothing is taken over. Kept in `<data>/live/`. Once its turn is done, **Take over** opens the agent's own terminal on the same conversation.
   - **The timeline.** Each line between the loops joins the turn that sent it to the turn that took it up. Each wait is a dotted line that says why: the agent starting, the previous wave's acceptance, a queue, OctoBuddy's check, you, a restart. The summary adds them up by why, counting time once when several lanes wait together. Work that did not stand is marked: a lane replaced by a later one is hatched as history, a turn done again later is outlined, a ring marks each rework with its likely cause, and the panel under it lists them with the time they cost. **Learn from it** asks the outer loop to keep lessons from them (below).
-- **Plugins.** Built in: the OctoSense app type, app preview and publishing to App Hub, app data, the app factory and the production loop (below), and the native TUI (off by default). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
+- **Plugins.** Built in: OctoSense apps (everything about an app project, with the app workbench: below), app data, the native TUI (off by default), and, inside OctoSense only, the app factory and the production loop (below). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
 
 ## Building an OctoSense app
+
+One plugin, **OctoSense apps**, holds everything about an app project (a folder with `bundle/manifest.json`).
+
+- **The app workbench.** The **App · workbench** button opens it beside the conversation, with four tabs:
+  - **Preview**: the app running from the project's files, reloaded as they change; script errors can go to the outer loop to fix.
+  - **Files**: the project's folder as a tree (`bundle/` and `app/parts/` open), and the source of the file picked, with line numbers. **Show in Finder** reveals it.
+  - **Permissions**: what the manifest asks the person for, one tick per capability a store app can use today (storage, network, pictures from the web, web pages, camera, microphone, photo library, location, mail), each with the line the store shows; the hosts it reaches; its storage limit. **Save to manifest** checks the hosts (bare names, and Network ticked) and keeps any other capability it had, with a warning.
+  - **App Hub**: on this computer, the submission (below); inside OctoSense, publishing to the local App Hub to install.
+- **OctoScript App Design Flow comes with OctoBuddy:** its docs, `tools/octo` and its script-app template (`resources/design-flow`, Apache-2.0, from `63d3dbda`), written out under `<data>/design-flow/` when no checkout of the flow is found. A machine with OctoBuddy alone can make an app and plan it with the flow's docs. Running it headless, checking it and submitting it still need App Hub's `hub` and `card-host` (`OCTOSENSE_APP_HUB`).
+
+### Submitting an app to App Hub
+
+On this computer the workbench's **App Hub** tab takes an app to OctoSense's App Hub the way its maintainers accept apps today (App Hub's PUBLISHING, "Submitting").
+
+1. **What the store shows and who publishes it**: name, version, category, subtitle, description, keywords, age rating, license, release notes, the platforms it ran on; the publisher's name, support contact and privacy policy (https). The form says what is missing (a placeholder, a subtitle over 80, a privacy page that is not https…). It writes `bundle/manifest.json` and `bundle/listing.json`.
+2. **Screenshots & check**: the screenshots its listing names, from a real headless run; the digest; App Hub's gate (`hub check`); the review packet (`hub scan`), whose seven questions show in the tab.
+3. **The review questions**: answered in the tab, or drafted by the outer loop (**Ask the outer loop to draft them**) into `build/REVIEW-ANSWERS.md` for you to check.
+4. **Submit for review…** first lists what Submit will do and the issue it opens, and does nothing else. **Submit** then: signs it if you ticked Sign it (a publisher key made once, kept in `<data>/publisher/`, never in the project); runs the gate on the final bytes; commits `bundle/` and tags it `v<version>`; pushes it to its repository (or makes a public one on your GitHub with `gh`); and opens the `Submit <id> <version>` issue in `OctoSense-org/OctoSense-App-Hub` with the repository, tag, commit, publisher, the gate's output and your answers. The issue's link comes back in the tab and the session.
+
+It needs GitHub's `gh`, signed in. `OCTOBUDDY_APP_HUB_REPO` names another repository for the issue.
+
+**Verified** on 2026-10-04 on a copy of 小账本: the form written, the screenshot taken, the gate `PASSED` (unsigned), seven questions; the plan listed making `github.com/<you>/pocket-ledger`, the commit and tag `v9.9.9` and the issue, with its body, and made nothing. **Not run yet:** a real submission.
+
+### What the agents get
 
 OctoBuddy gives the agents that build an app what they would otherwise look up or work out again on every run.
 
@@ -211,14 +235,16 @@ As Rinx does, OctoBuddy runs first as an app of its own on this computer, and th
   - The `standalone` feature, the default, is the app on the host: its view in a window of its own.
   - OctoSense builds it with `--no-default-features --features octosense-module` and hosts its module (`OCTOBUDDY_MODULE`, in `src/module.rs`). The window is not compiled in there.
 - **Running it.** `cargo run` on macOS starts it as `OctoBuddy.app`, with its name and icon in the Dock. It is a bundle next to the binary, made by `packaging/run-macos.sh`, which `.cargo/config.toml` sets as cargo's runner. Bundle id `org.octosense.octobuddy`; the icons are in `packaging/`.
-- **What changes on its own.**
-  - There is no system agent. The About page says so, and the picker does not offer OctoSense's agent; octos runs on OctoBuddy's own octos.
-  - `octobuddy.status`, `.report` and `.request` are OctoSense's to call, so on the host the Apps page has no requests from outside. Its live watch works as in OctoSense.
-  - AI providers: its own, or OctoSense's (below).
+- **What changes on its own.** The host edition shows nothing that only OctoSense has:
+  - There is no system agent: the picker does not offer OctoSense's agent, and octos runs on OctoBuddy's own octos.
+  - The app factory and the production loop (and the sidebar's Apps button) are OctoSense's: `octobuddy.status`, `.report` and `.request` are its agents' to call, and the production loop watches the apps installed there.
+  - AI providers: its own only, set up the way Cindy does it (below).
+  - An app goes to App Hub by submission (the workbench's App Hub tab), not to a local App Hub.
+  - Appearance follows macOS's light or dark, not OctoSense's style.
   - The agents' programs are its own copies (above), or yours.
 - **Its data** is in `~/.octobuddy` (`OCTOBUDDY_HOME` names another folder), the same on the host and in OctoSense.
 - **Not done yet:**
-  - a release package (a signed `.dmg` with cargo-packager, Linux and Windows installers, a release workflow);
+  - a notarized package, and Linux and Windows ones (the DMG is ad hoc signed: Download, above);
   - octos shipped inside the app.
 - **Verified** on macOS (Apple silicon) on 2026-10-02: `cargo run` started `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`, in a window titled OctoBuddy, and its About and AI Providers pages said it runs on its own and named the profile it reads.
 
@@ -227,11 +253,7 @@ As Rinx does, OctoBuddy runs first as an app of its own on this computer, and th
 On the host, Settings › AI Providers is OctoBuddy's own, set up the way Cindy does it. Inside OctoSense the page shows the shell's AI providers, read-only, as before. The code is in `src/own_providers.rs` (the data) and `src/providers_view.rs` (the page).
 
 - **One format.** It keeps them in `<data>/providers/profiles/_main.json`, written with `octosense-llm-config`, the library OctoSense's AI providers app is built on. Its catalog gives the families, models and endpoints. So the proxy, the agents and the inner loops' octos read this profile the same way they read OctoSense's.
-- **Where they come from** is yours to pick, under the page's title:
-  - **OctoBuddy's own** (the default once it has any);
-  - **OctoSense's**: the profile its AI providers app writes, read-only.
-
-  When OctoSense's has providers OctoBuddy's own does not, a banner offers **Import**. It adds them after OctoBuddy's own and copies their keys. It never replaces a provider or a key OctoBuddy already has, and it leaves OctoSense's as they are. `OCTOBUDDY_PROVIDERS=<an octos folder>` still names another profile, read-only.
+- **Only its own.** On the host it reads no other profile: OctoSense's AI providers belong to OctoSense, which OctoBuddy reads only inside it. `OCTOBUDDY_PROVIDERS=<an octos folder>` still names another profile, read-only (for tests).
 - **Adding one** is a three-step wizard:
   1. **Provider.** The families in three groups: coding plans first, then more providers, then local servers. Each family says whether it needs a key, how many models it has, and which agents can run on it.
   2. **Connect.** Pick its endpoint and enter its key (masked). A base URL is asked for only when the endpoint is your own. **Get an API key…** opens the provider's console, for the providers whose console is known. **Test connection** sends one request of a single token and shows what came back. The key is never shown, even in an error.
@@ -250,12 +272,11 @@ On the host, Settings › AI Providers is OctoBuddy's own, set up the way Cindy 
   - Agents still get placeholders: OctoBuddy's proxy adds the key upstream. Cindy, by comparison, gives pi the key itself.
 - **The agents' own sign-in.** The page shows whether Claude Code (`claude auth status`) and Codex (`codex login status`) are signed in, without saying who. An agent with no provider picked runs on that.
 - **Not done yet:** signing in from the page (it says which command to run), a custom endpoint for a family the catalog does not list, and fetching a provider's model list.
-- **Verified** on macOS on 2026-10-02 in a hidden window with a data folder of its own and a fake OctoSense profile (`OCTOS_APP_CORE_DIR`):
-  - the page read OctoSense's and offered to import it;
-  - with OctoBuddy's own selected, the wizard added `zai-coding/glm-5.3` and `glm-5.3-flash`. The profile was `0600` and held only the keychain marker, and the key went to the keychain;
+- **Verified** on macOS on 2026-10-02 in a hidden window with a data folder of its own:
+  - the wizard added `zai-coding/glm-5.3` and `glm-5.3-flash`. The profile was `0600` and held only the keychain marker, and the key went to the keychain;
   - a fake key's test showed the provider's `401` with the key masked;
-  - Make primary reordered the rows, and Import added the one it lacked;
-  - removing every row deleted the keychain items, and OctoSense's profile was unchanged.
+  - Make primary reordered the rows;
+  - removing every row deleted the keychain items.
 
 ## Build and test
 
