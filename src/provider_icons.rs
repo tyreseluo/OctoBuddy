@@ -96,9 +96,32 @@ pub fn family_of_model(model: &str) -> &'static str {
     }
 }
 
+/// The ink a one-colour mark is drawn in (`resources/providers/*.svg`):
+/// dark, for a light background.
+const MONO_INK: &str = "#1f2328";
+
+/// `svg` as the theme in use shows it: on a dark one, a one-colour mark in
+/// the theme's ink (it would hardly show in its own). Made once per mark and ink.
+fn for_theme(svg: &'static str) -> &'static str {
+    let palette = crate::theme::current();
+    if !palette.dark || !svg.contains(MONO_INK) {
+        return svg;
+    }
+    static MADE: std::sync::Mutex<Vec<(usize, u32, &'static str)>> = std::sync::Mutex::new(Vec::new());
+    let mut made = MADE.lock().unwrap_or_else(|e| e.into_inner());
+    let key = (svg.as_ptr() as usize, palette.ink);
+    if let Some((_, _, light)) = made.iter().find(|(p, ink, _)| (*p, *ink) == key) {
+        return light;
+    }
+    let light: &'static str = Box::leak(svg.replace(MONO_INK, &format!("#{:06x}", palette.ink)).into_boxed_str());
+    made.push((key.0, key.1, light));
+    light
+}
+
 /// Shows `svg` in the `Svg` widget `w` (one with no `svg` resource of its
 /// own), parsed only when it changes: list rows are drawn every frame.
 pub fn show(w: &WidgetRef, svg: &'static str, shown: &mut HashMap<WidgetUid, usize>) {
+    let svg = for_theme(svg);
     let key = svg.as_ptr() as usize;
     let uid = w.widget_uid();
     if shown.get(&uid) == Some(&key) {
