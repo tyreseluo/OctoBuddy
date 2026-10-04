@@ -2378,6 +2378,11 @@ pub struct OctoBuddyView {
     /// Which mark each provider icon shows (`provider_icons::show`).
     #[rust]
     icons_shown: HashMap<WidgetUid, usize>,
+    /// The width Settings › Tools' cards have now (`fit_tool_cards`).
+    #[rust]
+    tool_card_width: f64,
+    #[rust]
+    tool_fit_frame: NextFrame,
     /// The conversation each chat list shows (`draw_chat`).
     #[rust]
     chat_shown: HashMap<WidgetUid, String>,
@@ -5484,6 +5489,9 @@ fn tapped(view: &ViewRef, actions: &Actions) -> bool {
 impl Widget for OctoBuddyView {
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         self.ensure_started(cx);
+        if self.page == Page::Settings && self.settings_tab == SettingsTab::Tools {
+            self.fit_tool_cards(cx);
+        }
         let tree_uid = self.view.portal_list(cx, ids!(tree)).widget_uid();
         let tabs_uid = self.view.portal_list(cx, ids!(tabs)).widget_uid();
         let providers_uid = self.view.portal_list(cx, ids!(provider_list)).widget_uid();
@@ -5593,6 +5601,9 @@ impl Widget for OctoBuddyView {
                 let mut w = self.view.widget(cx, &[id]);
                 script_apply_eval!(cx, w, { abs_pos: #(pos) });
             }
+            self.view.redraw(cx);
+        }
+        if self.tool_fit_frame.is_event(event).is_some() {
             self.view.redraw(cx);
         }
         // Live replies: a frame on (the next draw asks for the next frame

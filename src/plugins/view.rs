@@ -11,6 +11,9 @@ use std::sync::mpsc;
 const SLOTS: [LiveId; 3] = [live_id!(plug_btn0), live_id!(plug_btn1), live_id!(plug_btn2)];
 const TOOL_CARDS: [LiveId; 12] = [live_id!(tool0), live_id!(tool1), live_id!(tool2), live_id!(tool3), live_id!(tool4), live_id!(tool5),
     live_id!(tool6), live_id!(tool7), live_id!(tool8), live_id!(tool9), live_id!(tool10), live_id!(tool11)];
+/// The narrowest a tool's card is, and the room between cards (the grid's spacing).
+const TOOL_CARD_MIN: f64 = 300.0;
+const TOOL_GAP: f64 = 12.0;
 
 impl OctoBuddyView {
     /// The external plugins' buttons for the project shown (three at most).
@@ -171,6 +174,30 @@ impl OctoBuddyView {
             item.button(cx, ids!(off)).set_text(cx, i18n::t("Off", "已停用"));
             item.draw_all_unscoped(cx);
         }
+    }
+
+    /// Settings › Tools' cards share each row's width: as many a row as fit
+    /// at `TOOL_CARD_MIN`, no gap at the end of a row. From the grid's width
+    /// last frame (the first frame of a new width is a frame late).
+    pub(crate) fn fit_tool_cards(&mut self, cx: &mut Cx) {
+        // Room at the right for the scroll bar.
+        let width = self.view.view(cx, ids!(tool_grid)).area().rect(cx).size.x - 12.0;
+        if width <= 0.0 {
+            // Not laid out yet (the page just opened): the next frame knows.
+            self.tool_fit_frame = cx.new_next_frame();
+            return;
+        }
+        let columns = ((width + TOOL_GAP) / (TOOL_CARD_MIN + TOOL_GAP)).floor().max(1.0);
+        let card = ((width - TOOL_GAP * (columns - 1.0)) / columns).floor();
+        if card == self.tool_card_width {
+            return;
+        }
+        self.tool_card_width = card;
+        for slot in TOOL_CARDS {
+            let mut w = self.view.widget(cx, &[slot]);
+            script_apply_eval!(cx, w, { width: #(card) });
+        }
+        self.view.redraw(cx);
     }
 
     /// Settings › Tools: a card per tool, as many a row as fit.
