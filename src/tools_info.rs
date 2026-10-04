@@ -102,16 +102,17 @@ pub fn probe() -> Vec<ToolInfo> {
         "https://github.com/Project-Robius-China/agent-spec", Box::new(|p| first_line(p, &["--version"]).map(|l| l.trim_start_matches("agent-spec").trim().to_string())));
     bin("mempal", "mempal", t("Long-term memory (wings and rooms): the outer loop searches it before it plans and saves what it learned; calibration and archives go there.", "长期记忆（wing / room）：外环规划前检索、结束后沉淀；估算校准和归档也存在这里。"),
         "https://github.com/tyreseluo/mempal", Box::new(|_| cargo_installed("mempal")));
-    // Read from a clone, not run.
+    // Read from a clone, not run; built in, so a packaged OctoBuddy (with no
+    // checkout of its source) says which commit it is too.
     let estimation = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/agent-estimation");
-    let source = std::fs::read_to_string(estimation.join("SOURCE.md")).unwrap_or_default();
+    let source = include_str!("../resources/agent-estimation/SOURCE.md");
     let commit = source.split(" at ").nth(1).and_then(|r| r.split_whitespace().next()).unwrap_or("").to_string();
     out.push(ToolInfo {
         name: "agent-estimation".into(),
         what: t("The estimation skill the outer loop plans with: rounds per slice, waves, minutes; OctoBuddy calibrates it with what slices really took.", "外环规划用的估算技能：每个切片几轮、几个 wave、多少分钟；OctoBuddy 用切片的真实耗时校准它。"),
         version: if commit.is_empty() { t("bundled", "内置") } else { format!("{} ({commit})", t("bundled", "内置")) },
         repo: "https://github.com/tyreseluo/agent-estimation".into(),
-        path: estimation.display().to_string(),
+        path: if estimation.is_dir() { estimation.display().to_string() } else { String::new() },
         ..Default::default()
     });
     let flow = crate::plugins::octosense_app::tools().ok();
