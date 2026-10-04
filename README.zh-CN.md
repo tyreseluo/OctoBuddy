@@ -13,7 +13,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 ## 下载
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有 Apple 芯片（`macos-aarch64`）和 Intel Mac（`macos-x86_64`）两个 DMG，各自附有 `.sha256`。它们只做了 ad-hoc 签名，还没经过 Apple 公证，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有适用于 Apple 芯片 Mac 的 DMG（`macos-aarch64`），附有 `.sha256`；暂不支持 Intel Mac。它只做了 ad-hoc 签名，还没经过 Apple 公证，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
 
 ## Agent 与模型
 
@@ -280,7 +280,7 @@ cargo packager --release --formats dmg    # 产物在 dist/：先是 OctoBuddy.a
 
 robius-packaging-commands 编译时会设置 Makepad 的 `apple_bundle` 和 `MAKEPAD_PACKAGE_DIR`，应用因此从包内读字体和图标，不读源码目录。打包配置在 `Cargo.toml` 的 `[package.metadata.packager]` 里。
 
-**发布一个版本**：先改 `Cargo.toml` 里的版本号，写好 `docs/RELEASE_NOTES_v<版本>.md`，然后推送 tag `v<版本>`。Release 工作流（`.github/workflows/release.yml`）会检查 tag 和版本号是否一致，创建 draft release，并为两种 Mac 各打一个 DMG 附上去（分别在 `macos-14` 和 `macos-15-intel` 上构建）。两个都传上去后，再把 draft 正式发布。手动运行这个工作流时只构建 DMG，作为这次运行的产物保存。
+**发布一个版本**：先改 `Cargo.toml` 里的版本号，写好 `docs/RELEASE_NOTES_v<版本>.md`，然后推送 tag `v<版本>`。Release 工作流（`.github/workflows/release.yml`）会检查 tag 和版本号是否一致，创建 draft release，在 `macos-15`（Apple 芯片）上打出 DMG，连同校验和一起附上去，然后正式发布。DMG 传上去之前，别人看不到这个 release；中间任何一步失败，它都会停在 draft 状态。手动运行这个工作流时只构建 DMG，作为这次运行的产物保存。
 
 ### 真实测试
 

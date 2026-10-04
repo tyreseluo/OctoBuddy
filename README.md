@@ -10,7 +10,7 @@ It was called OctoLoop until 2026-10-02.
 
 ## Download
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have a DMG for Apple silicon (`macos-aarch64`) and one for Intel Macs (`macos-x86_64`), each with its `.sha256`. They are signed ad hoc, not notarized by Apple yet, so macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have a DMG for Macs with Apple silicon (`macos-aarch64`), with its `.sha256`; Intel Macs are not supported. It is signed ad hoc, not notarized by Apple yet, so macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
 
 ## Agents and models
 
@@ -275,7 +275,7 @@ cargo packager --release --formats dmg    # dist/: OctoBuddy.app, then the DMG
 
 robius-packaging-commands builds it with Makepad's `apple_bundle` and `MAKEPAD_PACKAGE_DIR` set, so the app reads its fonts and icons from the package, never from the source tree. The package's settings are `[package.metadata.packager]` in `Cargo.toml`.
 
-**A release.** Set the version in `Cargo.toml`, write `docs/RELEASE_NOTES_v<version>.md`, then push the tag `v<version>`. The Release workflow (`.github/workflows/release.yml`) checks that the tag matches the version, makes a draft release, and attaches a DMG for each Mac (built on `macos-14` and `macos-15-intel`). Publish the draft once both are there. Run by hand, the workflow only builds the DMGs, as the run's artifacts.
+**A release.** Set the version in `Cargo.toml`, write `docs/RELEASE_NOTES_v<version>.md`, then push the tag `v<version>`. The Release workflow (`.github/workflows/release.yml`) checks that the tag matches the version, makes a draft release, builds the DMG on `macos-15` (Apple silicon) and attaches it with its sum, then publishes the release. No one sees it before its DMG is in it; if a step fails, it stays a draft. Run by hand, the workflow only builds the DMG, as the run's artifact.
 
 ### Live tests
 

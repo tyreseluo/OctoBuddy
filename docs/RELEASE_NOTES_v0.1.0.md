@@ -2,12 +2,7 @@ OctoBuddy @VERSION@ is the first release of OctoSense's coding app with two loop
 
 ## Download
 
-| Mac | Package |
-| --- | --- |
-| Apple silicon (M1 and later) | `OctoBuddy-@VERSION@-macos-aarch64.dmg` |
-| Intel | `OctoBuddy-@VERSION@-macos-x86_64.dmg` |
-
-Open the DMG and drag OctoBuddy to Applications. Each package has a `.sha256` beside it.
+For Macs with Apple silicon (M1 and later): `OctoBuddy-@VERSION@-macos-aarch64.dmg`, with its `.sha256` beside it. Open the DMG and drag OctoBuddy to Applications. Intel Macs are not supported.
 
 **The first time you open it.** This release is not notarized by Apple yet (there is no Developer ID for OctoBuddy), so macOS stops it the first time. Open it once, then go to **System Settings › Privacy & Security** and choose **Open Anyway**. Or, in a terminal:
 
@@ -25,14 +20,13 @@ xattr -dr com.apple.quarantine /Applications/OctoBuddy.app
 
 ## Needs
 
-- macOS 11 or later.
+- A Mac with Apple silicon, macOS 11 or later.
 - For pi: Node.js and npm.
-- On an Intel Mac, octos runs from your own install (its release has no Intel Mac build).
 - For OctoSense apps: a checkout of [OctoScript App Design Flow](https://github.com/OctoSense-org/OctoScript-App-Design-Flow) beside OctoSense, or `OCTOBUDDY_DESIGN_FLOW` set to it.
 
 ## Not yet
 
-- Linux and Windows packages.
+- Intel Macs, Linux and Windows.
 - A notarized build.
 
 ---
@@ -41,7 +35,7 @@ xattr -dr com.apple.quarantine /Applications/OctoBuddy.app
 
 OctoBuddy @VERSION@ 是 OctoSense 双环编码应用的第一个独立版本，可以脱离 OctoSense 单独运行。**外环**把需求拆成切片并审查结果，**内环**并行完成各个切片；**对话**模式直接和一个 agent 交流。
 
-**下载**：Apple silicon 下载 `OctoBuddy-@VERSION@-macos-aarch64.dmg`，Intel 下载 `OctoBuddy-@VERSION@-macos-x86_64.dmg`。打开 DMG，把 OctoBuddy 拖进「应用程序」。
+**下载**：适用于 Apple 芯片（M1 及以后）的 Mac，下载 `OctoBuddy-@VERSION@-macos-aarch64.dmg`。打开 DMG，把 OctoBuddy 拖进「应用程序」。暂不支持 Intel Mac。
 
 **第一次打开**：这个版本还没有经过 Apple 公证，macOS 会拦一次。先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；也可以在终端运行上面那条 `xattr` 命令。
 
@@ -54,8 +48,7 @@ OctoBuddy @VERSION@ 是 OctoSense 双环编码应用的第一个独立版本，�
 - 能从返工中总结经验，之后的每次运行都会用上。
 
 **需要**：
-- macOS 11 或更高版本。
+- Apple 芯片的 Mac，macOS 11 或更高版本。
 - 用 pi 需要 Node.js 和 npm。
-- Intel Mac 上的 octos 用你自己安装的版本。
 
-**还没有**：Linux 和 Windows 安装包，以及经过公证的版本。
+**还没有**：Intel Mac、Linux 和 Windows 的版本，以及经过公证的版本。

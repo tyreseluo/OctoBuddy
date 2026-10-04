@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test:
     # macOS: what OctoSense's desktop shell and its dev machines run.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable

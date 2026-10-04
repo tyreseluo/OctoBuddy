@@ -1,11 +1,12 @@
 # Packages OctoBuddy (as Robrix does: cargo-packager with
-# robius-packaging-commands) and attaches the packages to a draft release.
+# robius-packaging-commands) and publishes it as a GitHub release. macOS on
+# Apple silicon only for now.
 #
 # - A tag `vX.Y.Z` (or `vX.Y.Z-pre`) that matches Cargo.toml's version makes a
-#   draft release, builds every package and uploads it there. The draft is
-#   published by hand once every package has landed.
-# - Run by hand (workflow_dispatch), it builds the packages as the run's
-#   artifacts; with `create_release` it also makes the draft release.
+#   draft release, builds the DMG and uploads it there, then publishes the
+#   release: no one sees it before its DMG is in it.
+# - Run by hand (workflow_dispatch), it builds the DMG as the run's artifact;
+#   with `create_release` it also makes the release and publishes it.
 name: Release
 
 on:
@@ -16,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       create_release:
-        description: 'Also create a draft release (otherwise only the run''s artifacts)'
+        description: 'Also create and publish the release (otherwise only the run''s artifact)'
         type: boolean
         default: false
       release_tag:
@@ -111,22 +112,16 @@ jobs:
             --notes-file "$body"
 
   macos:
-    name: macOS (${{ matrix.arch }})
+    name: macOS (Apple silicon)
     needs: [check_tag_version, create_release]
     if: >-
       ${{ always() && (
         (github.event_name == 'push' && needs.create_release.result == 'success') ||
         github.event_name == 'workflow_dispatch'
       ) }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            arch: aarch64
-          - os: macos-15-intel
-            arch: x86_64
-    runs-on: ${{ matrix.os }}
+    runs-on: macos-15
+    env:
+      ARCH: aarch64
     steps:
       - uses: actions/checkout@v7
 
@@ -134,7 +129,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-${{ matrix.arch }}
+          key: release-aarch64
 
       - name: Install the packaging tools
         run: |
@@ -155,14 +150,14 @@ jobs:
           if [[ -z "$built" ]]; then
             echo "::error::cargo packager made no DMG"; exit 1
           fi
-          name="OctoBuddy-${version}-macos-${{ matrix.arch }}.dmg"
+          name="OctoBuddy-${version}-macos-${ARCH}.dmg"
           mv "$built" "dist/$name"
           (cd dist && shasum -a 256 "$name" > "$name.sha256")
           echo "file=dist/$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: OctoBuddy-macos-${{ matrix.arch }}
+          name: OctoBuddy-macos-aarch64
           path: |
             ${{ steps.dmg.outputs.file }}
             ${{ steps.dmg.outputs.file }}.sha256
@@ -176,3 +171,30 @@ jobs:
           gh release upload "${{ needs.create_release.outputs.tag }}" \
             "${{ steps.dmg.outputs.file }}" "${{ steps.dmg.outputs.file }}.sha256" \
             --repo "${{ github.repository }}"
+
+  publish_release:
+    name: Publish the release
+    needs: [create_release, macos]
+    if: ${{ always() && needs.create_release.result == 'success' && needs.macos.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # Only a release with its DMG and that DMG's sum in it.
+      - name: Check its assets
+        shell: bash
+        run: |
+          tag="${{ needs.create_release.outputs.tag }}"
+          assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name')
+          echo "$assets"
+          grep -q 'macos-aarch64\.dmg$' <<< "$assets" || { echo "::error::No DMG in $tag."; exit 1; }
+          grep -q 'macos-aarch64\.dmg\.sha256$' <<< "$assets" || { echo "::error::No DMG sum in $tag."; exit 1; }
+
+      - name: Publish it
+        shell: bash
+        run: |
+          tag="${{ needs.create_release.outputs.tag }}"
+          latest=(--latest)
+          if [[ "$tag" == *-* ]]; then latest=(--latest=false); fi
+          gh release edit "$tag" --repo "${{ github.repository }}" --draft=false "${latest[@]}"
+          gh release view "$tag" --repo "${{ github.repository }}" --json url,isDraft,isPrerelease
