@@ -511,7 +511,7 @@ script_mod! {
 
     let SendButton = ButtonFlat{
         text: "Send" width: Fit height: 30 padding: Inset{left: 16 right: 16}
-        draw_bg +: {color: th_accent color_hover: th_accent_hover color_down: th_accent_down color_focus: th_accent border_size: 0.0 border_radius: 6.0}
+        draw_bg +: {color: th_accent color_hover: th_accent_hover color_down: th_accent_down color_focus: th_accent border_size: 0.0 border_radius: 3.0}
         draw_text +: {color: th_on_accent color_hover: th_on_accent color_down: th_on_accent color_focus: th_on_accent}
     }
 
@@ -1590,7 +1590,7 @@ script_mod! {
                                     padding: Inset{left: 12 right: 12}
                                     draw_bg +: {
                                         color: th_danger_bg color_hover: th_danger_bg_hover color_down: th_danger_bg_down color_focus: th_danger_bg
-                                        border_size: 0.0 border_radius: 6.0
+                                        border_size: 0.0 border_radius: 3.0
                                     }
                                     draw_text +: {color: th_danger color_hover: th_danger color_down: th_danger color_focus: th_danger}
                                 }
@@ -1601,7 +1601,7 @@ script_mod! {
                                     padding: Inset{left: 12 right: 12}
                                     draw_bg +: {
                                         color: th_warning_bg color_hover: th_hover color_down: th_line color_focus: th_warning_bg
-                                        border_size: 0.0 border_radius: 6.0
+                                        border_size: 0.0 border_radius: 3.0
                                     }
                                     draw_text +: {color: th_warning color_hover: th_warning color_down: th_warning color_focus: th_warning}
                                 }
@@ -1611,7 +1611,7 @@ script_mod! {
                                     padding: Inset{left: 12 right: 12}
                                     draw_bg +: {
                                         color: th_accent_soft color_hover: th_accent_selected color_down: th_accent_selected color_focus: th_accent_soft
-                                        border_size: 0.0 border_radius: 6.0
+                                        border_size: 0.0 border_radius: 3.0
                                     }
                                     draw_text +: {color: th_accent_ink color_hover: th_accent_ink color_down: th_accent_ink color_focus: th_accent_ink}
                                 }
