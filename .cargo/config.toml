@@ -4,3 +4,14 @@ runner = "packaging/run-macos.sh"
 
 [target.x86_64-apple-darwin]
 runner = "packaging/run-macos.sh"
+
+# OctoBuddy's icon for Makepad, which sets the Dock's (and the window's) icon
+# at run time from these: without them it sets its own, the Makepad logo.
+# (A packaged build leaves the Dock to its bundle's icon.)
+[env]
+MAKEPAD_APP_ICON_32 = { value = "packaging/icons/icon_32.png", relative = true }
+MAKEPAD_APP_ICON_128 = { value = "packaging/icons/icon_128.png", relative = true }
+MAKEPAD_APP_ICON_256 = { value = "packaging/icons/icon_256.png", relative = true }
+MAKEPAD_APP_ICON_512 = { value = "packaging/icons/icon_512.png", relative = true }
+MAKEPAD_APP_ICON_1024 = { value = "packaging/icons/icon_512@2x.png", relative = true }
+MAKEPAD_APP_ICON_ICO = { value = "packaging/icons/icon.ico", relative = true }

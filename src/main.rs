@@ -21,6 +21,15 @@ script_mod! {
             main_window := Window {
                 window.title: "OctoBuddy"
                 window.inner_size: vec2(1100, 720)
+                // Its own icon in the caption, not the theme's generic one.
+                caption_bar +: {
+                    caption_label +: {
+                        caption_icon := Svg{
+                            width: 16 height: 16 margin: Inset{right: 6} animating: false
+                            draw_svg +: {svg: crate_resource("octosense_octobuddy:resources/app-icon.svg")}
+                        }
+                    }
+                }
                 body := OctoBuddyView {}
             }
         }

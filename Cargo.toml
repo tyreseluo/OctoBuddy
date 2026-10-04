@@ -63,6 +63,7 @@ icons = [
     "./packaging/icons/icon_128.png",
     "./packaging/icons/icon_256.png",
     "./packaging/icons/icon_512.png",
+    "./packaging/icons/icon_512@2x.png",
     "./packaging/icons/icon.ico",
 ]
 out_dir = "./dist"
