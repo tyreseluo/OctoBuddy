@@ -360,11 +360,12 @@ script_mod! {
         View{width: Fill height: Fit flow: Right new_batch: true Filler{} tag := SteerTag{}}
     }
 
-    // An agent, on the left: its mark, who it is, then what it says.
+    // An agent, on the left: its mark, who it is, then what it says. The
+    // mark is set as it is drawn: its model's provider, or the agent's own.
     let AgentMsg = View{
         width: Fill height: Fit flow: Right spacing: 10
         padding: Inset{top: 10 bottom: 6 right: 24}
-        icon := Svg{width: 22 height: 22 animating: false draw_svg +: {svg: crate_resource("self:resources/claude.svg")}}
+        icon := Svg{width: 22 height: 22 animating: false}
         View{
             width: Fill height: Fit flow: Down spacing: 5
             author := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
@@ -376,7 +377,7 @@ script_mod! {
     let AgentMsgSteps = View{
         width: Fill height: Fit flow: Right spacing: 10
         padding: Inset{top: 10 bottom: 6 right: 24}
-        icon := Svg{width: 22 height: 22 animating: false draw_svg +: {svg: crate_resource("self:resources/claude.svg")}}
+        icon := Svg{width: 22 height: 22 animating: false}
         View{
             width: Fill height: Fit flow: Down spacing: 6
             author := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
@@ -403,13 +404,12 @@ script_mod! {
     }
     let OuterMsg = AgentMsg{}
     let OuterMsgSteps = AgentMsgSteps{}
-    let InnerMsg = AgentMsg{icon +: {draw_svg +: {svg: crate_resource("self:resources/octos.svg")}}}
-    let InnerMsgSteps = AgentMsgSteps{icon +: {draw_svg +: {svg: crate_resource("self:resources/octos.svg")}}}
-    // Codex and pi wear their own marks, as outer and as inner loops.
-    let CodexMsg = AgentMsg{icon +: {draw_svg +: {svg: crate_resource("self:resources/codex.svg")}}}
-    let CodexMsgSteps = AgentMsgSteps{icon +: {draw_svg +: {svg: crate_resource("self:resources/codex.svg")}}}
-    let PiMsg = AgentMsg{icon +: {draw_svg +: {svg: crate_resource("self:resources/pi.svg")}}}
-    let PiMsgSteps = AgentMsgSteps{icon +: {draw_svg +: {svg: crate_resource("self:resources/pi.svg")}}}
+    let InnerMsg = AgentMsg{}
+    let InnerMsgSteps = AgentMsgSteps{}
+    let CodexMsg = AgentMsg{}
+    let CodexMsgSteps = AgentMsgSteps{}
+    let PiMsg = AgentMsg{}
+    let PiMsgSteps = AgentMsgSteps{}
 
     // A message between the loops: folded to a few lines until clicked.
     let MsgCard = View{
@@ -4978,7 +4978,17 @@ impl OctoBuddyView {
                 item.widget(cx, ids!(body)).set_text(cx, &row.body);
             }
             match row.kind {
-                chat::Kind::Outer | chat::Kind::Inner => item.label(cx, ids!(author)).set_text(cx, &row.title),
+                chat::Kind::Outer | chat::Kind::Inner => {
+                    // Who wrote it, and on what: the agent, then its model;
+                    // its mark the model's provider (or the agent's own).
+                    let engine = row_engine(&row.title, row.kind == chat::Kind::Inner);
+                    let author = match row.model.as_deref() {
+                        Some(m) => format!("{} · {}", row.title, provider_icons::model_name(m)),
+                        None => row.title.clone(),
+                    };
+                    item.label(cx, ids!(author)).set_text(cx, &author);
+                    provider_icons::show(&item.widget(cx, ids!(icon)), provider_icons::reply_svg(engine, row.model.as_deref()), &mut self.icons_shown);
+                }
                 chat::Kind::Card => {
                     item.label(cx, ids!(header)).set_text(cx, &row.title);
                     item.label(cx, ids!(fold)).set_text(cx, if open { i18n::t("collapse", "收起") } else { i18n::t("show all", "展开") });

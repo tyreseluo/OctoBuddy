@@ -36,11 +36,13 @@ pub struct Row {
     /// What its agent is doing before its first word (starting, thinking,
     /// reconnecting): said beside the clock.
     pub status: Option<String>,
+    /// The model an agent's reply was written on (its mark and its name say so).
+    pub model: Option<String>,
 }
 
 impl Row {
     fn new(kind: Kind, title: impl Into<String>, body: impl Into<String>) -> Row {
-        Row { kind, title: title.into(), body: body.into(), steps: String::new(), took: None, live: false, since: None, status: None }
+        Row { kind, title: title.into(), body: body.into(), steps: String::new(), took: None, live: false, since: None, status: None, model: None }
     }
 }
 
@@ -73,6 +75,7 @@ pub fn waiting_row(session: &Session, plain: bool, status: &str, since: u64) -> 
     let cli = session.engine();
     let title = if plain { agent_name(cli).to_string() } else { format!("Outer · {cli}") };
     let mut row = Row::new(Kind::Outer, title, "");
+    row.model = session.outer_model().map(String::from);
     row.live = true;
     row.since = Some(since);
     row.status = Some(status.to_string());
@@ -84,10 +87,28 @@ pub fn row_of_message(session: &Session, message: usize) -> Option<usize> {
     session_rows_at(session, None, false).iter().position(|(i, _)| *i >= message)
 }
 
+/// The engine and model a switch note names (`改用 claude · minimax-cn/MiniMax-M3，…`,
+/// `Now talking to claude · default, …`): the model `None` for the agent's own default.
+fn switched_to(text: &str) -> Option<(String, Option<String>)> {
+    let rest = ["The outer loop now runs on ", "Now talking to ", "外环改用 ", "改用 "].iter().find_map(|p| text.strip_prefix(p))?;
+    let label = rest.split([',', ';', '，', '；', '。']).next()?.trim();
+    let (engine, model) = label.split_once(" · ")?;
+    let model = (!matches!(model, "default" | "默认")).then(|| model.to_string());
+    Some((engine.to_string(), model))
+}
+
 /// The same, each row with the index of its message.
 fn session_rows_at(session: &Session, streaming: Option<usize>, plain: bool) -> Vec<(usize, Row)> {
     let mut rows = Vec::new();
+    // The model replies were written on, for those that did not keep it
+    // (written before replies did): the last switch note's.
+    let mut model_then: Option<(String, Option<String>)> = None;
     for (i, m) in session.messages.iter().enumerate() {
+        if m.role() == Role::System {
+            if let Some(switch) = switched_to(&m.text) {
+                model_then = Some(switch);
+            }
+        }
         let meta = m.meta.clone().unwrap_or_default();
         let row = match m.role() {
             // Steered into a running turn: said beside it, and whether it was taken.
@@ -113,6 +134,7 @@ fn session_rows_at(session: &Session, streaming: Option<usize>, plain: bool) -> 
                 let mut row = Row::new(Kind::Outer, title, body);
                 row.steps = stream::steps_text(m.steps.as_deref().unwrap_or(&[]));
                 row.took = m.took;
+                row.model = m.model.clone().or_else(|| model_then.as_ref().filter(|(engine, _)| engine == cli).and_then(|(_, model)| model.clone()));
                 row.live = streaming == Some(i);
                 row.since = Some(m.at);
                 row
@@ -170,6 +192,14 @@ pub(crate) mod tests {
     use super::*;
     use crate::model::{Exchange, Message, Step};
 
+    #[test]
+    fn a_switch_note_names_the_model_replies_ran_on() {
+        assert_eq!(switched_to("改用 claude · minimax-cn/MiniMax-M3，从你的下一条消息起生效。"), Some(("claude".into(), Some("minimax-cn/MiniMax-M3".into()))));
+        assert_eq!(switched_to("Now talking to claude · default, from your next message."), Some(("claude".into(), None)));
+        assert_eq!(switched_to("外环改用 codex · zai-coding/glm-5.3；从你的下一条消息开始新的对话。"), Some(("codex".into(), Some("zai-coding/glm-5.3".into()))));
+        assert_eq!(switched_to("思考强度改为 默认，从下一条消息起生效（保留原对话）。"), None);
+    }
+
     pub(crate) fn peer(log: Vec<Exchange>) -> Peer {
         Peer {
             id: "w".into(), slug: "feat".into(), role: Some("developer".into()), agent: None, brief: "b".into(), status: "idle".into(),
@@ -199,7 +229,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_person_inner_talk_is_not_in_the_outer_conversation() {
-        let msg = |role: &str, text: &str| Message { role: role.into(), author: "feat".into(), text: text.into(), at: 0, steps: None, meta: None, took: None, started: None, cost: None };
+        let msg = |role: &str, text: &str| Message { role: role.into(), author: "feat".into(), text: text.into(), at: 0, steps: None, meta: None, took: None, started: None, cost: None, model: None };
         let session = Session {
             id: "s".into(), title: "t".into(), created_at: 0, cli: None, lead_session: None, peers: None, lead_cost: None,
             isolate: None, worktree: None, work_dir: None, work_branch: None, lead_model: None, estimate: None, auto: None, flow: None, waiting: None, data: None, detached: None, outer: None, inner: None, outer_effort: None, inner_effort: None, pinned: None, archived: None, carried: None,

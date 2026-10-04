@@ -31,6 +31,31 @@ pub fn svg(family: &str) -> &'static str {
     }
 }
 
+/// An agent's own mark (Claude Code, Codex, pi, octos).
+pub fn agent_svg(engine: &str) -> &'static str {
+    match engine {
+        crate::rpc_lead::CODEX => include_str!("../resources/codex.svg"),
+        crate::rpc_lead::PI => include_str!("../resources/pi.svg"),
+        "claude" | "" => include_str!("../resources/claude.svg"),
+        _ => include_str!("../resources/octos.svg"),
+    }
+}
+
+/// What an agent's reply wears: the mark of the provider its model runs on
+/// (MiniMax for Claude Code on MiniMax), else the agent's own (its own login).
+pub fn reply_svg(engine: &str, model: Option<&str>) -> &'static str {
+    match model.and_then(|m| m.split_once('/')).map(|(family, _)| svg(family)) {
+        Some(mark) if !std::ptr::eq(mark, PLAIN) => mark,
+        _ => agent_svg(engine),
+    }
+}
+
+/// The model's name as a reply says it: a provider's model without its
+/// family (`MiniMax-M3`), the agent's own as it is (`opus`).
+pub fn model_name(model: &str) -> &str {
+    model.split_once('/').map(|(_, m)| m).unwrap_or(model)
+}
+
 /// The provider a pick runs on: a `family/model` label names it; an
 /// agent's own models are its maker's (Claude Code's Anthropic's, Codex's
 /// OpenAI's).
@@ -99,6 +124,11 @@ mod tests {
         assert_eq!(family_of_model("MiniMax-M3"), "minimax");
         assert_eq!(family_of_model("kimi-k2.5"), "moonshot");
         assert_eq!(family_of_model("something-else"), "");
+        // A reply on MiniMax wears MiniMax's mark; on the agent's own login, the agent's.
+        assert!(std::ptr::eq(reply_svg("claude", Some("minimax-cn/MiniMax-M3")), svg("minimax")));
+        assert!(std::ptr::eq(reply_svg("claude", Some("opus")), agent_svg("claude")));
+        assert!(std::ptr::eq(reply_svg("codex", None), agent_svg("codex")));
+        assert_eq!(model_name("minimax-cn/MiniMax-M3"), "MiniMax-M3");
         // Every family the catalog offers has its mark (or the plain one on purpose).
         for f in octosense_llm_config::catalog::families() {
             let mark = svg(f.id());

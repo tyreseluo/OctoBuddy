@@ -65,6 +65,9 @@ pub struct Message {
     /// For the same: when the turn began, and what it cost (USD).
     pub started: Option<u64>,
     pub cost: Option<f64>,
+    /// For a lead's message: the model it was written on, as the picker
+    /// names it then (`minimax-cn/MiniMax-M3` on a provider, or the agent's own).
+    pub model: Option<String>,
 }
 
 /// One tool call, as the stream shows it.
@@ -716,7 +719,8 @@ impl Store {
         if role == Role::User && !session.messages.iter().any(|m| m.role() == Role::User) {
             session.title = title_from(text);
         }
-        session.messages.push(Message { role: role.as_str().to_string(), author: author.to_string(), text: text.to_string(), at: now_secs(), steps: None, meta: None, took: None, started: None, cost: None });
+        let model = (role == Role::Lead).then(|| session.outer_model().map(String::from)).flatten();
+        session.messages.push(Message { role: role.as_str().to_string(), author: author.to_string(), text: text.to_string(), at: now_secs(), steps: None, meta: None, took: None, started: None, cost: None, model });
         true
     }
 

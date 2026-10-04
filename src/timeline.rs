@@ -1600,7 +1600,7 @@ mod tests {
     use crate::model::{Exchange, Message, Store};
 
     fn msg(role: &str, text: &str, at: u64, took: Option<u64>) -> Message {
-        Message { role: role.into(), author: "claude".into(), text: text.into(), at, steps: None, meta: None, took, started: took.map(|t| at - t / 2), cost: None }
+        Message { role: role.into(), author: "claude".into(), text: text.into(), at, steps: None, meta: None, took, started: took.map(|t| at - t / 2), cost: None, model: None }
     }
 
     #[test]
