@@ -47,7 +47,8 @@ base64 = "0.22"
 # Packaged as Robrix is (`cargo packager --release`): robius-packaging-commands
 # (0.4 or later) builds it with Makepad's `apple_bundle` and
 # `MAKEPAD_PACKAGE_DIR` set, so it reads its fonts and icons from the package,
-# and gathers every Makepad crate's resources into ./dist/resources. In the
+# and gathers every Makepad crate's resources into ./dist/resources (the
+# terminal's fonts too: packaging/terminal-fonts.sh). In the
 # package each crate's resources sit under the crate's name: ours under
 # `octosense_octobuddy`, not the binary's `octosense-octobuddy`.
 [package.metadata.packager]
@@ -74,7 +75,8 @@ before-each-package-command = """
 robius-packaging-commands before-each-package \
     --force-makepad \
     --binary-name octosense-octobuddy \
-    --path-to-binary ./target/release/octosense-octobuddy
+    --path-to-binary ./target/release/octosense-octobuddy \
+&& sh ./packaging/terminal-fonts.sh
 """
 
 [package.metadata.packager.macos]

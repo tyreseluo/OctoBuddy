@@ -289,7 +289,12 @@ impl OctoBuddyView {
         }
         if let Some(sid) = key.strip_prefix("s:") {
             if let Some(at) = self.store.find_session(sid) {
-                self.system(at, i18n::t("Back from the terminal: the outer loop goes on here, with what you did there.", "已从终端回来：外环在这里接着做，包括你在终端里做的。"));
+                let note = if self.store.is_plain(at) {
+                    i18n::t("Back from the terminal: the conversation goes on here, with what was said there.", "已从终端回来：对话在这里接着进行，包括你在终端里说的。")
+                } else {
+                    i18n::t("Back from the terminal: the outer loop goes on here, with what you did there.", "已从终端回来：外环在这里接着做，包括你在终端里做的。")
+                };
+                self.system(at, note);
                 self.drain_outer(at);
             }
         } else if let Some(peer) = key.strip_prefix("p:") {
@@ -299,6 +304,28 @@ impl OctoBuddyView {
             }
         }
         true
+    }
+
+    /// A terminal belongs to the session (or inner loop) it was opened on:
+    /// whether that one is no longer what is shown — another one picked, or
+    /// it was deleted — so the terminal (and the CLI in it) must end rather
+    /// than stand in for the one shown now.
+    fn tui_elsewhere(&self) -> bool {
+        let Some(key) = self.tui.as_deref().map(|k| k.trim_start_matches("live:")) else { return false };
+        if let Some(sid) = key.strip_prefix("s:") {
+            let shown = self.selected.and_then(|at| self.store.session(at)).map(|s| s.id.as_str());
+            return shown != Some(sid);
+        }
+        if let Some(peer) = key.strip_prefix("p:") {
+            let shown = self.selected.and_then(|at| self.shown_peer(at)).map(|p| p.id.as_str());
+            return shown != Some(peer);
+        }
+        false
+    }
+
+    /// OctoBuddy closing: the terminal's CLI ends with it, not after it.
+    pub(crate) fn end_tui(&mut self, cx: &mut Cx) {
+        self.release_tui(cx);
     }
 
     /// The switch, the inner panel's toggle, a CLI that exited.
@@ -367,7 +394,7 @@ impl OctoBuddyView {
         let on = plugins::enabled(plugins::NATIVE_TUI);
         // The plugin off, or another view picked at the top left: back to OctoBuddy's.
         let left = self.stage != Stage::Tui && self.tui.as_deref().is_some_and(|k| k.starts_with("s:") || k.starts_with("live:s:"));
-        if (!on && self.tui.is_some()) || left {
+        if (!on && self.tui.is_some()) || left || self.tui_elsewhere() {
             self.release_tui(cx);
         }
         let shown = self.selected.is_some_and(|at| self.store.session(at).is_some());

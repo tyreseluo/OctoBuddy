@@ -566,6 +566,26 @@ script_mod! {
         label := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 9.5}
         mark := Label{text: "" padding: 0 draw_text.color: th_success draw_text.text_style: theme.font_bold{font_size: 10}}
     }
+    // An agent's own terminal UI. Its fonts named by crate, not by a path
+    // out of the terminal's crate (`self:../../widgets/…`): a packaged
+    // OctoBuddy finds a resource only by its crate's name, so the terminal's
+    // own fonts drew nothing there (a blank terminal). The same members, in
+    // the same order.
+    let AgentTerm = MpTerm{
+        draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}
+        draw_text +: {
+            text_style +: {
+                font_family +: {
+                    latin := FontMember{res: crate_resource("makepad_widgets:resources/jetbrains_mono_variable.ttf") asc: 0.0 desc: 0.0 weight: 400.0}
+                    nerd := FontMember{res: crate_resource("makepad_terminal:resources/SymbolsNerdFontMono-Regular.ttf") asc: 0.0 desc: 0.0}
+                    icons := FontMember{res: crate_resource("makepad_widgets:resources/fa-solid-900.ttf") asc: 0.0 desc: 0.0}
+                    emoji := FontMember{res: crate_resource("makepad_widgets:resources/NotoColorEmoji.ttf") asc: 0.0 desc: 0.0}
+                    symbols := FontMember{res: crate_resource("makepad_widgets:resources/Inter.ttf") asc: 0.0 desc: 0.0}
+                    chinese := FontMember{res: crate_resource("makepad_widgets:resources/LXGWWenKaiRegular.ttf") asc: 0.0 desc: 0.0}
+                }
+            }
+        }
+    }
     // A theme in Settings › Appearance: a swatch in its own colours (set by
     // the code), its name, whether it is light or dark, a mark when in use.
     let ThemeRow = HoverRow{
@@ -1295,7 +1315,7 @@ script_mod! {
                                 tui_restart := SegOff{text: "Reconnect" height: 26}
                             }
                             // Its own surface (the desktop's terminal colours), framed lightly.
-                            cli_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}}
+                            cli_term := AgentTerm{}
                             tui_note := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                         }
                         // The session's run on a time axis, to replay.
@@ -1704,7 +1724,7 @@ script_mod! {
                                     inner_live_title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: th_ink2 draw_text.text_style.font_size: 9}
                                     inner_take := SegOff{text: "Take over" height: 24}
                                 }
-                                inner_term := MpTerm{draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}}
+                                inner_term := AgentTerm{}
                             }
                         }
                         d_question_row := SolidView{
@@ -2707,8 +2727,11 @@ impl OctoBuddyView {
             self.sync_picker(cx, at);
         }
         self.sync_preview(cx);
-        self.sync_flow(cx);
+        // The terminal first: one that no longer belongs to what is shown
+        // ends here and the stage goes back to the conversation, which the
+        // views then show (the other way round left them hidden: a blank stage).
         self.sync_tui(cx);
+        self.sync_flow(cx);
         self.sync_plan(cx);
         self.sync_confirm(cx);
         self.sync_side_menu(cx);
@@ -5316,6 +5339,10 @@ impl Widget for OctoBuddyView {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        // Closing: a terminal's CLI ends with OctoBuddy.
+        if let Event::Shutdown = event {
+            self.end_tui(cx);
+        }
         self.ensure_started(cx);
         // A press outside the engine picker (and its button) closes it; and
         // the "+" menu.
