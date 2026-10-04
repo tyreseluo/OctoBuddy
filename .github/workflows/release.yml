@@ -1,0 +1,178 @@
+# Packages OctoBuddy (as Robrix does: cargo-packager with
+# robius-packaging-commands) and attaches the packages to a draft release.
+#
+# - A tag `vX.Y.Z` (or `vX.Y.Z-pre`) that matches Cargo.toml's version makes a
+#   draft release, builds every package and uploads it there. The draft is
+#   published by hand once every package has landed.
+# - Run by hand (workflow_dispatch), it builds the packages as the run's
+#   artifacts; with `create_release` it also makes the draft release.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+      - 'v*.*.*-*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Also create a draft release (otherwise only the run''s artifacts)'
+        type: boolean
+        default: false
+      release_tag:
+        description: 'Release tag (default: v + the version in Cargo.toml)'
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check_tag_version:
+    name: Tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare the tag with the crate's version
+        shell: bash
+        run: |
+          version=$(awk '/^\[package\]$/ {p=1; next} /^\[/ {p=0} p && $1 == "version" {gsub(/"/, "", $3); print $3; exit}' Cargo.toml)
+          echo "tag: ${GITHUB_REF_NAME}, Cargo.toml: ${version}"
+          if [[ "${GITHUB_REF_NAME}" != "v${version}" ]]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not match Cargo.toml's version '${version}'."
+            exit 1
+          fi
+
+  create_release:
+    name: Create the draft release
+    needs: [check_tag_version]
+    if: >-
+      ${{ always() && (
+        (github.event_name == 'push' && needs.check_tag_version.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+      ) }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the tag
+        id: resolve
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${{ github.event.inputs.release_tag }}"
+            if [[ -z "$tag" ]]; then
+              tag="v$(awk '/^\[package\]$/ {p=1; next} /^\[/ {p=0} p && $1 == "version" {gsub(/"/, "", $3); print $3; exit}' Cargo.toml)"
+            fi
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      # Only ever a new release: one already made for this tag is left alone.
+      - name: Refuse to reuse an existing release
+        shell: bash
+        run: |
+          tag="${{ steps.resolve.outputs.tag }}"
+          existing=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$tag\") | \"id=\(.id) draft=\(.draft)\"")
+          if [[ -n "$existing" ]]; then
+            echo "::error::A release already exists for '$tag' ($existing); delete it first, deliberately, to release again."
+            exit 1
+          fi
+
+      - name: Create it as a draft
+        shell: bash
+        run: |
+          tag="${{ steps.resolve.outputs.tag }}"
+          notes="docs/RELEASE_NOTES_${tag}.md"
+          body="${RUNNER_TEMP}/notes.md"
+          if [[ -f "$notes" ]]; then
+            sed "s|@VERSION@|${tag#v}|g" "$notes" > "$body"
+          else
+            echo "::warning::No release notes at $notes."
+            : > "$body"
+          fi
+          pre=()
+          if [[ "$tag" == *-* ]]; then pre=(--prerelease); fi
+          gh release create "$tag" --draft "${pre[@]}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "OctoBuddy ${tag}" \
+            --notes-file "$body"
+
+  macos:
+    name: macOS (${{ matrix.arch }})
+    needs: [check_tag_version, create_release]
+    if: >-
+      ${{ always() && (
+        (github.event_name == 'push' && needs.create_release.result == 'success') ||
+        github.event_name == 'workflow_dispatch'
+      ) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: aarch64
+          - os: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.arch }}
+
+      - name: Install the packaging tools
+        run: |
+          cargo install cargo-packager --locked
+          cargo install robius-packaging-commands --locked
+
+      # Ad hoc signed (Cargo.toml's signing_identity "-"), not notarized: there
+      # is no Developer ID for OctoBuddy yet.
+      - name: Package the DMG
+        run: cargo packager --release --formats dmg
+
+      - name: Name it and sum it
+        id: dmg
+        shell: bash
+        run: |
+          version=$(awk '/^\[package\]$/ {p=1; next} /^\[/ {p=0} p && $1 == "version" {gsub(/"/, "", $3); print $3; exit}' Cargo.toml)
+          built=$(find dist -maxdepth 1 -name '*.dmg' -print -quit)
+          if [[ -z "$built" ]]; then
+            echo "::error::cargo packager made no DMG"; exit 1
+          fi
+          name="OctoBuddy-${version}-macos-${{ matrix.arch }}.dmg"
+          mv "$built" "dist/$name"
+          (cd dist && shasum -a 256 "$name" > "$name.sha256")
+          echo "file=dist/$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: OctoBuddy-macos-${{ matrix.arch }}
+          path: |
+            ${{ steps.dmg.outputs.file }}
+            ${{ steps.dmg.outputs.file }}.sha256
+          if-no-files-found: error
+
+      - name: Attach it to the release
+        if: needs.create_release.result == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.create_release.outputs.tag }}" \
+            "${{ steps.dmg.outputs.file }}" "${{ steps.dmg.outputs.file }}.sha256" \
+            --repo "${{ github.repository }}"
