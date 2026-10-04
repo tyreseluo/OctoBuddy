@@ -1144,7 +1144,8 @@ script_mod! {
                     width: Fill height: Fit padding: Inset{left: 14 right: 10 top: 14 bottom: 10}
                     flow: Right spacing: 8 align: Align{y: 0.5}
                     Svg{width: 20 height: 20 animating: false draw_svg +: {svg: crate_resource("self:resources/octos.svg")}}
-                    projects_title := Label{text: "Projects" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
+                    // The app's name by its mark: the tree below says what it holds.
+                    projects_title := Label{text: "OctoBuddy" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
                     Filler{}
                     // A project, or a new OctoSense app (its menu).
                     add_project := SmallButton{text: "+" width: 28 height: 28}
@@ -3191,8 +3192,7 @@ impl OctoBuddyView {
     /// says is the English).
     fn apply_language(&mut self, cx: &mut Cx) {
         use i18n::t;
-        let labels: [(&[LiveId], &str); 11] = [
-            (ids!(projects_title), t("Projects", "项目")),
+        let labels: [(&[LiveId], &str); 10] = [
             (ids!(inner_title), t("Inner", "Inner")),
             (ids!(approvals_label), t("Approvals", "审批")),
             (ids!(peers_empty_text), t("No inner loops yet. They start when the outer loop sends a plan.", "还没有 inner。outer 发出计划后会自动启动。")),
