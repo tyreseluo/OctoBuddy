@@ -25,6 +25,8 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 | octos | 支持 | 支持（默认） | OctoBuddy 自己的 `octos serve`；对话里也可以用 OctoSense 自带的 agent |
 
 - **模型。**Claude Code 可以用你自己的登录；每个 agent 也都可以通过 OctoBuddy 的本机代理，使用 **AI providers** 里启用的 provider。
+  - **Claude Code 和 pi 用其他厂商的模型。**它们走 Anthropic 的 Messages API。除了接入地址本身就兼容的（Anthropic、Z.ai），MiniMax（国内和国际）、DeepSeek、Moonshot（Kimi）、智谱、阿里云百炼（通义千问）和 OpenRouter 也能用：OctoBuddy 会改走这几家在自家 API 旁边另外提供的 Anthropic 兼容地址。每个地址都验证过（`/v1/messages` 有响应）。经第三方中转的接入点保持它原来的协议。哪些 agent 能用某个 provider，在「设置 › AI Providers」里逐行写明。
+  - **图标。**每个模型旁边显示它所属厂商的图标：模型选择器、「设置 › AI Providers」和添加向导、内环面板里都有。
 - **Codex。**这些 provider 没有 `/responses` 接口，所以 Codex 的请求先经过一层 Responses → Chat Completions 的转换。
 - **Key。**代理从 AI providers 的 profile 里读出 provider 的 key，加到它转发的请求上。子进程只拿到占位 key，它的环境变量和命令行参数里都没有 key。
 - **选择。**输入框下方的选择器左边是 agent，右边是它的模型，模型下面是思考强度（effort）。
@@ -68,6 +70,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - 消息下方有一行回执，显示它是否已送达。
 - **打断并发送。**⇧⌘Enter（其他平台 ⇧Ctrl+Enter），或在运行中输入内容后出现的「打断并发送」按钮：这一轮和它的子代理被打断，这条消息作为下一轮的开始。内环照常工作。内环面板上也有同样的按钮。
 - **视图。**对话；外环和内环的流程图；回放整个会话的时间轴；开启原生 TUI 插件后，还有 agent 自己的终端界面。
+  - **终端**只属于打开它的那个对话（或内环）。切到别的对话、删掉这个对话、关掉插件或退出 OctoBuddy 时，它都会结束，里面的 CLI 也一起结束。
   - **实时视图。**只读地显示外环或某个内环此刻在做什么：它写的话、每次工具调用、它的子代理。它照常工作，不接管任何东西。记录在 `<data>/live/`。这一轮结束后，「接管终端」会在同一个会话上打开 agent 自己的终端。
   - **时间轴。**环与环之间的每条线，都从发出它的那一轮连到接手它的那一轮。每段等待画成点线并写明原因：等 agent 启动、等前一个 wave 验收、排队、OctoBuddy 在检查、等你、重启。汇总按原因累计，几条泳道同时等待的时段只算一次。没有留下来的工作会单独标出：被后来的内环取代的泳道画成斜线（历史），后来重做过的一轮只画轮廓，每处返工有一个圆环并注明可能的原因，下方的面板列出它们和浪费的时间。「从中学习」让外环从中总结经验（见下文）。
 - **插件。**内置的有：OctoSense 应用类型、应用预览与发布到 App Hub、应用数据、应用工厂和生产回路（见下文）、原生 TUI（默认关闭）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
