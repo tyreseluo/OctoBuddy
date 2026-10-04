@@ -11,6 +11,10 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 2026-10-02 之前它叫 OctoLoop。
 
+## 下载
+
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有 Apple 芯片（`macos-aarch64`）和 Intel Mac（`macos-x86_64`）两个 DMG，各自附有 `.sha256`。它们只做了 ad-hoc 签名，还没经过 Apple 公证，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
+
 ## Agent 与模型
 
 | Agent | 外环 / 对话 | 内环 | OctoBuddy 怎么驱动它 |
@@ -264,6 +268,21 @@ cargo test --locked
 cargo clippy --locked --all-targets --no-deps -- -D warnings
 cargo run            # 在 OctoSense 之外，单独开一个 OctoBuddy 窗口
 ```
+
+### 打包
+
+打包方式和 Robrix 一样，用 cargo-packager 和 robius-packaging-commands（0.4 或更新）：
+
+```sh
+cargo install cargo-packager robius-packaging-commands --locked
+cargo packager --release --formats dmg    # 产物在 dist/：先是 OctoBuddy.app，再是 DMG
+```
+
+robius-packaging-commands 编译时会设置 Makepad 的 `apple_bundle` 和 `MAKEPAD_PACKAGE_DIR`，应用因此从包内读字体和图标，不读源码目录。打包配置在 `Cargo.toml` 的 `[package.metadata.packager]` 里。
+
+**发布一个版本**：先改 `Cargo.toml` 里的版本号，写好 `docs/RELEASE_NOTES_v<版本>.md`，然后推送 tag `v<版本>`。Release 工作流（`.github/workflows/release.yml`）会检查 tag 和版本号是否一致，创建 draft release，并为两种 Mac 各打一个 DMG 附上去（分别在 `macos-14` 和 `macos-15-intel` 上构建）。两个都传上去后，再把 draft 正式发布。手动运行这个工作流时只构建 DMG，作为这次运行的产物保存。
+
+### 真实测试
 
 真实测试默认忽略。运行它们需要：各 agent 的程序（自带的或你自己的）、AI providers 里配好对应的 provider、shell 的 octos 目录。
 

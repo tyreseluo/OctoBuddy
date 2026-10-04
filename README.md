@@ -8,6 +8,10 @@ It runs inside OctoSense as a native app, and on its own in a window of its own.
 
 It was called OctoLoop until 2026-10-02.
 
+## Download
+
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have a DMG for Apple silicon (`macos-aarch64`) and one for Intel Macs (`macos-x86_64`), each with its `.sha256`. They are signed ad hoc, not notarized by Apple yet, so macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
+
 ## Agents and models
 
 | Agent | Outer loop / chat | Inner loops | How OctoBuddy drives it |
@@ -259,6 +263,21 @@ cargo test --locked
 cargo clippy --locked --all-targets --no-deps -- -D warnings
 cargo run            # OctoBuddy in a window of its own, outside OctoSense
 ```
+
+### Packaging
+
+It is packaged as Robrix is, with cargo-packager and robius-packaging-commands (0.4 or later):
+
+```sh
+cargo install cargo-packager robius-packaging-commands --locked
+cargo packager --release --formats dmg    # dist/: OctoBuddy.app, then the DMG
+```
+
+robius-packaging-commands builds it with Makepad's `apple_bundle` and `MAKEPAD_PACKAGE_DIR` set, so the app reads its fonts and icons from the package, never from the source tree. The package's settings are `[package.metadata.packager]` in `Cargo.toml`.
+
+**A release.** Set the version in `Cargo.toml`, write `docs/RELEASE_NOTES_v<version>.md`, then push the tag `v<version>`. The Release workflow (`.github/workflows/release.yml`) checks that the tag matches the version, makes a draft release, and attaches a DMG for each Mac (built on `macos-14` and `macos-15-intel`). Publish the draft once both are there. Run by hand, the workflow only builds the DMGs, as the run's artifacts.
+
+### Live tests
 
 The live tests are ignored by default. They need the agents' programs (OctoBuddy's copies or yours), their providers in AI providers, and the shell's octos home:
 
