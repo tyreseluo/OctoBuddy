@@ -42,6 +42,7 @@ pub mod app_preview;
 pub mod app_publish;
 pub mod card_loop;
 pub(crate) mod native_tui;
+pub mod new_app;
 pub mod octosense_app;
 pub mod workbench;
 pub(crate) mod view;

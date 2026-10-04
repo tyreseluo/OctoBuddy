@@ -576,6 +576,8 @@ pub struct Store {
     /// whether the sidebar is folded away.
     pub panes: Option<Vec<PaneWidth>>,
     pub sidebar_closed: Option<bool>,
+    /// Where the last new OctoSense app went (`plugins/new_app.rs`).
+    pub new_app_dir: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, SerJson, DeJson)]

@@ -33,7 +33,7 @@ const TABS: [(Tab, LiveId, LiveId, LiveId); 4] = [
 /// The capabilities a store app can ask for today (OctoScript App Design
 /// Flow's CAPABILITIES), each with the line the person reads before
 /// installing. The rest serve system apps or no shell yet.
-const CAPS: [(&str, LiveId, &str, &str, &str, &str); 9] = [
+pub(crate) const CAPS: [(&str, LiveId, &str, &str, &str, &str); 9] = [
     ("storage", live_id!(cap_storage), "Storage", "存储", "Keep its own data on this device, where only it can read it.", "在本机保存自己的数据，只有它能读。"),
     ("net", live_id!(cap_net), "Network", "网络", "Reach only the hosts listed below.", "只访问下面列出的域名。"),
     ("images", live_id!(cap_images), "Pictures from the web", "网络图片", "Show pictures from any public https website.", "显示任意公开 https 网站的图片。"),

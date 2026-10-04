@@ -1926,6 +1926,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::ProvidersDone { job, result } => self.providers_done(job, result),
             LoopEvent::HubDone { project, step, result } => self.hub_done(&project, step, result),
             LoopEvent::LoginsProbed(logins) => self.logins_probed(logins),
+            LoopEvent::TemplatesSynced(result) => self.templates_synced(result),
             LoopEvent::AgentInstalled { name, result, awaited } => self.agent_installed(&name, result, awaited),
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),
             LoopEvent::FactoryReady { id, result } => self.factory_ready(id, result),

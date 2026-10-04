@@ -54,6 +54,7 @@ mod card_tabs;
 mod picker;
 mod provider_icons;
 use plugins::workbench::Workbench;
+use plugins::new_app::NewApp;
 mod appearance;
 pub mod plugins;
 mod tools_info;
@@ -628,6 +629,32 @@ script_mod! {
     }
     let HubCheck = CheckBox{
         text: ""
+        draw_text +: {
+            color: th_ink color_hover: th_ink color_down: th_ink color_focus: th_ink color_active: th_ink
+            text_style: theme.font_regular{font_size: 9.5}
+        }
+    }
+    // The new OctoSense app dialog: a template (its colours set by the code
+    // when picked), and a permission to tick.
+    let TemplateCard = View{
+        width: 312 height: Fit visible: false
+        card := HoverRow{
+            width: Fill height: 118 flow: Right spacing: 12 new_batch: true
+            padding: Inset{left: 12 right: 12 top: 12 bottom: 10}
+            cursor: MouseCursor.Hand grab_key_focus: false
+            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            icon := Svg{width: 40 height: 40 animating: false}
+            View{
+                width: Fill height: Fill flow: Down spacing: 4
+                name := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
+                summary := Label{width: Fill text: "" padding: 0 max_lines: 3 draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                Filler{}
+                features := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: th_accent draw_text.text_style.font_size: 8}
+            }
+        }
+    }
+    let NaCap = CheckBox{
+        width: 204 text: ""
         draw_text +: {
             color: th_ink color_hover: th_ink color_down: th_ink color_focus: th_ink color_active: th_ink
             text_style: theme.font_regular{font_size: 9.5}
@@ -2305,6 +2332,66 @@ script_mod! {
                 }
             }
         }
+        // A new OctoSense app: its template, name, id, place and permissions.
+        new_app_layer := View{
+            width: Fill height: Fill flow: Overlay visible: false align: Align{x: 0.5 y: 0.5}
+            SolidView{width: Fill height: Fill cursor: MouseCursor.Default grab_key_focus: false draw_bg.color: th_scrim}
+            RoundedView{
+                width: 690 height: 640 flow: Down new_batch: true
+                draw_bg.color: th_raised draw_bg.border_radius: 10.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line_strong
+                View{
+                    width: Fill height: Fit padding: Inset{left: 22 right: 22 top: 18 bottom: 10}
+                    na_title := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 14}}
+                }
+                ScrollYView{
+                    width: Fill height: Fill flow: Down spacing: 8
+                    padding: Inset{left: 22 right: 22 top: 4 bottom: 12}
+                    na_tpl_label := SectionTitle{text: ""}
+                    na_tpl_note := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                    View{
+                        width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 10 margin: Inset{top: 2 bottom: 6}
+                        nt0 := TemplateCard{} nt1 := TemplateCard{} nt2 := TemplateCard{}
+                        nt3 := TemplateCard{} nt4 := TemplateCard{} nt5 := TemplateCard{}
+                    }
+                    View{
+                        width: Fill height: Fit flow: Right spacing: 12
+                        View{
+                            width: Fill height: Fit flow: Down spacing: 6
+                            na_name_label := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                            na_name := InputStyle{width: Fill height: 32}
+                        }
+                        View{
+                            width: 260 height: Fit flow: Down spacing: 6
+                            na_id_label := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                            na_id := InputStyle{width: Fill height: 32}
+                        }
+                    }
+                    na_where_label := Label{text: "" padding: 0 margin: Inset{top: 6} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                    View{
+                        width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                        na_where := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: th_ink2 draw_text.text_style: theme.font_code{font_size: 9}}
+                        na_pick_dir := SegOff{text: "Choose…" height: 28}
+                    }
+                    na_perm_label := Label{text: "" padding: 0 margin: Inset{top: 8} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                    na_perm_note := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                    View{
+                        width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 6
+                        nc_storage := NaCap{} nc_net := NaCap{} nc_images := NaCap{}
+                        nc_web := NaCap{} nc_camera := NaCap{} nc_microphone := NaCap{}
+                        nc_library := NaCap{} nc_location := NaCap{} nc_mail := NaCap{}
+                    }
+                    na_hosts_label := Label{text: "" padding: 0 margin: Inset{top: 6} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                    na_hosts := InputStyle{width: Fill height: 32 empty_text: "api.example.org, cdn.example.org"}
+                }
+                View{
+                    width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                    padding: Inset{left: 22 right: 22 top: 10 bottom: 16}
+                    na_status := Label{width: Fill text: "" padding: 0 draw_text.color: th_danger draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                    na_cancel := SegOff{text: "Cancel" height: 30}
+                    na_create := SegOn{text: "Create" height: 30}
+                }
+            }
+        }
         // A spec's file as written, opened from a card's Specs tab, over all.
         spec_layer := View{
             width: Fill height: Fill flow: Overlay visible: false align: Align{x: 0.5 y: 0.5}
@@ -2398,6 +2485,12 @@ pub struct OctoBuddyView {
     /// Which mark each provider icon shows (`provider_icons::show`).
     #[rust]
     icons_shown: HashMap<WidgetUid, usize>,
+    /// The new OctoSense app dialog (`plugins/new_app.rs`), and its form to
+    /// be set again from the template (fresh templates arrived).
+    #[rust]
+    new_app: NewApp,
+    #[rust]
+    new_app_reset: bool,
     /// The width Settings › Tools' cards have now (`fit_tool_cards`).
     #[rust]
     tool_card_width: f64,
@@ -2948,6 +3041,7 @@ impl OctoBuddyView {
         self.sync_confirm(cx);
         self.sync_side_menu(cx);
         self.sync_add_menu(cx);
+        self.sync_new_app(cx);
         self.view.view(cx, ids!(rename_layer)).set_visible(cx, self.renaming.is_some());
         self.view.portal_list(cx, ids!(tree)).redraw(cx);
         self.view.portal_list(cx, ids!(messages)).redraw(cx);
@@ -4407,17 +4501,22 @@ impl OctoBuddyView {
                 self.pick_project_folder(cx);
             }
         }
-        for (id, app) in [(ids!(a_project), false), (ids!(a_app), true)] {
-            if self.add_menu.is_some() && self.view.button(cx, id).clicked(actions) {
-                self.add_menu = None;
-                self.picking_app = app;
-                self.pick_project_folder(cx);
-                self.relayout(cx);
-            }
+        if self.add_menu.is_some() && self.view.button(cx, ids!(a_project)).clicked(actions) {
+            self.add_menu = None;
+            self.picking_app = false;
+            self.pick_project_folder(cx);
+            self.relayout(cx);
         }
+        if self.add_menu.is_some() && self.view.button(cx, ids!(a_app)).clicked(actions) {
+            self.add_menu = None;
+            self.open_new_app(cx);
+        }
+        self.new_app_actions(cx, actions);
         for action in actions {
             let Some(answer) = action.downcast_ref::<FileDialogAction>() else { continue };
             match answer {
+                FileDialogAction::FolderSelected(path) if self.new_app.picking_dir => self.new_app_dir_picked(cx, Some(path)),
+                FileDialogAction::FolderCancelled if self.new_app.picking_dir => self.new_app_dir_picked(cx, None),
                 FileDialogAction::FolderSelected(path) if self.picking_folder => {
                     self.picking_folder = false;
                     if std::mem::take(&mut self.picking_app) {

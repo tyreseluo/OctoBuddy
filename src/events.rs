@@ -22,6 +22,8 @@ pub enum LoopEvent {
     HubDone { project: String, step: crate::plugins::workbench::HubStep, result: Result<String, String> },
     /// Settings › AI Providers: the agents' own sign-ins (agent, what it says).
     LoginsProbed(Vec<(String, crate::providers_view::Login)>),
+    /// The app templates' local copy brought up to date (`plugins/new_app.rs`).
+    TemplatesSynced(Result<(), String>),
     /// Settings › Tools: the versions found on this machine.
     ToolsProbed(Vec<crate::tools_info::ToolInfo>),
     /// OctoBuddy's copy of an agent's program is installed (its path), or
