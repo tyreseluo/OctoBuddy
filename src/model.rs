@@ -194,6 +194,9 @@ pub struct Peer {
     /// The tasks it was given as files (an agent-spec contract or a plain
     /// brief), in order: the last is the one in force.
     pub specs: Option<Vec<SpecRef>>,
+    /// What its lead already read for it (`path:L10-L40`): OctoBuddy pastes
+    /// those lines, as they are then, into its first message.
+    pub reads: Option<Vec<String>>,
 }
 
 /// A task an inner loop was given, kept as a file.
@@ -891,7 +894,7 @@ mod tests {
             store.session_mut(at).unwrap().peers_mut().push(Peer {
                 id: id.into(), slug: id.into(), role: None, agent: None, brief: String::new(), status: status.into(), dir: String::new(),
                 branch: None, round: 1, started_at: 0, finished_at: None, activity: Some("x".into()), result: None,
-                session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None,
+                session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: None,
             });
         }
         // A queued one that had a turn already was cut off too.

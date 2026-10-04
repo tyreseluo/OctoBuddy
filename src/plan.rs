@@ -125,6 +125,9 @@ pub struct Slice {
     pub agent: Option<String>,
     /// A fresh read-only reviewer looks at its work before the lead does.
     pub independent_review: Option<bool>,
+    /// What the lead (or its scouts) already read that this slice needs
+    /// (`path:L10-L40`, or a whole small file): OctoBuddy pastes it in.
+    pub read: Option<Vec<String>>,
 }
 
 /// The whole plan's estimate, from agent-estimation's wave mode.
@@ -186,7 +189,7 @@ pub fn split_reply(reply: &str) -> Reply {
         match PlanDoc::deserialize_json_lenient(body.trim()) {
             Ok(doc) => {
                 out.estimate = doc.estimate;
-                out.shared = doc.shared.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                out.shared = doc.shared.map(|s| unescape(s.trim())).filter(|s| !s.is_empty());
                 let mut seen = Vec::new();
                 out.slices = doc.slices.into_iter()
                     .filter(|s| !s.brief.trim().is_empty())
@@ -200,8 +203,9 @@ pub fn split_reply(reply: &str) -> Reply {
                         seen.push(slug.clone());
                         let role = s.role.map(|r| slugify(&r)).filter(|r| !r.is_empty());
                         let check = s.check.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
-                        Slice { slug, role, brief: s.brief.trim().to_string(), check, rounds: s.rounds, wave: s.wave, reviews: s.reviews, model: s.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
-                            agent: s.agent.map(|a| a.trim().to_ascii_lowercase()).filter(|a| !a.is_empty()), independent_review: s.independent_review }
+                        Slice { slug, role, brief: unescape(s.brief.trim()), check, rounds: s.rounds, wave: s.wave, reviews: s.reviews, model: s.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty()),
+                            agent: s.agent.map(|a| a.trim().to_ascii_lowercase()).filter(|a| !a.is_empty()), independent_review: s.independent_review,
+                            read: s.read.map(|r| r.into_iter().map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect::<Vec<_>>()).filter(|r| !r.is_empty()) }
                     })
                     .collect();
             }
@@ -233,6 +237,16 @@ pub fn split_reply(reply: &str) -> Reply {
         }
     }
     out
+}
+
+/// A text an agent escaped twice (its newlines as the two characters `\n`,
+/// in a tool call's JSON string): its lines again. One with real newlines
+/// is left as it is.
+fn unescape(text: &str) -> String {
+    if text.contains('\n') || !text.contains("\\n") {
+        return text.to_string();
+    }
+    text.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"")
 }
 
 /// Cuts the last block opened by `fence` out of `reply`: the rest, and the block's body.
@@ -390,5 +404,13 @@ mod tests {
     fn slugs_are_safe() {
         assert_eq!(slugify("  Fix: the Login bug / 登录 "), "fix-the-login-bug");
         assert_eq!(slugify("---"), "");
+    }
+
+    #[test]
+    fn a_brief_escaped_twice_gets_its_lines_back() {
+        assert_eq!(unescape("## Goal\\nAdd `x`.\\n## Files\\n- a.py \\\"b\\\""), "## Goal\nAdd `x`.\n## Files\n- a.py \"b\"");
+        assert_eq!(unescape("one\ntwo \\n stays"), "one\ntwo \\n stays", "real newlines: as it is");
+        let r = split_reply("```octobuddy-plan\n{\"slices\":[{\"slug\":\"a\",\"brief\":\"## Goal\\\\nx\\\\n## Files\\\\n- a.py\"}]}\n```");
+        assert_eq!(r.slices[0].brief, "## Goal\nx\n## Files\n- a.py");
     }
 }

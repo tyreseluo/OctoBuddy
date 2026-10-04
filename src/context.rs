@@ -3,9 +3,10 @@
 //! directory they share (`.octobuddy/context/<session>/`, kept out of git).
 //! OctoBuddy rewrites them when a round starts, a report comes in and the
 //! outer loop answers; the inner loops read them only when they need to.
-use crate::model::{Role, SessionRef};
+use crate::handoff;
+use crate::model::{Peer, Role, SessionRef};
 use crate::OctoBuddyView;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The context directory of a session, relative to the directory the loops share.
 pub fn relative(session: &str) -> String {
@@ -17,6 +18,52 @@ impl OctoBuddyView {
         let session = self.store.session(at)?;
         let base = session.work_dir.clone().unwrap_or_else(|| self.store.projects[at.0].path.clone());
         Some(PathBuf::from(base).join(relative(&session.id)))
+    }
+
+    /// What an inner loop's first message carries beyond its card, so it
+    /// does not go and read it: its own files' map, the excerpts its lead
+    /// already read (as they are now), the memory that bears on the request.
+    pub(crate) fn handoff_extra(&self, p: &Peer, context: &str) -> String {
+        let dir = Path::new(&p.dir);
+        let mut out = String::new();
+        let map = handoff::file_map(dir, &handoff::card_files(&p.brief));
+        if !map.is_empty() {
+            out.push_str(&format!("\nYOUR FILES (what is defined where: read only the ranges you need)\n{map}"));
+        }
+        if let Some(reads) = p.reads.as_ref().filter(|r| !r.is_empty()) {
+            let excerpts = handoff::excerpts(dir, reads);
+            if !excerpts.is_empty() {
+                out.push_str(&format!("\nALREADY READ BY THE LEAD (the lines as they are now: do not read them again){excerpts}"));
+            }
+        }
+        let pack = std::fs::read_to_string(dir.join(context).join("pack.md")).unwrap_or_default();
+        let memory = handoff::inner_memory(&pack);
+        if !memory.is_empty() {
+            out.push_str(&format!("\nMEMORY (from this project's earlier work)\n{memory}"));
+        }
+        out
+    }
+
+    /// The project's map (`handoff::KNOWLEDGE`), written again off the UI
+    /// thread: its files with their definitions, and the work accepted.
+    pub(crate) fn write_project_map(&self, at: SessionRef) {
+        let Some(session) = self.store.session(at) else { return };
+        let dir = PathBuf::from(session.work_dir.clone().unwrap_or_else(|| self.store.projects[at.0].path.clone()));
+        let mut accepted: Vec<String> = Vec::new();
+        for s in &self.store.projects[at.0].sessions {
+            for p in s.peers().iter().filter(|p| p.review.as_deref().is_some_and(|r| r.starts_with("accept"))) {
+                let goal = handoff_goal(&p.brief);
+                let files = p.touched.as_ref().filter(|t| !t.is_empty()).map(|t| format!(" ({})", t.join(", "))).unwrap_or_default();
+                accepted.push(format!("{} [{}]{files}: {goal}", p.slug, p.role()));
+            }
+        }
+        std::thread::spawn(move || {
+            let path = dir.join(handoff::KNOWLEDGE);
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&path, handoff::project_map(&dir, &accepted));
+        });
     }
 
     /// The latest context pack (`pack.md`: memory hits, the docs index), for
@@ -62,4 +109,16 @@ impl OctoBuddyView {
             let _ = std::fs::write(dir.join("reports").join(format!("{}.md", p.slug)), text);
         }
     }
+}
+
+/// A brief's goal in one line: its card's Goal (or a contract's Intent), else its first line.
+fn handoff_goal(brief: &str) -> String {
+    let mut lines = brief.lines().map(str::trim).skip_while(|l| {
+        let t = l.trim_start_matches('#').trim().to_ascii_lowercase();
+        !(l.starts_with('#') && (t == "goal" || t == "intent"))
+    });
+    let line = lines.nth(1).filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .or_else(|| brief.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("spec:") && !l.starts_with("---") && !l.starts_with('#')))
+        .unwrap_or("");
+    line.chars().take(120).collect()
 }

@@ -104,6 +104,10 @@ pub struct Runtime {
     pub(crate) held: HashMap<String, String>,
     /// Reports the lead was reminded of, still without a verdict (`peer:exchanges`).
     pub(crate) verdict_nudged: HashSet<String>,
+    /// Session id → the models line its outer loop was last given (said again only when it changes).
+    models_said: HashMap<String, String>,
+    /// `peer:read` an inner loop repeated and was told of (once each).
+    read_steered: HashSet<String>,
     /// Sessions told their review budget is used up (said once).
     budget_said: HashSet<String>,
     /// Sessions whose work moved on (a check passed, or a commit went in)
@@ -257,22 +261,28 @@ fn key_of(store: &crate::model::Store, peer: &str) -> String {
         .and_then(|p| p.session_key.clone()).unwrap_or_else(|| session_key(peer))
 }
 
-fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str) -> String {
+/// The first message to an inner loop: where it works, its task, what
+/// OctoBuddy gathered for it (`extra`: its files' map, the excerpts its lead
+/// already read, the memory), then the few rules (after Cindy's worker
+/// envelope: the task first, the rest short).
+fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str, extra: &str) -> String {
     let place = match branch {
-        Some(branch) => format!("You work in {dir}, the session's git worktree of the project, on branch {branch}."),
-        None => format!("You work in {dir}, the project directory."),
+        Some(branch) => format!("{dir}, the session's git worktree (branch {branch})"),
+        None => format!("{dir}, the project directory"),
     };
-    let place = format!("{place} The outer loop and other inner loops work in the same directory at the same time: \
-touch only what your task needs, and never revert or reformat changes you did not make.");
     let check = match check {
-        Some(cmd) => format!("\nWhen you finish, OctoBuddy runs `{cmd}` in your directory and gives the lead its result: make it pass."),
+        Some(cmd) => format!("\n- When you finish, OctoBuddy runs `{cmd}` here and gives the lead its result: make it pass."),
         None => String::new(),
     };
-    let context = format!("\nThe outer loop's plan and decisions are in {context}/outer.md, and the other inner loops' reports \
-in {context}/reports/: read them when your task touches theirs (OctoBuddy keeps them current; do not edit them). \
-{context}/pack.md, when there, holds what OctoBuddy gathered for this request — the project's memory hits and an \
-index of the docs (headings with line numbers): read it first, then only the doc sections your task needs."); 
-    format!("You are an inner-loop worker of OctoBuddy. {place}\n\nTask from the lead:\n{brief}\n\n{REPORT_RULES}{COMMIT_RULE}{check}{context}")
+    let map = if Path::new(dir).join(crate::handoff::KNOWLEDGE).is_file() {
+        format!("\n- The project's map (its files, what is defined where, the work accepted so far): {}.", crate::handoff::KNOWLEDGE)
+    } else {
+        String::new()
+    };
+    format!("You are an inner loop of OctoBuddy, working in {place}. Other loops work in the same folder now: change \
+only your task's files, and never revert or reformat what you did not change.\n\nTASK\n{brief}\n{extra}\n{REPORT_RULES}{COMMIT_RULE}{check}{map}\n\
+- The lead's plan is in {context}/outer.md and the other slices' reports in {context}/reports/: read them only when your task \
+touches their files.")
 }
 
 /// How many inner loops may run turns at once, across sessions
@@ -302,21 +312,19 @@ fn max_inners() -> usize {
 
 /// Loops share one directory, so OctoBuddy commits each loop's own files (in
 /// a worktree octos's sandbox cannot write git's data anyway).
-const COMMIT_RULE: &str = "\nDo not run git commit (or git add): OctoBuddy commits for you, exactly the files your file tools \
-changed, as the person. When a reply of yours changed files, end it with one line `Commit: <message>`, \
-the message written the way this project writes them (see git log).";
+const COMMIT_RULE: &str = "\n- Do not run git commit or git add: OctoBuddy commits the files you changed. End a reply that changed \
+files with one line `Commit: <message>`, written the way this project writes them (see git log).";
 
-/// How a peer reports (after Cindy's worker rules): the lead sees only the
-/// report block, once per task, never progress.
-const REPORT_RULES: &str = "Rules:\n\
-1. Do the task. Build and test when you can.\n\
-2. When the lead's task is complete, or you are blocked, end your reply with ONE report block; it is the only \
-thing the lead sees:\n```octobuddy-report\nwhat you changed, what you ran to check it, whether it passed \
-(verified, partially verified or unverified), and anything the lead must decide\n```\n\
-3. Report once per task; never send progress. If you need an answer from the lead, say so in the report.\n\
-4. Messages from the person are between you and them: the lead does not see them. Answer the person in your \
-reply, without a report block.\n\
-5. If critical context is missing before a destructive or broad change, report that you are blocked instead of guessing.";
+/// How a peer reports (after Cindy's worker rules): once per task, a few
+/// short fields; OctoBuddy adds its files, its check and its commit.
+const REPORT_RULES: &str = "RULES\n\
+- Do the task; build and test when you can. If context you need is missing before a broad or destructive change, \
+report blocked instead of guessing.\n\
+- When the task is done, or you are blocked or need the lead's answer, end your reply with ONE report, the only thing \
+the lead sees (under 1,200 characters: OctoBuddy adds the files you changed, its run of your check and its commit, \
+so do not restate them):\n```octobuddy-report\nstatus: done | blocked | question\nverified: what you ran, and its result\n\
+decide: what the lead must decide or answer (or none)\nnotes: what the lead cannot see in the files (a few lines at most)\n```\n\
+- Report once per task, never progress. A message from the person is between you and them: answer it without a report.";
 
 /// A later message to a peer. `lead_waits`: a task from the lead is still
 /// open, which the peer reports on once done, whoever spoke last.
@@ -396,7 +404,7 @@ impl OctoBuddyView {
             if let Some(line) = self.rt.lines.get(&p.id) {
                 for d in &line.queue {
                     let who = if d.from == From::Lead { "yours" } else { "the person's" };
-                    let text: String = d.text.chars().take(100).collect();
+                    let text: String = d.text.chars().take(40).collect();
                     lines.push(format!("    queued {} ({who}): {text}", d.id));
                 }
             }
@@ -404,7 +412,9 @@ impl OctoBuddyView {
         if !closed.is_empty() {
             lines.push(format!("- closed (take no more work): {}", closed.join(", ")));
         }
-        if let Some(models) = self.models_line(at) {
+        // The models and agents: said again only when they change.
+        if let Some(models) = self.models_line(at).filter(|m| self.rt.models_said.get(&session.id) != Some(m)) {
+            self.rt.models_said.insert(session.id.clone(), models.clone());
             lines.push(models);
         }
         if let Some(notes) = self.rt.notes.remove(&session.id).filter(|n| !n.is_empty()) {
@@ -532,6 +542,11 @@ impl OctoBuddyView {
             Some(status) => format!("{status}\n\n{text}"),
             None => text.clone(),
         };
+        // The project's map, current before the outer loop plans: it reads
+        // that instead of sending scouts to find its way.
+        if !self.store.is_plain(at) {
+            self.write_project_map(at);
+        }
         // The context pack goes first (memory searched, docs indexed: what
         // the outer loop would spend its first minutes on), built off the UI
         // thread; the outer loop counts as busy meanwhile.
@@ -1151,6 +1166,7 @@ impl OctoBuddyView {
                 p.wave = slice.wave;
                 (p.rounds_used, p.over_budget, p.flow, p.claude_session) = (None, None, None, None);
                 p.review_wanted = slice.independent_review;
+                p.reads = slice.read.clone();
                 // Its old process and conversation go: its next turn is a first one.
                 self.rt.claude_inners.remove(&id);
                 self.rt.opened.remove(&id);
@@ -1172,7 +1188,7 @@ impl OctoBuddyView {
                 id: id.clone(), slug: slug.clone(), role: slice.role.clone(), agent: Some(named.clone().unwrap_or_else(|| agent.clone())),
                 brief: slice.brief.clone(), status: "queued".into(), dir: dir.clone(), branch: None,
                 round, started_at: now_secs(), finished_at: None, activity: Some("preparing".into()), result: None,
-                session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: slice.check.clone(), verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: slice.rounds, wave: slice.wave, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: pick.clone().or_else(|| pinned.clone()), agent_named: named.is_some().then_some(true), accepted: None, review_wanted: slice.independent_review, reviews_for: None, by_person: None, claude_session: None, specs: None,
+                session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: slice.check.clone(), verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: slice.rounds, wave: slice.wave, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: pick.clone().or_else(|| pinned.clone()), agent_named: named.is_some().then_some(true), accepted: None, review_wanted: slice.independent_review, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: slice.read.clone(),
             });
             started.push((id, slug, slice.brief.clone()));
         }
@@ -1249,13 +1265,23 @@ impl OctoBuddyView {
         }
         self.selected_peer = started.first().map(|(id, _, _)| id.clone());
         let first_wave = slices.iter().map(|s| s.wave.unwrap_or(1)).min().unwrap_or(1);
+        // Who owns which files, from the cards: OctoBuddy says it, not the outer loop's shared part.
+        let owners = crate::handoff::ownership(&started.iter().map(|(_, slug, brief)| (slug.clone(), brief.clone())).collect::<Vec<_>>());
+        if let Some(n) = shared.as_ref().map(|s| s.chars().count()).filter(|n| *n > 1500) {
+            self.rt.notes.entry(session_id.clone()).or_default()
+                .push(format!("your plan's shared part was {n} characters and goes whole to every slice: keep it under 1,500 (who owns which files OctoBuddy adds from the cards)"));
+        }
+        self.write_project_map(at);
         for ((id, _, brief), slice) in started.into_iter().zip(&slices) {
             let mut line = Line::default();
             // What every slice shares, said once by the outer loop, with each.
-            let brief = match &shared {
-                Some(shared) => format!("{brief}\n\n## Shared by every slice of this plan\n\n{shared}"),
-                None => brief,
-            };
+            let mut brief = brief;
+            if let Some(shared) = &shared {
+                brief.push_str(&format!("\n\n## Shared by every slice of this plan\n\n{shared}"));
+            }
+            if owners.lines().count() > 1 {
+                brief.push_str(&format!("\n\n## Who owns which files (change none of the others')\n{owners}"));
+            }
             line.queue.push_back(Delivery::new(From::Lead, brief));
             self.rt.lines.insert(id.clone(), line);
             let wave = slice.wave.unwrap_or(1);
@@ -1399,7 +1425,8 @@ impl OctoBuddyView {
             // A reviewer's brief is its whole prompt.
             (true, true) => d.text.clone(),
             (true, false) => {
-                let mut text = first_prompt(&d.text, &p.dir, work_branch.as_deref(), p.check.as_deref(), &context);
+                let extra = self.handoff_extra(&p, &context);
+                let mut text = first_prompt(&d.text, &p.dir, work_branch.as_deref(), p.check.as_deref(), &context, &extra);
                 // Made by the person: its first task is theirs.
                 if p.by_person == Some(true) {
                     text = text.replacen("Task from the lead:", "Task from the person:", 1);
@@ -1506,7 +1533,7 @@ What the person says to you after it stays between you and them.");
             let Some(session_id) = self.store.session(at).map(|s| s.id.clone()) else { continue };
             let Some(p) = self.store.peer_mut(&peer).cloned() else { continue };
             let last = p.log().last().and_then(|e| e.reply.clone()).unwrap_or_default();
-            let tail: String = last.chars().rev().take(8000).collect::<Vec<_>>().into_iter().rev().collect();
+            let tail = forwarded_tail(&last, &session_id, &p.slug);
             self.store.push_meta(at, Role::Peer, &p.slug, &i18n::pick(format!("(it stopped without reporting; its last reply)\n{}", short(&tail, 4000)),
                 format!("（它停下了，没有汇报；这是它最后的回复）\n{}", short(&tail, 4000))), p.role());
             self.system(at, &i18n::pick(format!("{} stopped without reporting on the outer loop's task; its last reply goes to the outer loop.", p.slug),
@@ -1618,6 +1645,8 @@ with octobuddy_review (accept, revise or reject). If you sent subagents to check
     /// Sends the ready reports to the lead now; says whether it sent any.
     fn review_now(&mut self, at: SessionRef) -> bool {
         let Some(session) = self.store.session(at).cloned() else { return false };
+        // The whole reports the short ones point at.
+        self.write_context(at);
         let checking = self.rt.checking.clone();
         let Some(all) = self.rt.unreported.get(&session.id).filter(|v| !v.is_empty()).cloned() else { return false };
         let (reports, later): (Vec<_>, Vec<_>) = all.into_iter().partition(|(id, _, _)| !checking.contains(id));
@@ -2265,11 +2294,17 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
             }
             LoopEvent::PeerTool { peer, id, name, detail } => {
+                let mut repeated = None;
                 if let Some(p) = self.store.peer_mut(&peer) {
                     p.activity = Some(format!("{name} {}", detail.lines().next().unwrap_or("")).trim().to_string());
                     if let Some(open) = p.open_exchange() {
-                        upsert_step(open.steps.get_or_insert_with(Vec::new), &id, &name, &detail);
+                        let steps = open.steps.get_or_insert_with(Vec::new);
+                        upsert_step(steps, &id, &name, &detail);
+                        repeated = crate::handoff::repeated_read(steps.iter().map(|s| (s.name.as_str(), s.detail.as_str())));
                     }
+                }
+                if let Some((read, n)) = repeated {
+                    self.read_loop(&peer, &read, n);
                 }
             }
             LoopEvent::PeerToolEnd { peer, id, ok } => {
@@ -2503,7 +2538,17 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
         let why = if held { "it gave no `Commit:` line, and the outer loop interrupted it or said not to commit" } else { "it gave no `Commit:` line" };
         let loose = (commit.is_none() && auto.is_none() && !pending.is_empty() && check)
             .then(|| format!("[commit] {} file(s) not committed ({}): {why}", pending.len(), pending.join(", ")));
+        // A card names its files (a contract's are agent-spec's to check).
+        let card = if check && spec.is_none() { crate::handoff::card_files(&p.brief) } else { Vec::new() };
+        let stray = crate::handoff::outside(&card, p.touched.as_deref().unwrap_or(&[]));
+        let stray = (!stray.is_empty()).then(|| format!("[files] it changed files outside its card's Files: {}", stray.join(", ")));
         if spec.is_none() && tests.is_none() && commit.is_none() && loose.is_none() {
+            if let Some(line) = stray {
+                let session = self.store.find_peer(peer).and_then(|at| self.store.session(at)).map(|s| s.id.clone()).unwrap_or_default();
+                if let Some((_, report, _)) = self.rt.unreported.get_mut(&session).and_then(|v| v.iter_mut().find(|(id, _, _)| id == peer)) {
+                    report.push_str(&format!("\n\n{line}"));
+                }
+            }
             return false;
         }
         let files = if commit.is_some() || auto.is_some() { self.rt.to_commit.remove(peer).unwrap_or_default() } else { Vec::new() };
@@ -2533,6 +2578,7 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             if let Some(spec) = spec {
                 verdict.push(crate::contract::check(std::path::Path::new(&spec), &dir, &touched).unwrap_or_else(|err| format!("[agent-spec] {err}")));
             }
+            verdict.extend(stray);
             let mut passed = None;
             if let Some(cmd) = tests {
                 let _ = crate::plugins::octosense_app::assemble(&dir);
@@ -2843,7 +2889,7 @@ what the cookbook or the lessons already say. Then say in one line what you kept
             session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None,
             model: None, effort: None, touched: None, base: workspace::git(&dir, &["rev-parse", "HEAD"]).ok(), commits: None, subagents: None,
             estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None,
-            inflight: None, uncommitted: None, model_pick: model.clone(), agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: Some(true), claude_session: None, specs: None,
+            inflight: None, uncommitted: None, model_pick: model.clone(), agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: Some(true), claude_session: None, specs: None, reads: None,
         });
         let mut line = Line::default();
         line.ready = true;
@@ -2971,6 +3017,21 @@ your role, the task you were given, what the outer loop that gave it (\"{}\") se
 
     /// Closes a peer: its running turn is cancelled, what waits for it is
     /// dropped, and it takes no more work; its conversation stays readable.
+/// An inner loop read the same thing `n` times this turn: told once, as a
+    /// steer into the turn it is in (Claude Code takes none mid-turn: not it).
+    fn read_loop(&mut self, peer: &str, read: &str, n: usize) {
+        if self.on_claude(peer) || !self.rt.read_steered.insert(format!("{peer}:{read}")) {
+            return;
+        }
+        let Some(at) = self.store.find_peer(peer) else { return };
+        let slug = self.store.peer_mut(peer).map(|p| p.slug.clone()).unwrap_or_default();
+        let shown: String = read.chars().take(80).collect();
+        self.system(at, &i18n::pick(format!("{slug} read the same thing {n} times this turn ({shown}): OctoBuddy told it to go on with what it has."),
+            format!("{slug} 这一轮把同一段读了 {n} 次（{shown}）：OctoBuddy 提醒它用已经读到的内容继续做。")));
+        self.deliver(peer, Delivery::new(From::Lead, format!("OctoBuddy: you have run `{shown}` {n} times this turn, and what it shows has not \
+changed. Use what you read and go on with the change; read other lines only if your task needs them.")), Mode::Steer);
+    }
+
     pub(crate) fn close_peer(&mut self, peer: &str, by: &str) {
         let Some(at) = self.store.find_peer(peer) else { return };
         let running = self.rt.lines.get_mut(peer).and_then(Line::clear);
@@ -3098,6 +3159,7 @@ your role, the task you were given, what the outer loop that gave it (\"{}\") se
     /// closes, queue changes, messages, then a new round.
     pub(crate) fn apply_reply(&mut self, at: SessionRef, session: &str, reply: plan::Reply) {
         let mut calibration = Vec::new();
+        let accepted_any = reply.reviews.iter().any(|r| r.verdict.starts_with("accept"));
         for review in reply.reviews {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == review.slug).map(|p| p.id.clone()));
             // Reviewed: its next failed check goes back to it again first.
@@ -3124,6 +3186,9 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
         }
         for text in calibration {
             crate::memory::remember(&self.store.projects[at.0].path, "calibration", text);
+        }
+        if accepted_any {
+            self.write_project_map(at);
         }
         for slug in &reply.close {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| &p.slug == slug && p.status != "closed").map(|p| p.id.clone()));
@@ -3313,6 +3378,7 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
                 self.rt.nudged.remove(peer);
                 self.rt.pending.remove(peer);
                 self.store.push_meta(at, Role::Peer, &p.slug, &report, p.role());
+                let report = crate::handoff::cap_report(&report, &format!("{}/reports/{}.md", crate::context::relative(&session_id), p.slug));
                 self.queue_report(at, &session_id, peer, &p, report, false, outcome, next.is_some(), commit);
             }
             // A task from the lead ended without a report: forward the reply,
@@ -3331,7 +3397,7 @@ Go on now: do it (write the files), run your check, then end with your octobuddy
             }
             (_, Some(From::Lead), None) if from_lead_task => {
                 self.rt.pending.remove(peer);
-                let tail: String = text.chars().rev().take(8000).collect::<Vec<_>>().into_iter().rev().collect();
+                let tail = forwarded_tail(&text, &session_id, &p.slug);
                 self.store.push_meta(at, Role::Peer, &p.slug, &format!("(forwarded: it did not report)\n{}", short(&tail, 4000)), p.role());
                 // Its agent or model failed before any work: said as that, to
                 // the person and to the outer loop, which can run it elsewhere.
@@ -3345,7 +3411,7 @@ Go on now: do it (write the files), run your check, then end with your octobuddy
             // it: what the peer finished with goes to the lead, marked as such.
             (_, Some(From::Person), None) if from_lead_task && outcome == "completed" => {
                 self.rt.pending.remove(peer);
-                let tail: String = text.chars().rev().take(8000).collect::<Vec<_>>().into_iter().rev().collect();
+                let tail = forwarded_tail(&text, &session_id, &p.slug);
                 self.store.push_meta(at, Role::Peer, &p.slug, &format!("(the person cut in on its task; its reply after)\n{}", short(&tail, 4000)), p.role());
                 self.queue_report(at, &session_id, peer, &p, format!("(The person cut in on your task with their own message; this is its reply after.)\n{tail}"), true, outcome, next.is_some(), commit);
             }
@@ -3369,6 +3435,17 @@ Go on now: do it (write the files), run your check, then end with your octobuddy
         self.release_slots();
         self.maybe_review(at);
     }
+}
+
+/// The end of a reply that came with no report, for the outer loop: its
+/// last part, and where the whole of it is (`write_context` keeps it).
+fn forwarded_tail(text: &str, session: &str, slug: &str) -> String {
+    let n = text.chars().count();
+    let tail: String = text.chars().skip(n.saturating_sub(crate::handoff::FORWARD_MAX)).collect();
+    if n <= crate::handoff::FORWARD_MAX {
+        return tail;
+    }
+    format!("… {tail}\n(Its whole reply: {}/reports/{slug}.md.)", crate::context::relative(session))
 }
 
 /// The commit message a peer named: its last `Commit: …` line.
@@ -3435,14 +3512,17 @@ mod tests {
 
     #[test]
     fn prompts_say_where_and_from_whom() {
-        let first = first_prompt("Add power.", "/c/p", Some("octobuddy/x/p"), None, ".octobuddy/context/s1");
-        assert!(first_prompt("t", "/p", None, Some("pytest -q"), ".octobuddy/context/s1").contains("OctoBuddy runs `pytest -q`"));
-        assert!(first.contains("/c/p") && first.contains("octobuddy/x/p") && first.contains("Add power."));
+        let first = first_prompt("Add power.", "/c/p", Some("octobuddy/x/p"), None, ".octobuddy/context/s1", "\nYOUR FILES (…)\ncalc.py (3 lines)\n");
+        assert!(first_prompt("t", "/p", None, Some("pytest -q"), ".octobuddy/context/s1", "").contains("OctoBuddy runs `pytest -q`"));
+        assert!(first.contains("/c/p") && first.contains("octobuddy/x/p") && first.contains("TASK\nAdd power."));
+        assert!(first.contains("YOUR FILES (…)\ncalc.py"), "what OctoBuddy gathered comes with the task");
         assert!(first.contains("Do not run git commit") && first.contains("`Commit: <message>`"), "OctoBuddy commits for it");
-        assert!(first.contains("```octobuddy-report") && first.contains("Report once"), "peers learn how to report");
-        let shared = first_prompt("t", "/p", None, None, ".octobuddy/context/s1");
+        assert!(first.contains("```octobuddy-report\nstatus: done | blocked | question") && first.contains("Report once"), "peers learn how to report");
+        let shared = first_prompt("t", "/p", None, None, ".octobuddy/context/s1", "");
         assert!(shared.contains(".octobuddy/context/s1/outer.md"));
-        assert!(shared.contains("the project directory") && shared.contains("same directory at the same time"), "loops share the directory");
+        assert!(shared.contains("the project directory") && shared.contains("same folder now"), "loops share the directory");
+        // The envelope stays short: the task is most of what an inner loop reads.
+        assert!(shared.chars().count() < 1500, "{}", shared.chars().count());
         assert!(later_prompt(From::Person, "hi", false).starts_with("Message from the person"));
         assert!(later_prompt(From::Person, "hi", false).contains("without a report block"));
         assert!(later_prompt(From::Person, "hi", true).contains("report on it"), "the lead's open task is still reported");

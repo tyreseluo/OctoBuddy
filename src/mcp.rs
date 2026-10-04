@@ -164,7 +164,8 @@ fn tools() -> Value {
     let slice = json!({"type": "object", "required": ["slug", "brief"], "properties": {
         "slug": {"type": "string", "description": "short kebab-case name"},
         "role": {"type": "string", "description": "developer, tester, writer, reviewer…"},
-        "brief": {"type": "string", "description": "the agent-spec task contract (spec: task …)"},
+        "brief": {"type": "string", "description": "its task card: ## Goal, ## Files, ## Facts, ## Done when (about 15 lines)"},
+        "read": {"type": "array", "items": {"type": "string"}, "description": "what you or your scouts already read that it needs, as path:L10-L40 (or a small file's path): OctoBuddy pastes those lines in, current, so it does not read them again (6,000 characters at most)"},
         "check": {"type": "string", "description": "shell command OctoBuddy runs when it is done"},
         "rounds": {"type": "number"}, "wave": {"type": "integer"}, "reviews": {"type": "integer"},
         "model": {"type": "string", "description": "one of STATUS's MODELS (for its agent: STATUS's AGENTS); leave out for the default"},
@@ -175,7 +176,7 @@ fn tools() -> Value {
         {"name": "octobuddy_plan", "description": "Start inner loops, one per slice (1-8, no shared files; later waves wait until you accept the earlier). Same fields as the octobuddy-plan block.",
          "inputSchema": {"type": "object", "required": ["slices"], "properties": {
             "estimate": {"type": "object", "properties": {"rounds": {"type": "number"}, "waves": {"type": "integer"}, "minutes": {"type": "number"}}},
-            "shared": {"type": "string", "description": "what every slice needs alike (data structures, storage keys, names, who owns which file): said once, given to each slice"},
+            "shared": {"type": "string", "description": "what every slice needs alike (data structures, storage keys, names), under 1,500 characters: said once, given to each slice (OctoBuddy adds who owns which files from the cards)"},
             "slices": {"type": "array", "items": slice}}}},
         {"name": "octobuddy_send", "description": "Message inner loops by slug (mode interrupt, steer or queue), close the ones done for good, change what you queued. Same fields as the octobuddy-send block.",
          "inputSchema": {"type": "object", "properties": {
