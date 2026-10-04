@@ -881,25 +881,28 @@ script_mod! {
     let ProviderRowView = View{
         width: Fill height: Fit padding: Inset{top: 4 bottom: 4}
         card := RoundedView{
-            width: Fill height: Fit new_batch: true flow: Right spacing: 10 align: Align{y: 0.5}
-            padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
-            draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
-            picon := ProviderIcon{width: 22 height: 22}
+            width: Fill height: Fit new_batch: true flow: Right spacing: 12 align: Align{y: 0.5}
+            padding: Inset{left: 16 right: 14 top: 14 bottom: 14}
+            draw_bg.color: th_raised draw_bg.border_radius: 10.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            picon := ProviderIcon{width: 28 height: 28}
             View{
-                width: Fill height: Fit flow: Down spacing: 3
-                name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
-                detail := Label{width: Fill text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
-                agents := Label{width: Fill text: "" draw_text.color: th_success draw_text.text_style.font_size: 9}
+                width: Fill height: Fit flow: Down spacing: 5
+                View{
+                    width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                    name := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11.5}}
+                    role_badge := RoundedView{
+                        width: Fit height: Fit new_batch: true
+                        padding: Inset{left: 7 right: 7 top: 2 bottom: 2}
+                        draw_bg.color: th_accent_soft draw_bg.border_radius: 4.0
+                        role := Label{text: "" padding: 0 draw_text.color: th_accent_ink draw_text.text_style: theme.font_bold{font_size: 8.5}}
+                    }
+                }
+                detail := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.text_style.font_size: 9.5}
+                agents := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink2 draw_text.text_style.font_size: 9}
             }
             row_primary := SegOff{text: "Make primary" visible: false}
             row_test := SegOff{text: "Test" visible: false}
             row_remove := SegOff{text: "Remove" visible: false}
-            role_badge := RoundedView{
-                width: Fit height: Fit new_batch: true
-                padding: Inset{left: 8 right: 8 top: 2 bottom: 2}
-                draw_bg.color: th_accent_soft draw_bg.border_radius: 8.0
-                role := Label{text: "" draw_text.color: th_accent_ink draw_text.text_style: theme.font_bold{font_size: 8.5}}
-            }
         }
     }
 
@@ -949,6 +952,27 @@ script_mod! {
     let ProvidersEmpty = View{
         width: Fill height: Fit padding: Inset{top: 6 bottom: 6}
         empty_text := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 10}
+    }
+    // Settings › AI Providers' other rows: a section's title; what an agent
+    // runs on with no provider picked, or what the inner loops run on; a note.
+    let ProvSection = View{
+        width: Fill height: Fit padding: Inset{top: 20 bottom: 6}
+        label := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 12}}
+    }
+    let ProvAccount = View{
+        width: Fill height: Fit padding: Inset{top: 3 bottom: 3}
+        card := RoundedView{
+            width: Fill height: Fit new_batch: true flow: Right spacing: 12 align: Align{y: 0.5}
+            padding: Inset{left: 16 right: 16 top: 11 bottom: 11}
+            draw_bg.color: th_raised draw_bg.border_radius: 10.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            picon := ProviderIcon{width: 20 height: 20}
+            name := Label{text: "" padding: 0 draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 10.5}}
+            state := Label{width: Fill text: "" padding: 0 align: Align{x: 1.0} draw_text.color: th_ink2 draw_text.text_style.font_size: 9.5}
+        }
+    }
+    let ProvNote = View{
+        width: Fill height: Fit padding: Inset{top: 4 bottom: 4 left: 2}
+        text := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
     }
 
     // The floating buttons over the conversation (on: the one in use): light
@@ -2038,9 +2062,11 @@ script_mod! {
                         width: Fill height: Fill flow: Down spacing: 10
                         padding: Inset{left: 28 right: 28 top: 22 bottom: 22}
                         View{
-                            width: Fill height: Fit flow: Right align: Align{y: 0.5}
+                            width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
                             providers_title := Label{text: "AI Providers" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 17}}
                             Filler{}
+                            // On the host: OctoBuddy's own providers can be added to.
+                            add_provider := SegOn{text: "+ Add a provider" height: 28 visible: false}
                             reload_providers := ButtonFlat{
                                 text: "Reload" width: Fit height: 28 padding: Inset{left: 12 right: 12}
                                 draw_bg +: {color: th_sidebar color_hover: th_hover color_down: th_line color_focus: th_sidebar border_size: 0.0 border_radius: 6.0}
@@ -2048,13 +2074,12 @@ script_mod! {
                             }
                         }
                         providers_hint := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
-                        // On the host: OctoSense's AI providers found here, and where they come from.
-                        own_bar := View{
-                            width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5} visible: false
-                            Filler{}
-                            add_provider := SegOn{text: "+ Add a provider"}
-                        }
-                        // (A list's own visibility does not take: its box's does.)
+                        providers_path := Label{width: Fill text: "" draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8}}
+                        own_status := Label{width: Fill text: "" visible: false draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
+                        // The providers' cards, then what runs without one and
+                        // the inner loops' model: one list, so nothing waits
+                        // below a gap. (A list's own visibility does not take:
+                        // its box's does.)
                         provider_box := View{
                             width: Fill height: Fill
                             provider_list := PortalList{
@@ -2063,9 +2088,11 @@ script_mod! {
                                 OwnPrimary := OwnPrimaryRow{}
                                 OwnFallback := OwnFallbackRow{}
                                 Empty := ProvidersEmpty{}
+                                Section := ProvSection{}
+                                Account := ProvAccount{}
+                                Note := ProvNote{}
                             }
                         }
-                        own_status := Label{width: Fill text: "" visible: false draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
                         // The add wizard: pick a provider, connect it, pick its models (as Cindy's).
                         wizard := RoundedView{
                             width: Fill height: Fill new_batch: true flow: Down spacing: 8 visible: false
@@ -2105,14 +2132,6 @@ script_mod! {
                                 wz_next := SegOn{text: "Next"}
                                 wz_finish := SegOn{text: "Add"}
                             }
-                        }
-                        // The agents' own logins (a Claude or ChatGPT subscription), used when no provider is picked.
-                        logins_title := SectionTitle{text: "" visible: false}
-                        logins := Label{width: Fill text: "" visible: false draw_text.color: th_ink2 draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
-                        inner_box := View{
-                            width: Fill height: Fit flow: Down spacing: 10
-                            inner_model_title := SectionTitle{text: "Inner loop model"}
-                            inner_source := Body{}
                         }
                     }
                     plugins_section := View{
@@ -2453,7 +2472,7 @@ pub struct OctoBuddyView {
     #[rust]
     confirm_remove: Option<String>,
     #[rust]
-    logins: Option<Vec<(String, String)>>,
+    logins: Option<Vec<(String, providers_view::Login)>>,
     #[rust]
     logins_probing: bool,
     // Where the view was last drawn: a change means a relayout, see draw_walk.
@@ -2980,7 +2999,6 @@ impl OctoBuddyView {
 
         self.sync_providers_page(cx);
         let peer = providers::peer_profile(&self.providers);
-        self.view.label(cx, ids!(inner_source)).set_text(cx, &i18n::pick(format!("Inner loops run with {}.", peer.source), format!("Inner 使用 {}。", peer.source)));
 
         self.view.label(cx, ids!(about_version)).set_text(cx, &i18n::pick(format!("Version {}", env!("CARGO_PKG_VERSION")), format!("版本 {}", env!("CARGO_PKG_VERSION"))));
         let (claude, octos) = (workspace::find_bin("claude"), workspace::find_bin("octos"));
@@ -3173,14 +3191,13 @@ impl OctoBuddyView {
     /// says is the English).
     fn apply_language(&mut self, cx: &mut Cx) {
         use i18n::t;
-        let labels: [(&[LiveId], &str); 12] = [
+        let labels: [(&[LiveId], &str); 11] = [
             (ids!(projects_title), t("Projects", "项目")),
             (ids!(inner_title), t("Inner", "Inner")),
             (ids!(approvals_label), t("Approvals", "审批")),
             (ids!(peers_empty_text), t("No inner loops yet. They start when the outer loop sends a plan.", "还没有 inner。outer 发出计划后会自动启动。")),
             (ids!(settings_title), t("Settings", "设置")),
             (ids!(providers_title), t("AI Providers", "AI Providers")),
-            (ids!(inner_model_title), t("Inner loop model", "Inner 使用的模型")),
             // What it is: OctoSense's app inside OctoSense, an app of its own on the host.
             (ids!(about_body), if system::hosted() {
                 t("The OctoBuddy two-loop workflow as an OctoSense app. You talk to the outer loop, which plans the work, splits it into slices and reviews the results; inner loops do the slices. All of them work in the same directory: the project, or the session's git worktree. OctoBuddy commits each inner loop's own files, as you.",

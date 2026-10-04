@@ -125,9 +125,33 @@ fn open_url(url: &str) {
     let _ = std::process::Command::new(program).arg(url).spawn();
 }
 
-/// The agents' own sign-ins (a Claude or ChatGPT subscription), said
-/// without who is signed in. Blocks: off the UI thread.
-fn probe_logins() -> Vec<(String, String)> {
+/// An agent's own sign-in, as its CLI tells it (not who is signed in).
+#[derive(Clone, Debug)]
+pub enum Login {
+    NotInstalled,
+    SignedOut,
+    /// How: `claude.ai, team`, `ChatGPT`.
+    SignedIn(String),
+    /// What it said, when it is not one of these.
+    Other(String),
+}
+
+impl Login {
+    /// Said in the interface's language (on the UI thread: the language is its).
+    fn said(&self) -> String {
+        match self {
+            Login::NotInstalled => i18n::t("not installed", "未安装").to_string(),
+            Login::SignedOut => i18n::t("not signed in", "未登录").to_string(),
+            Login::SignedIn(how) => i18n::pick(format!("signed in ({how})"), format!("已登录（{how}）")),
+            Login::Other(said) if said.is_empty() => i18n::t("could not tell", "无法判断").to_string(),
+            Login::Other(said) => said.clone(),
+        }
+    }
+}
+
+/// The agents' own sign-ins (a Claude or ChatGPT subscription). Blocks:
+/// off the UI thread.
+fn probe_logins() -> Vec<(String, Login)> {
     let run = |name: &str, args: &[&str]| -> Option<String> {
         let bin = workspace::find_bin(name);
         let mut child = std::process::Command::new(&bin).args(args)
@@ -144,25 +168,75 @@ fn probe_logins() -> Vec<(String, String)> {
         let out = child.wait_with_output().ok()?;
         Some(format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
     };
-    let not_found = || i18n::t("not installed", "未安装").to_string();
     let claude = match run("claude", &["auth", "status"]) {
-        None => not_found(),
+        None => Login::NotInstalled,
         Some(out) => match serde_json::from_str::<serde_json::Value>(out.trim()) {
             Ok(v) if v["loggedIn"].as_bool() == Some(true) => {
-                let how = [v["authMethod"].as_str(), v["subscriptionType"].as_str()].into_iter().flatten().collect::<Vec<_>>().join(", ");
-                i18n::pick(format!("signed in ({how})"), format!("已登录（{how}）"))
+                Login::SignedIn([v["authMethod"].as_str(), v["subscriptionType"].as_str()].into_iter().flatten().collect::<Vec<_>>().join(", "))
             }
-            Ok(_) => i18n::t("not signed in", "未登录").to_string(),
-            Err(_) => i18n::t("could not tell", "无法判断").to_string(),
+            Ok(_) => Login::SignedOut,
+            Err(_) => Login::Other(String::new()),
         },
     };
     let codex = match run("codex", &["login", "status"]) {
-        None => not_found(),
+        None => Login::NotInstalled,
         // Its first line, up to anything of a key ("… - sk-…").
-        Some(out) => out.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.split(" - ").next().unwrap_or(l))
-            .map(|l| l.chars().take(80).collect()).unwrap_or_else(|| i18n::t("could not tell", "无法判断").to_string()),
+        Some(out) => match out.lines().map(str::trim).find(|l| !l.is_empty()).map(|l| l.split(" - ").next().unwrap_or(l)) {
+            Some(l) if l.starts_with("Not logged in") => Login::SignedOut,
+            Some(l) => match l.strip_prefix("Logged in using ") {
+                Some(how) => Login::SignedIn(how.trim_start_matches("an ").trim_start_matches("a ").to_string()),
+                None => Login::Other(l.chars().take(80).collect()),
+            },
+            None => Login::Other(String::new()),
+        },
     };
     vec![("Claude Code".into(), claude), ("Codex".into(), codex)]
+}
+
+/// A row of Settings › AI Providers' list.
+#[derive(Clone)]
+enum PageRow {
+    Section(&'static str),
+    /// No provider (or the profile could not be read): why, and what runs.
+    Empty,
+    /// The provider at this index of `Providers::rows`.
+    Provider(usize),
+    /// An agent and what it runs on: its own account, or the inner loops' model.
+    Account(String, String),
+    Note(String),
+}
+
+/// `primary` or `fallback N`, said.
+fn role_text(role: &str) -> String {
+    match role.strip_prefix("fallback") {
+        _ if role == "primary" => i18n::t("Primary", "主模型").to_string(),
+        Some(n) => i18n::pick(format!("Fallback{n}"), format!("备用{n}")),
+        None => role.to_string(),
+    }
+}
+
+/// Who serves a model, by which endpoint, and where its key is.
+fn provider_detail(family: &str, route: &str, key: providers::KeyState) -> String {
+    let name = octosense_llm_config::registry::lookup(family).map(|f| f.label).unwrap_or(family);
+    let name = if i18n::zh() { name.replace(" (China)", "（中国）") } else { name.to_string() };
+    let route = match route {
+        "official" => i18n::t("official endpoint", "官方接入点").to_string(),
+        r => i18n::pick(format!("endpoint {r}"), format!("接入点 {r}")),
+    };
+    let key = match key {
+        providers::KeyState::Keychain => i18n::t("key in the keychain", "Key 在钥匙串"),
+        providers::KeyState::InProfile => i18n::t("key in the profile", "Key 在配置文件"),
+        providers::KeyState::Missing => i18n::t("no key", "缺少 Key"),
+    };
+    format!("{name} · {route} · {key}")
+}
+
+/// A path with the home directory as `~`.
+fn home_short(path: &std::path::Path) -> String {
+    match std::env::var_os("HOME").map(std::path::PathBuf::from).and_then(|home| path.strip_prefix(home).ok().map(std::path::Path::to_path_buf)) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
 }
 
 impl OctoBuddyView {
@@ -171,25 +245,25 @@ impl OctoBuddyView {
         let hosted = system::hosted();
         let named = std::env::var_os("OCTOBUDDY_PROVIDERS").is_some();
         let host = !hosted && !named;
-        let path = self.providers.profile_path.display().to_string();
         let hint = if hosted {
-            i18n::pick(format!("Enabled in OctoSense's AI providers app ({path}). OctoBuddy only reads them: change them there, then press Reload."),
-                format!("来自 OctoSense 的 AI Providers 应用（{path}）。OctoBuddy 只读取：请在那里修改，然后点「重新载入」。"))
+            i18n::t("From OctoSense's AI Providers app, read-only here: change them there, then press Reload.",
+                "来自 OctoSense 的 AI Providers 应用，这里只读：请在那里修改，再点「重新载入」。")
         } else if named {
-            i18n::pick(format!("Read from the profile OCTOBUDDY_PROVIDERS names ({path}), read-only."),
-                format!("读取 OCTOBUDDY_PROVIDERS 指定的配置（{path}），只读。"))
+            i18n::t("From the profile OCTOBUDDY_PROVIDERS names, read-only here.", "来自 OCTOBUDDY_PROVIDERS 指定的配置，这里只读。")
         } else {
-            i18n::pick(format!("OctoBuddy's own ({path}). Keys stay in the system keychain; agents never get them: OctoBuddy's local proxy adds them."),
-                format!("OctoBuddy 自己的（{path}）。Key 存在系统钥匙串里，从不交给 agent：由 OctoBuddy 的本机代理加上。"))
+            i18n::t("The agents (outer and inner loops) run on these models. API keys stay in the system keychain and never reach an agent: OctoBuddy's local proxy adds them to each request.",
+                "Agent（外环和 inner）用这里的模型。API Key 存在系统钥匙串里，不会交给 agent：请求经过 OctoBuddy 的本机代理时才加上。")
         };
-        self.view.label(cx, ids!(providers_hint)).set_text(cx, &hint);
+        self.view.label(cx, ids!(providers_hint)).set_text(cx, hint);
+        let path = home_short(&self.providers.profile_path);
+        self.view.label(cx, ids!(providers_path)).set_text(cx, &i18n::pick(format!("Profile: {path}"), format!("配置文件：{path}")));
 
         let open = self.wizard.is_some();
-        self.view.view(cx, ids!(own_bar)).set_visible(cx, host && !open);
-        for id in [ids!(provider_box), ids!(inner_box)] {
-            self.view.view(cx, id).set_visible(cx, !open);
+        self.view.button(cx, ids!(add_provider)).set_visible(cx, host && !open);
+        self.view.view(cx, ids!(provider_box)).set_visible(cx, !open);
+        for id in [ids!(providers_hint), ids!(providers_path)] {
+            self.view.label(cx, id).set_visible(cx, !open);
         }
-        self.view.label(cx, ids!(providers_hint)).set_visible(cx, !open);
         let note = self.own_note.as_ref().map(|r| match r { Ok(s) => format!("✓ {s}"), Err(e) => format!("✗ {e}") });
         let status = self.view.label(cx, ids!(own_status));
         status.set_visible(cx, !open && note.is_some());
@@ -202,15 +276,6 @@ impl OctoBuddyView {
             self.logins_probing = true;
             let inbox = self.rt.inbox.clone();
             std::thread::spawn(move || events::post(&inbox, LoopEvent::LoginsProbed(probe_logins())));
-        }
-        let logins = self.logins.as_ref().map(|l| l.iter().map(|(a, s)| format!("{a}: {s}")).collect::<Vec<_>>().join("\n"))
-            .unwrap_or_else(|| i18n::t("Checking…", "正在检查…").to_string());
-        let logins = i18n::pick(format!("{logins}\nAn agent with no provider picked runs on its own sign-in (Claude Code: `claude auth login`; Codex: `codex login`)."),
-            format!("{logins}\n没选 provider 时，agent 用它自己的登录（Claude Code：`claude auth login`；Codex：`codex login`）。"));
-        self.view.label(cx, ids!(logins_title)).set_text(cx, i18n::t("The agents' own sign-in", "Agent 自己的登录"));
-        self.view.label(cx, ids!(logins)).set_text(cx, &logins);
-        for id in [ids!(logins_title), ids!(logins)] {
-            self.view.label(cx, id).set_visible(cx, !open);
         }
         self.view.portal_list(cx, ids!(provider_list)).redraw(cx);
         self.view.portal_list(cx, ids!(wz_list)).redraw(cx);
@@ -328,48 +393,104 @@ impl OctoBuddyView {
     }
 
     /// The providers list: its rows (OctoBuddy's own can be changed).
+    /// Settings › AI Providers' list: the providers (or why there is none),
+    /// what an agent runs on with none picked, what the inner loops run on.
+    fn provider_page_rows(&self) -> Vec<PageRow> {
+        let mut rows = vec![PageRow::Section(i18n::t("Providers and models", "供应商与模型"))];
+        if self.providers.rows.is_empty() {
+            rows.push(PageRow::Empty);
+        } else {
+            rows.extend((0..self.providers.rows.len()).map(PageRow::Provider));
+        }
+        rows.push(PageRow::Section(i18n::t("The agents' own accounts", "Agent 自己的账号")));
+        match &self.logins {
+            Some(logins) => rows.extend(logins.iter().map(|(agent, login)| PageRow::Account(agent.clone(), login.said()))),
+            None => rows.push(PageRow::Note(i18n::t("Checking…", "正在检查…").into())),
+        }
+        rows.push(PageRow::Note(i18n::t("With no provider picked, an agent runs on its own account. To sign in: `claude auth login` for Claude Code, `codex login` for Codex.",
+            "没选供应商时，agent 用自己的账号运行。登录方法：Claude Code 运行 `claude auth login`，Codex 运行 `codex login`。").into()));
+        rows.push(PageRow::Section(i18n::t("The inner loops' model", "Inner 用的模型")));
+        let state = match self.providers.primary() {
+            Some(primary) => i18n::pick(format!("the primary, {}", primary.label), format!("跟随主模型 {}", primary.label)),
+            None => {
+                let name = providers::fallback_profile();
+                i18n::pick(format!("octos profile “{name}”"), format!("octos 配置“{name}”"))
+            }
+        };
+        rows.push(PageRow::Account("octos".into(), state));
+        rows
+    }
+
     pub(crate) fn draw_providers(&mut self, cx: &mut Cx2d, list: &mut PortalList) {
         let editable = !system::hosted() && own_providers::is_own(&self.providers.profile_path);
-        if self.providers.rows.is_empty() {
-            let why = match &self.providers.error {
-                Some(err) => i18n::pick(format!("Could not read the AI providers profile: {err}"), format!("无法读取 AI Providers 配置：{err}")),
-                None if editable => i18n::pick(format!("No provider yet. Press “+ Add a provider”. Until then an agent runs on its own sign-in, and the inner loop on the octos profile “{}”.", providers::fallback_profile()),
-                    format!("还没有 provider。点「+ 添加供应商」。在此之前 agent 用它自己的登录，inner 使用 octos 配置“{}”。", providers::fallback_profile())),
-                None => i18n::pick(format!("No provider is enabled in OctoSense yet. Open Start → Settings → AI providers in OctoSense to add one. Until then the inner loop uses the octos profile “{}”.", providers::fallback_profile()),
-                    format!("OctoSense 里还没有启用任何 provider。请在 OctoSense 的「开始 → 设置 → AI providers」中添加。在此之前 inner 使用 octos 配置“{}”。", providers::fallback_profile())),
-            };
-            list.set_item_range(cx, 0, 1);
-            while let Some(index) = list.next_visible_item(cx) {
-                if index == 0 {
+        let rows = self.provider_page_rows();
+        list.set_item_range(cx, 0, rows.len());
+        while let Some(index) = list.next_visible_item(cx) {
+            let Some(row) = rows.get(index) else { continue };
+            match row {
+                PageRow::Section(title) => {
+                    let item = list.item(cx, index, id!(Section));
+                    item.label(cx, ids!(label)).set_text(cx, title);
+                    item.draw_all_unscoped(cx);
+                }
+                PageRow::Empty => {
+                    let fallback = providers::fallback_profile();
+                    let why = match &self.providers.error {
+                        Some(err) => i18n::pick(format!("Could not read the AI providers profile: {err}"), format!("无法读取 AI Providers 配置：{err}")),
+                        None if editable => i18n::pick(format!("No provider yet: press “+ Add a provider” at the top. Until then an agent runs on its own account, and the inner loops on the octos profile “{fallback}”."),
+                            format!("还没有供应商：点右上角「+ 添加供应商」。在此之前，agent 用自己的账号运行，inner 用 octos 配置“{fallback}”。")),
+                        None => i18n::pick(format!("No provider is enabled in OctoSense yet: add one in OctoSense's Start → Settings → AI providers. Until then the inner loops use the octos profile “{fallback}”."),
+                            format!("OctoSense 里还没有启用供应商：请在 OctoSense 的「开始 → 设置 → AI providers」中添加。在此之前，inner 用 octos 配置“{fallback}”。")),
+                    };
                     let item = list.item(cx, index, id!(Empty));
                     item.label(cx, ids!(empty_text)).set_text(cx, &why);
                     item.draw_all_unscoped(cx);
                 }
+                PageRow::Provider(i) => {
+                    let Some(row) = self.providers.rows.get(*i) else { continue };
+                    let template = match (editable, row.role == "primary") {
+                        (false, _) => id!(Provider),
+                        (true, true) => id!(OwnPrimary),
+                        (true, false) => id!(OwnFallback),
+                    };
+                    let item = list.item(cx, index, template);
+                    let (family, model) = row.label.split_once('/').unwrap_or(("", &row.label));
+                    crate::provider_icons::show(&item.widget(cx, ids!(picon)), crate::provider_icons::svg(family), &mut self.icons_shown);
+                    item.label(cx, ids!(name)).set_text(cx, model);
+                    item.label(cx, ids!(role)).set_text(cx, &role_text(&row.role));
+                    item.label(cx, ids!(detail)).set_text(cx, &provider_detail(family, &row.route, row.key));
+                    let agents = row.agents.join(" · ");
+                    item.label(cx, ids!(agents)).set_text(cx, &if agents.is_empty() {
+                        i18n::t("No agent can run on it yet.", "暂时没有 agent 能用它。").to_string()
+                    } else {
+                        i18n::pick(format!("For {agents}"), format!("可用于 {agents}"))
+                    });
+                    if editable {
+                        let confirming = self.confirm_remove.as_deref() == Some(row.label.as_str());
+                        item.button(cx, ids!(row_remove)).set_text(cx, if confirming { i18n::t("Click again to remove", "再点一次删除") } else { i18n::t("Remove", "删除") });
+                        item.button(cx, ids!(row_primary)).set_text(cx, i18n::t("Make primary", "设为主模型"));
+                        item.button(cx, ids!(row_test)).set_text(cx, i18n::t("Test", "测试"));
+                    }
+                    item.draw_all_unscoped(cx);
+                }
+                PageRow::Account(agent, state) => {
+                    let item = list.item(cx, index, id!(Account));
+                    let engine = match agent.as_str() {
+                        "Codex" => crate::rpc_lead::CODEX,
+                        "octos" => "octos",
+                        _ => "claude",
+                    };
+                    crate::provider_icons::show(&item.widget(cx, ids!(picon)), crate::provider_icons::agent_svg(engine), &mut self.icons_shown);
+                    item.label(cx, ids!(name)).set_text(cx, if agent == "octos" { "Inner · octos" } else { agent });
+                    item.label(cx, ids!(state)).set_text(cx, state);
+                    item.draw_all_unscoped(cx);
+                }
+                PageRow::Note(text) => {
+                    let item = list.item(cx, index, id!(Note));
+                    item.label(cx, ids!(text)).set_text(cx, text);
+                    item.draw_all_unscoped(cx);
+                }
             }
-            return;
-        }
-        list.set_item_range(cx, 0, self.providers.rows.len());
-        while let Some(index) = list.next_visible_item(cx) {
-            let Some(row) = self.providers.rows.get(index) else { continue };
-            let template = match (editable, row.role == "primary") {
-                (false, _) => id!(Provider),
-                (true, true) => id!(OwnPrimary),
-                (true, false) => id!(OwnFallback),
-            };
-            let item = list.item(cx, index, template);
-            let family = row.label.split_once('/').map(|(f, _)| f).unwrap_or(&row.label);
-            crate::provider_icons::show(&item.widget(cx, ids!(picon)), crate::provider_icons::svg(family), &mut self.icons_shown);
-            item.label(cx, ids!(name)).set_text(cx, &row.label);
-            item.label(cx, ids!(detail)).set_text(cx, &format!("route: {} · {}", row.route, row.key.label()));
-            item.label(cx, ids!(agents)).set_text(cx, &i18n::pick(format!("Runs: {}", row.agents.join(" · ")), format!("可运行：{}", row.agents.join(" · "))));
-            item.label(cx, ids!(role)).set_text(cx, &row.role);
-            if editable {
-                let confirming = self.confirm_remove.as_deref() == Some(row.label.as_str());
-                item.button(cx, ids!(row_remove)).set_text(cx, if confirming { i18n::t("Click again to remove", "再点一次删除") } else { i18n::t("Remove", "删除") });
-                item.button(cx, ids!(row_primary)).set_text(cx, i18n::t("Make primary", "设为主模型"));
-                item.button(cx, ids!(row_test)).set_text(cx, i18n::t("Test", "测试"));
-            }
-            item.draw_all_unscoped(cx);
         }
     }
 
@@ -411,7 +532,8 @@ impl OctoBuddyView {
             }
         }
         let Some((index, what)) = hit else { return };
-        let Some(label) = self.providers.rows.get(index).map(|r| r.label.clone()) else { return };
+        let Some(PageRow::Provider(i)) = self.provider_page_rows().get(index).cloned() else { return };
+        let Some(label) = self.providers.rows.get(i).map(|r| r.label.clone()) else { return };
         if what != 2 {
             self.confirm_remove = None;
         }
@@ -575,7 +697,7 @@ impl OctoBuddyView {
         self.providers = providers::read();
     }
 
-    pub(crate) fn logins_probed(&mut self, logins: Vec<(String, String)>) {
+    pub(crate) fn logins_probed(&mut self, logins: Vec<(String, Login)>) {
         self.logins = Some(logins);
         self.logins_probing = false;
     }
