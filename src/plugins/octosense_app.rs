@@ -387,14 +387,15 @@ fn beside_checkout() -> Option<PathBuf> {
 }
 
 /// `$OCTOBUDDY_DESIGN_FLOW`, else OctoScript-App-Design-Flow beside this
-/// checkout; App Hub from `$OCTOSENSE_APP_HUB`, else a built one beside the
-/// design flow (or in its quickstart's `octosense-ws`).
+/// checkout, else the one OctoBuddy bundles (`design_flow.rs`); App Hub
+/// from `$OCTOSENSE_APP_HUB`, else a built one beside the design flow (or
+/// in its quickstart's `octosense-ws`).
 pub fn tools() -> Result<Tools, String> {
-    let flow = std::env::var_os("OCTOBUDDY_DESIGN_FLOW").map(PathBuf::from)
+    let checkout = std::env::var_os("OCTOBUDDY_DESIGN_FLOW").map(PathBuf::from)
         .or_else(|| beside_checkout().map(|dir| dir.join("OctoScript-App-Design-Flow")))
-        .filter(|dir| dir.join("tools/octo").is_file())
-        .ok_or_else(|| "OctoScript App Design Flow was not found: clone it (github.com/OctoSense-org/OctoScript-App-Design-Flow) \
-beside OctoSense, or set OCTOBUDDY_DESIGN_FLOW to its folder".to_string())?;
+        .filter(|dir| dir.join("tools/octo").is_file());
+    let flow = checkout.or_else(super::design_flow::dir).filter(|dir| dir.join("tools/octo").is_file())
+        .ok_or_else(|| "OctoScript App Design Flow could not be written out under OctoBuddy's data".to_string())?;
     let built = |dir: &PathBuf| dir.join("target/release/hub").is_file() && dir.join("target/release/card-host").is_file();
     let app_hub = std::env::var_os("OCTOSENSE_APP_HUB").map(PathBuf::from).or_else(|| {
         let parent = flow.parent()?;

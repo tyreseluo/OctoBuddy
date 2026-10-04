@@ -35,6 +35,7 @@
 //! }
 //! ```
 pub mod app_data;
+pub mod design_flow;
 pub mod app_factory;
 pub mod app_preview;
 pub mod app_publish;
