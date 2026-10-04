@@ -3955,8 +3955,10 @@ impl OctoBuddyView {
         let rows_key = match &self.flow_open {
             Some(FlowOpen::Outer(id)) => self.store.projects.iter().flat_map(|p| &p.sessions).find(|s| &s.id == id)
                 .map(|s| (chat::session_rows(s, self.rt.streaming_lead(&s.id)), s.id.clone())),
-            Some(FlowOpen::Inner(id)) => self.store.find_peer(id).and_then(|at| self.store.session(at))
-                .and_then(|s| s.peers().iter().find(|p| &p.id == id)).map(|p| (chat::peer_rows(p), p.id.clone())),
+            Some(FlowOpen::Inner(id)) => self.store.find_peer(id).and_then(|at| {
+                let p = self.store.session(at)?.peers().iter().find(|p| &p.id == id)?;
+                Some((chat::peer_rows_on(p, self.peer_model(at, p).as_deref()), p.id.clone()))
+            }),
             _ => None,
         };
         match rows_key {
@@ -5030,8 +5032,26 @@ impl OctoBuddyView {
             while list.next_visible_item(cx).is_some() {}
             return;
         };
-        let rows = chat::peer_rows(&p);
+        let model = self.selected.and_then(|at| self.peer_model(at, &p));
+        let rows = chat::peer_rows_on(&p, model.as_deref());
         self.draw_chat(cx, list, &rows, &p.id);
+    }
+
+    /// The model an inner loop's replies ran on: the one picked for it, the
+    /// one octos reported, the session's inner model (for its engine), else
+    /// for octos the AI providers' primary. None: its agent's own login.
+    fn peer_model(&self, at: SessionRef, p: &Peer) -> Option<String> {
+        let given = |m: &Option<String>| m.clone().filter(|m| !m.trim().is_empty());
+        if let Some(m) = given(&p.model_pick).or_else(|| given(&p.model)) {
+            return Some(m);
+        }
+        let session = self.store.session(at)?;
+        if session.inner_engine() == p.agent() {
+            if let Some(m) = session.inner_model() {
+                return Some(m.to_string());
+            }
+        }
+        (p.agent() == "octos").then(|| self.providers.primary().map(|r| r.label.clone())).flatten()
     }
 
     /// Draws `rows` into a ChatList; `key` names the conversation for the

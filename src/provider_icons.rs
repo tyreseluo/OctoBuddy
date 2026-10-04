@@ -42,12 +42,16 @@ pub fn agent_svg(engine: &str) -> &'static str {
 }
 
 /// What an agent's reply wears: the mark of the provider its model runs on
-/// (MiniMax for Claude Code on MiniMax), else the agent's own (its own login).
+/// (MiniMax for Claude Code on MiniMax, by a `family/model` label or a bare
+/// model's name), else the agent's own (its own login, or its maker's model).
 pub fn reply_svg(engine: &str, model: Option<&str>) -> &'static str {
-    match model.and_then(|m| m.split_once('/')).map(|(family, _)| svg(family)) {
-        Some(mark) if !std::ptr::eq(mark, PLAIN) => mark,
-        _ => agent_svg(engine),
-    }
+    let family = match model.and_then(|m| m.split_once('/')) {
+        Some((family, _)) => family,
+        None => model.map(family_of_model).unwrap_or(""),
+    };
+    let own = matches!((engine, family), ("claude" | "", "anthropic") | (crate::rpc_lead::CODEX, "openai"));
+    let mark = svg(family);
+    if family.is_empty() || own || std::ptr::eq(mark, PLAIN) { agent_svg(engine) } else { mark }
 }
 
 /// The model's name as a reply says it: a provider's model without its
@@ -151,6 +155,11 @@ mod tests {
         assert!(std::ptr::eq(reply_svg("claude", Some("minimax-cn/MiniMax-M3")), svg("minimax")));
         assert!(std::ptr::eq(reply_svg("claude", Some("opus")), agent_svg("claude")));
         assert!(std::ptr::eq(reply_svg("codex", None), agent_svg("codex")));
+        // An inner loop octos reported a bare model for: its provider's mark too.
+        assert!(std::ptr::eq(reply_svg("claude", Some("MiniMax-M3")), svg("minimax")));
+        assert!(std::ptr::eq(reply_svg("octos", Some("glm-5.3")), svg("zai")));
+        assert!(std::ptr::eq(reply_svg("codex", Some("gpt-5.5")), agent_svg("codex")));
+        assert!(std::ptr::eq(reply_svg("octos", Some("some-local-model")), agent_svg("octos")));
         assert_eq!(model_name("minimax-cn/MiniMax-M3"), "MiniMax-M3");
         // Every family the catalog offers has its mark (or the plain one on purpose).
         for f in octosense_llm_config::catalog::families() {

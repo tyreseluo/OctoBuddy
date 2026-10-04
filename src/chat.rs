@@ -152,6 +152,15 @@ fn session_rows_at(session: &Session, streaming: Option<usize>, plain: bool) -> 
     rows
 }
 
+/// The same, its replies marked with the model they ran on.
+pub fn peer_rows_on(p: &Peer, model: Option<&str>) -> Vec<Row> {
+    let mut rows = peer_rows(p);
+    for row in rows.iter_mut().filter(|r| r.kind == Kind::Inner) {
+        row.model = model.map(String::from);
+    }
+    rows
+}
+
 /// An inner loop's conversation: what it was given, by whom, and what it
 /// answered, as it streams.
 pub fn peer_rows(p: &Peer) -> Vec<Row> {
