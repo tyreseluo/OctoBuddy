@@ -1869,18 +1869,8 @@ script_mod! {
                         }
                         providers_hint := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
                         // On the host: OctoSense's AI providers found here, and where they come from.
-                        os_found := RoundedView{
-                            width: Fill height: Fit new_batch: true flow: Right spacing: 8 align: Align{y: 0.5} visible: false
-                            padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
-                            draw_bg.color: th_accent_soft draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_accent_line
-                            os_found_text := Label{width: Fill text: "" draw_text.color: th_accent_ink draw_text.wrap: Words draw_text.text_style.font_size: 9.5}
-                            import_providers := SegOn{text: "Import"}
-                        }
                         own_bar := View{
                             width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5} visible: false
-                            src_label := Label{text: "" draw_text.color: muted draw_text.text_style.font_size: 9.5}
-                            src_own_on := SegOn{text: "OctoBuddy's own"} src_own := SegOff{text: "OctoBuddy's own"}
-                            src_os_on := SegOn{text: "OctoSense's"} src_os := SegOff{text: "OctoSense's"}
                             Filler{}
                             add_provider := SegOn{text: "+ Add a provider"}
                         }
@@ -2806,14 +2796,14 @@ impl OctoBuddyView {
             claude.display(), octos.display(), peer.source), format!("外环和 inner 可以跑在 Claude Code（{}）、Codex 或 pi（用你的 AI providers，经 OctoBuddy 本机代理）、或 octos（{}，使用 {}）上。版本见 设置 › 工具。",
             claude.display(), octos.display(), peer.source));
         let link = match (&self.link, &self.system_link) {
-            (None, _) if !system::hosted() => i18n::t("On its own: OctoBuddy runs on this computer, not in OctoSense. There is no system agent here; octobuddy.status, octobuddy.report and octobuddy.request are OctoSense's to call when OctoBuddy runs in it.",
-                "单独运行：OctoBuddy 运行在这台电脑上，不在 OctoSense 里。这里没有系统 agent；octobuddy.status、octobuddy.report 和 octobuddy.request 要在 OctoSense 里运行时才能被调用。").to_string(),
+            // On the host there is no system agent to link: nothing to say.
+            (None, _) if !system::hosted() => String::new(),
             (None, _) => i18n::t("System octos: not linked (OctoSense has not granted OctoBuddy an assistant here).", "系统 octos：未接入（OctoSense 在这里没有给 OctoBuddy 授权助手）。").to_string(),
             (Some(_), None) => i18n::t("System octos: linking OctoBuddy's peer…", "系统 octos：正在接入 OctoBuddy 的 peer…").to_string(),
             (Some(_), Some(Ok(()))) => i18n::t("System octos: linked. The system agent sees OctoBuddy as a peer and can call octobuddy.status and octobuddy.send.", "系统 octos：已接入。系统 agent 能看到 OctoBuddy 这个 peer，并可调用 octobuddy.status 和 octobuddy.send。").to_string(),
             (Some(_), Some(Err(err))) => i18n::pick(format!("System octos: not linked: {err}"), format!("系统 octos：接入失败：{err}")),
         };
-        self.view.label(cx, ids!(about_loops)).set_text(cx, &format!("{loops}\n{link}"));
+        self.view.label(cx, ids!(about_loops)).set_text(cx, &if link.is_empty() { loops } else { format!("{loops}\n{link}") });
         let data = model::data_dir();
         let (store, worktrees, octos_data) = (model::default_store_path(), data.join("worktrees"), data.join("octos/serve"));
         let text = i18n::pick(format!("Projects and sessions: {}\nSession worktrees: {}\nInner loops' octos data: {}",
@@ -2999,8 +2989,14 @@ impl OctoBuddyView {
             (ids!(settings_title), t("Settings", "设置")),
             (ids!(providers_title), t("AI Providers", "AI Providers")),
             (ids!(inner_model_title), t("Inner loop model", "Inner 使用的模型")),
-            (ids!(about_body), t("The OctoBuddy two-loop workflow as an OctoSense app. You talk to the outer loop, which plans the work, splits it into slices and reviews the results; inner loops do the slices. All of them work in the same directory: the project, or the session's git worktree. OctoBuddy commits each inner loop's own files, as you.",
-                "OctoBuddy 双环工作流的 OctoSense 应用。你和 outer 对话，它规划工作、拆成切片并审查结果；inner 完成各个切片。它们都在同一个目录里工作：项目目录，或会话的 git worktree。OctoBuddy 以你的身份提交每个 inner 自己改过的文件。")),
+            // What it is: OctoSense's app inside OctoSense, an app of its own on the host.
+            (ids!(about_body), if system::hosted() {
+                t("The OctoBuddy two-loop workflow as an OctoSense app. You talk to the outer loop, which plans the work, splits it into slices and reviews the results; inner loops do the slices. All of them work in the same directory: the project, or the session's git worktree. OctoBuddy commits each inner loop's own files, as you.",
+                    "OctoBuddy 双环工作流的 OctoSense 应用。你和 outer 对话，它规划工作、拆成切片并审查结果；inner 完成各个切片。它们都在同一个目录里工作：项目目录，或会话的 git worktree。OctoBuddy 以你的身份提交每个 inner 自己改过的文件。")
+            } else {
+                t("OctoBuddy, the two-loop coding app, on this computer. You talk to the outer loop, which plans the work, splits it into slices and reviews the results; inner loops do the slices. All of them work in the same directory: the project, or the session's git worktree. OctoBuddy commits each inner loop's own files, as you.",
+                    "OctoBuddy 双环编码应用，运行在这台电脑上。你和 outer 对话，它规划工作、拆成切片并审查结果；inner 完成各个切片。它们都在同一个目录里工作：项目目录，或会话的 git worktree。OctoBuddy 以你的身份提交每个 inner 自己改过的文件。")
+            }),
             (ids!(loops_title), t("Loops", "双环")),
             (ids!(data_title), t("Data on this device", "本机数据")),
             (ids!(language_title), t("Language", "语言")),
@@ -3009,7 +3005,7 @@ impl OctoBuddyView {
         for (id, text) in labels {
             self.view.label(cx, id).set_text(cx, text);
         }
-        let buttons: [(&[LiveId], &str); 33] = [
+        let buttons: [(&[LiveId], &str); 28] = [
             (ids!(stop), t("Stop", "停止")),
             (ids!(go_on), t("Go on", "继续")),
             (ids!(send), t("Send", "发送")),
@@ -3024,12 +3020,7 @@ impl OctoBuddyView {
             (ids!(approve_session), t("Always in this session", "本会话内都允许")),
             (ids!(deny), t("Deny", "拒绝")),
             (ids!(reload_providers), t("Reload", "重新载入")),
-            (ids!(src_own_on), t("OctoBuddy's own", "OctoBuddy 自己的")),
-            (ids!(src_own), t("OctoBuddy's own", "OctoBuddy 自己的")),
-            (ids!(src_os_on), t("OctoSense's", "OctoSense 的")),
-            (ids!(src_os), t("OctoSense's", "OctoSense 的")),
             (ids!(add_provider), t("+ Add a provider", "+ 添加供应商")),
-            (ids!(import_providers), t("Import", "导入")),
             (ids!(nav_plugins_on), t("Plugins", "插件")),
             (ids!(nav_plugins), t("Plugins", "插件")),
             (ids!(nav_tools_on), t("Tools", "工具")),

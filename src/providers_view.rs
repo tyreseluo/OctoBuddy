@@ -7,7 +7,7 @@
 //! the agents' own sign-ins. Which agents can run on a provider is said by
 //! its endpoint's protocol, row by row.
 use crate::events::{self, LoopEvent};
-use crate::own_providers::{self, Group, Source};
+use crate::own_providers::{self, Group};
 use crate::{i18n, providers, system, tapped, workspace, OctoBuddyView, SettingsTab};
 use makepad_widgets::*;
 use octosense_llm_config::catalog::{CatalogFamily, Model, Route};
@@ -171,7 +171,6 @@ impl OctoBuddyView {
         let hosted = system::hosted();
         let named = std::env::var_os("OCTOBUDDY_PROVIDERS").is_some();
         let host = !hosted && !named;
-        let own = host && own_providers::source() == Source::Own;
         let path = self.providers.profile_path.display().to_string();
         let hint = if hosted {
             i18n::pick(format!("Enabled in OctoSense's AI providers app ({path}). OctoBuddy only reads them: change them there, then press Reload."),
@@ -179,30 +178,14 @@ impl OctoBuddyView {
         } else if named {
             i18n::pick(format!("Read from the profile OCTOBUDDY_PROVIDERS names ({path}), read-only."),
                 format!("读取 OCTOBUDDY_PROVIDERS 指定的配置（{path}），只读。"))
-        } else if own {
-            i18n::pick(format!("OctoBuddy's own ({path}), in the same form as OctoSense's AI providers (inside OctoSense, OctoBuddy uses OctoSense's). Keys stay in the system keychain; agents never get them: OctoBuddy's local proxy adds them."),
-                format!("OctoBuddy 自己的（{path}），格式与 OctoSense 的 AI Providers 相同（在 OctoSense 里运行时改用 OctoSense 的）。Key 存在系统钥匙串里，从不交给 agent：由 OctoBuddy 的本机代理加上。"))
         } else {
-            i18n::pick(format!("Read from OctoSense's AI providers ({path}), read-only: change them in OctoSense, then press Reload. Or use OctoBuddy's own."),
-                format!("读取 OctoSense 的 AI Providers（{path}），只读：请在 OctoSense 里修改，然后点「重新载入」。也可以改用 OctoBuddy 自己的。"))
+            i18n::pick(format!("OctoBuddy's own ({path}). Keys stay in the system keychain; agents never get them: OctoBuddy's local proxy adds them."),
+                format!("OctoBuddy 自己的（{path}）。Key 存在系统钥匙串里，从不交给 agent：由 OctoBuddy 的本机代理加上。"))
         };
         self.view.label(cx, ids!(providers_hint)).set_text(cx, &hint);
 
         let open = self.wizard.is_some();
-        let theirs = &self.providers.octosense;
-        self.view.view(cx, ids!(os_found)).set_visible(cx, host && !open && !theirs.is_empty());
-        if !theirs.is_empty() {
-            let (n, labels) = (theirs.len(), theirs.iter().take(4).cloned().collect::<Vec<_>>().join(", "));
-            let more = if theirs.len() > 4 { " …" } else { "" };
-            self.view.label(cx, ids!(os_found_text)).set_text(cx, &i18n::pick(
-                format!("OctoSense's AI providers on this computer has {n} OctoBuddy's own does not: {labels}{more}. Import adds them (keys into OctoBuddy's own keychain items; OctoSense's stay as they are)."),
-                format!("这台电脑上 OctoSense 的 AI Providers 有 {n} 个 OctoBuddy 自己没有的：{labels}{more}。「导入」会把它们加进来（key 存入 OctoBuddy 自己的钥匙串条目，OctoSense 的不动）。")));
-        }
         self.view.view(cx, ids!(own_bar)).set_visible(cx, host && !open);
-        self.view.label(cx, ids!(src_label)).set_text(cx, i18n::t("Use:", "使用："));
-        for (id, show) in [(ids!(src_own_on), own), (ids!(src_own), !own), (ids!(src_os_on), !own), (ids!(src_os), own), (ids!(add_provider), own)] {
-            self.view.button(cx, id).set_visible(cx, show);
-        }
         for id in [ids!(provider_box), ids!(inner_box)] {
             self.view.view(cx, id).set_visible(cx, !open);
         }
@@ -350,10 +333,8 @@ impl OctoBuddyView {
         if self.providers.rows.is_empty() {
             let why = match &self.providers.error {
                 Some(err) => i18n::pick(format!("Could not read the AI providers profile: {err}"), format!("无法读取 AI Providers 配置：{err}")),
-                None if editable => i18n::pick(format!("No provider yet. Press “+ Add a provider”{}. Until then an agent runs on its own sign-in, and the inner loop on the octos profile “{}”.",
-                    if self.providers.octosense.is_empty() { "" } else { ", or import OctoSense's" }, providers::fallback_profile()),
-                    format!("还没有 provider。点「+ 添加供应商」{}。在此之前 agent 用它自己的登录，inner 使用 octos 配置“{}”。",
-                    if self.providers.octosense.is_empty() { "" } else { "，或导入 OctoSense 的" }, providers::fallback_profile())),
+                None if editable => i18n::pick(format!("No provider yet. Press “+ Add a provider”. Until then an agent runs on its own sign-in, and the inner loop on the octos profile “{}”.", providers::fallback_profile()),
+                    format!("还没有 provider。点「+ 添加供应商」。在此之前 agent 用它自己的登录，inner 使用 octos 配置“{}”。", providers::fallback_profile())),
                 None => i18n::pick(format!("No provider is enabled in OctoSense yet. Open Start → Settings → AI providers in OctoSense to add one. Until then the inner loop uses the octos profile “{}”.", providers::fallback_profile()),
                     format!("OctoSense 里还没有启用任何 provider。请在 OctoSense 的「开始 → 设置 → AI providers」中添加。在此之前 inner 使用 octos 配置“{}”。", providers::fallback_profile())),
             };
@@ -409,22 +390,6 @@ impl OctoBuddyView {
     pub(crate) fn providers_page_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         if self.page != crate::Page::Settings || self.settings_tab != SettingsTab::Providers {
             return;
-        }
-        for (id, source) in [(ids!(src_own), Source::Own), (ids!(src_os), Source::OctoSense)] {
-            if self.view.button(cx, id).clicked(actions) {
-                own_providers::set_source(source);
-                self.own_note = None;
-                self.reread_providers(cx);
-            }
-        }
-        if self.view.button(cx, ids!(import_providers)).clicked(actions) {
-            self.own_note = Some(Ok(i18n::t("Importing…", "正在导入…").to_string()));
-            self.providers_job(ProvidersJob::Import, || {
-                let n = own_providers::import_octosense()?;
-                own_providers::set_source(Source::Own);
-                Ok(i18n::pick(format!("Imported {n} from OctoSense's AI providers."), format!("已从 OctoSense 的 AI Providers 导入 {n} 个。")))
-            });
-            self.relayout(cx);
         }
         if self.view.button(cx, ids!(add_provider)).clicked(actions) {
             self.wizard = Some(Wizard { step: 1, ..Default::default() });
@@ -567,7 +532,6 @@ impl OctoBuddyView {
                         // The key once: the models of one endpoint share it.
                         added.push(own_providers::add(p, if i == 0 { key.as_deref() } else { None })?);
                     }
-                    own_providers::set_source(Source::Own);
                     Ok(i18n::pick(format!("Added {}.", added.join(", ")), format!("已添加 {}。", added.join("、"))))
                 });
             }

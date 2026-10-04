@@ -288,9 +288,22 @@ pub fn choice() -> Choice {
     STATE.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|s| s.choice).unwrap_or_else(stored)
 }
 
-/// Whether OctoSense's style is a dark one (`<style>-dark`).
+/// Whether what OctoBuddy follows is dark: inside OctoSense its style
+/// (`<style>-dark`); on the host the system's appearance.
 fn shell_is_dark(vm: &mut ScriptVm) -> bool {
-    makepad_widgets::desktop_style::current_name(vm).is_some_and(|name| name.ends_with("-dark"))
+    if crate::system::hosted() {
+        return makepad_widgets::desktop_style::current_name(vm).is_some_and(|name| name.ends_with("-dark"));
+    }
+    system_is_dark()
+}
+
+/// macOS in Dark Mode (`AppleInterfaceStyle` is `Dark`; unset when light).
+fn system_is_dark() -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    std::process::Command::new("defaults").args(["read", "-g", "AppleInterfaceStyle"]).output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).trim().eq_ignore_ascii_case("dark"))
 }
 
 /// The palette for `choice`, the shell's style considered.

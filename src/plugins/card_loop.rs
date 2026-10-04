@@ -653,6 +653,13 @@ impl OctoBuddyView {
 
     /// The sidebar's Live button: marked when a watched app is not well.
     pub(crate) fn sync_live_button(&mut self, cx: &mut Cx) {
+        // Its page is the OctoSense-only plugins': none on the host.
+        if !super::here(super::CARD_LOOP) && !super::here(super::APP_FACTORY) {
+            for id in [ids!(live_button), ids!(live_button_alert), ids!(live_button_request)] {
+                self.view.view(cx, id).set_visible(cx, false);
+            }
+            return;
+        }
         self.card_loop_load();
         let alarm = self.card_loop.alarm();
         // A request waiting for the person marks it too (in the accent), less than an app not well.

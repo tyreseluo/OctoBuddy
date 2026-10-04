@@ -19,17 +19,25 @@ fn choices() -> Vec<Choice> {
 impl OctoBuddyView {
     pub(crate) fn sync_appearance(&mut self, cx: &mut Cx) {
         self.view.label(cx, ids!(appearance_title)).set_text(cx, i18n::t("Appearance", "外观"));
-        self.view.label(cx, ids!(appearance_hint)).set_text(cx, i18n::t(
+        let hosted = crate::system::hosted();
+        self.view.label(cx, ids!(appearance_hint)).set_text(cx, if hosted { i18n::t(
             "Follow OctoSense: OctoBuddy is light or dark as OctoSense is. Or pick a theme of its own.",
-            "跟随 OctoSense：OctoSense 是浅色或深色，OctoBuddy 就跟着是浅色或深色。也可以选一套 OctoBuddy 自己的主题。"));
+            "跟随 OctoSense：OctoSense 是浅色或深色，OctoBuddy 就跟着是浅色或深色。也可以选一套 OctoBuddy 自己的主题。") } else { i18n::t(
+            "Follow the system: OctoBuddy is light or dark as macOS is. Or pick a theme of its own.",
+            "跟随系统：macOS 是浅色或深色，OctoBuddy 就跟着是浅色或深色。也可以选一套 OctoBuddy 自己的主题。") });
         let now = theme::choice();
         let in_use = theme::current();
         for (id, choice) in ROWS.iter().zip(choices()) {
             let row = self.view.view(cx, &[*id]);
             let (name, sub, palette) = match choice {
-                Choice::Follow => (
+                Choice::Follow if hosted => (
                     i18n::t("Follow OctoSense", "跟随 OctoSense").to_string(),
                     i18n::t("Light or dark, as OctoSense is", "浅色或深色，跟着 OctoSense").to_string(),
+                    if now == Choice::Follow { in_use } else { theme::palette_for(Choice::Follow, false) },
+                ),
+                Choice::Follow => (
+                    i18n::t("Follow the system", "跟随系统").to_string(),
+                    i18n::t("Light or dark, as macOS is", "浅色或深色，跟着 macOS").to_string(),
                     if now == Choice::Follow { in_use } else { theme::palette_for(Choice::Follow, false) },
                 ),
                 Choice::Theme(b) => (b.name.to_string(), if b.dark { i18n::t("Dark", "深色") } else { i18n::t("Light", "浅色") }.to_string(), Palette::of(b)),

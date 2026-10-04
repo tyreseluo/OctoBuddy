@@ -207,9 +207,6 @@ pub struct Providers {
     pub profile_path: PathBuf,
     pub rows: Vec<ProviderRow>,
     pub error: Option<String>,
-    /// On the host: the providers OctoSense's AI providers has here that
-    /// OctoBuddy's own does not (what importing would add; labels).
-    pub octosense: Vec<String>,
 }
 
 impl Providers {
@@ -226,15 +223,12 @@ fn core_dir() -> Option<PathBuf> {
     if crate::system::hosted() {
         return octosense_app_peers::octos_core::core_dir().or_else(profile::default_core_dir);
     }
-    // On the host: a profile the person names, else the one chosen in
-    // Settings › AI Providers (its own, or OctoSense's).
+    // On the host: a profile the person names, else OctoBuddy's own
+    // (Settings › AI Providers).
     if let Some(named) = std::env::var_os("OCTOBUDDY_PROVIDERS").map(PathBuf::from) {
         return Some(named);
     }
-    match crate::own_providers::source() {
-        crate::own_providers::Source::Own => Some(crate::own_providers::dir()),
-        crate::own_providers::Source::OctoSense => crate::own_providers::octosense_dir(),
-    }
+    Some(crate::own_providers::dir())
 }
 
 /// Reads what AI providers has enabled. Never returns a key.
@@ -257,13 +251,9 @@ pub fn read() -> Providers {
                 key: key(&p.key_env),
                 agents: crate::own_providers::agents_for(p),
             }).collect();
-            let octosense = if crate::system::hosted() { Vec::new() } else {
-                let own: Vec<String> = crate::own_providers::set().iter().map(octosense_llm_config::Provider::label).collect();
-                crate::own_providers::octosense_has().into_iter().filter(|l| !own.contains(l)).collect()
-            };
-            Providers { profile_path: path, rows, error: None, octosense }
+            Providers { profile_path: path, rows, error: None }
         }
-        Err(err) => Providers { profile_path: path, rows: Vec::new(), error: Some(err.to_string()), ..Default::default() },
+        Err(err) => Providers { profile_path: path, rows: Vec::new(), error: Some(err.to_string()) },
     }
 }
 

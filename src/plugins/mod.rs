@@ -62,6 +62,18 @@ pub const APP_DATA: &str = "app-data";
 pub const CARD_LOOP: &str = "card-loop";
 /// Apps asked for from outside (`octobuddy.request`), built once the person says.
 pub const APP_FACTORY: &str = "app-factory";
+
+/// The plugins that only mean something inside OctoSense: the app factory
+/// (apps asked for by OctoSense's assistant) and the production loop (the
+/// apps installed there, and what its agents report). On the host they are
+/// neither listed nor on.
+pub const OCTOSENSE_ONLY: [&str; 2] = [APP_FACTORY, CARD_LOOP];
+
+/// Whether plugin `id` exists in this OctoBuddy: inside OctoSense every
+/// built-in one; on the host all but `OCTOSENSE_ONLY`.
+pub fn here(id: &str) -> bool {
+    crate::system::hosted() || !OCTOSENSE_ONLY.contains(&id)
+}
 /// An agent's own terminal UI in place of OctoBuddy's messages (off until
 /// the person turns it on: some prefer the CLI they know).
 pub const NATIVE_TUI: &str = "native-tui";
@@ -177,7 +189,7 @@ pub fn builtins() -> Vec<Plugin> {
             buttons: vec![Button { id: "loop".into(), name: tr("Live", "巡检"), sub: tr("watch", "守护") }],
             external: None, broken: None,
         },
-    ]
+    ].into_iter().filter(|p| here(&p.id)).collect()
 }
 
 /// Where external plugins are installed.
@@ -266,6 +278,9 @@ pub fn off_by_default(id: &str) -> bool {
 }
 
 pub fn enabled(id: &str) -> bool {
+    if !here(id) {
+        return false;
+    }
     if DISABLED.read().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|d| d.contains(id)) {
         return false;
     }

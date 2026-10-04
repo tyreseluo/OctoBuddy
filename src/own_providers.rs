@@ -14,22 +14,14 @@
 //! owner reads. The agents still get placeholders: OctoBuddy's proxy adds
 //! the key upstream (`claude_proxy.rs`).
 //!
-//! Where a host OctoBuddy reads providers from is the person's choice
-//! (`<data>/providers/source`): its own, or OctoSense's AI providers
-//! (read-only). Importing copies OctoSense's into its own, keys included.
+//! A host OctoBuddy reads only these: OctoSense's AI providers belong to
+//! OctoSense, and OctoBuddy reads them only inside it.
 use octosense_llm_config::{catalog, profile, Provider, ProviderSet};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The suffix of OctoBuddy's own keychain accounts.
 pub const ACCOUNT_SUFFIX: &str = "::octobuddy";
-
-/// Where a host OctoBuddy reads its providers from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Source {
-    Own,
-    OctoSense,
-}
 
 /// Its own core dir: what octos would call one (`profiles/_main.json`).
 pub fn dir() -> PathBuf {
@@ -38,40 +30,6 @@ pub fn dir() -> PathBuf {
 
 pub fn profile_path() -> PathBuf {
     profile::profile_path(&dir())
-}
-
-/// OctoSense's: where its AI providers app writes. In OctoSense, its
-/// kernel's; on the host, under OctoSense's home (`OCTOSENSE_HOME`, else
-/// `~/.octosense`, as the shell resolves it): `<home>/octos-home/.octos`.
-/// (On the host the kernel library is not configured, and names a default
-/// of its own that is not OctoSense's.)
-pub fn octosense_dir() -> Option<PathBuf> {
-    if crate::system::hosted() {
-        return octosense_app_peers::octos_core::core_dir();
-    }
-    if let Some(dir) = std::env::var_os("OCTOS_APP_CORE_DIR").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(dir));
-    }
-    let home = std::env::var_os("OCTOSENSE_HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".octosense")))?;
-    Some(home.join("octos-home/.octos"))
-}
-
-pub fn source() -> Source {
-    match std::fs::read_to_string(dir().join("source")).ok().as_deref().map(str::trim) {
-        Some("octosense") => Source::OctoSense,
-        Some("own") => Source::Own,
-        // Not chosen yet: its own once it has any; else OctoSense's, if there are some.
-        _ => {
-            let theirs = octosense_dir().is_some_and(|d| profile::profile_path(&d).is_file());
-            if profile_path().is_file() || !theirs { Source::Own } else { Source::OctoSense }
-        }
-    }
-}
-
-pub fn set_source(source: Source) {
-    let _ = std::fs::create_dir_all(dir());
-    let _ = std::fs::write(dir().join("source"), if source == Source::Own { "own" } else { "octosense" });
 }
 
 /// The providers it keeps (primary first).
@@ -177,42 +135,6 @@ pub fn make_primary(label: &str) -> Result<(), String> {
     save(&s, &BTreeMap::new())
 }
 
-/// OctoSense's AI providers added to its own: the ones it does not have,
-/// after its own (the primary when it has none), with their keys (into its
-/// own keychain accounts) where it has no key of that name yet. How many.
-/// Blocks (the keychain): off the UI thread.
-pub fn import_octosense() -> Result<usize, String> {
-    let theirs = octosense_dir().map(|d| profile::profile_path(&d)).ok_or("no OctoSense home here")?;
-    let loaded = profile::load(&theirs).map_err(|e| format!("{}: {e}", theirs.display()))?;
-    if loaded.set.is_empty() {
-        return Err(format!("OctoSense's AI providers has none ({})", theirs.display()));
-    }
-    let mine = profile::load(&profile_path()).unwrap_or_default();
-    let mut s = mine.set.clone();
-    let mut env = BTreeMap::new();
-    let mut count = 0;
-    for p in loaded.set.iter() {
-        if s.iter().any(|o| o.label() == p.label()) {
-            continue;
-        }
-        if !mine.env_vars.contains_key(&p.key_env) && !env.contains_key(&p.key_env) {
-            if let Some(key) = loaded.env_vars.get(&p.key_env).and_then(|v| crate::providers::resolve_key(v, &p.key_env)) {
-                env.insert(p.key_env.clone(), store_key(&p.key_env, &key)?);
-            }
-        }
-        if s.primary.is_none() {
-            s.primary = Some(p.clone());
-        } else {
-            s.fallbacks.push(p.clone());
-        }
-        count += 1;
-    }
-    if count > 0 {
-        save(&s, &env)?;
-    }
-    Ok(count)
-}
-
 /// Whether it keeps a key named `key_env` (a new one need not be entered).
 pub fn has_key(key_env: &str) -> bool {
     profile::load(&profile_path()).is_ok_and(|l| l.env_vars.get(key_env).is_some_and(|v| !v.is_empty()))
@@ -278,13 +200,6 @@ pub fn agents_for(p: &Provider) -> Vec<&'static str> {
     }
     out.push("octos");
     out
-}
-
-/// Whether OctoSense's AI providers has any here, and which (labels).
-pub fn octosense_has() -> Vec<String> {
-    octosense_dir().map(|d| profile::profile_path(&d))
-        .and_then(|p| profile::load(&p).ok())
-        .map(|l| l.set.iter().map(Provider::label).collect()).unwrap_or_default()
 }
 
 /// A provider as the form makes it: a family, one of its models, one of
