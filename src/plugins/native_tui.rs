@@ -14,6 +14,22 @@ use crate::{i18n, plugins, providers, rpc_lead, OctoBuddyView, Stage};
 use makepad_terminal::widget::{MpTerm, MpTermAction};
 use makepad_widgets::*;
 
+/// On the host, before any terminal is made: Makepad's state is OctoBuddy's
+/// own (`<data>/.makepad`, not the `~/.makepad` every Makepad app shares), and
+/// its terminal settings name no fonts. With a font named, or CJK fonts
+/// picked automatically (the default), the terminal swaps `AgentTerm`'s
+/// family for one of its own, by paths a packaged OctoBuddy cannot read: it
+/// drew in a proportional font, widely spaced, without emoji.
+pub fn own_terminal_settings() {
+    use makepad_terminal::settings as term;
+    makepad_widgets::makepad_platform::home::set_platform_data_dir(&crate::model::data_dir());
+    let s = term::current();
+    if s.cjk_font != term::CJK_NONE || !s.font_family.is_empty() {
+        // Applies to this process even when it cannot be saved.
+        let _ = term::update(term::Settings { cjk_font: term::CJK_NONE.into(), font_family: String::new(), ..s });
+    }
+}
+
 /// A word for a POSIX shell, single-quoted.
 pub fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))

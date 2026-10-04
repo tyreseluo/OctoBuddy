@@ -46,6 +46,7 @@ pub struct App {
 #[cfg(feature = "standalone")]
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
+        octosense_octobuddy::own_terminal_settings();
         makepad_widgets::script_mod(vm);
         makepad_terminal::widget::script_mod(vm);
         octosense_octobuddy::script_mod(vm);

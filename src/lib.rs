@@ -19,6 +19,7 @@ pub mod agents;
 mod module;
 #[cfg(feature = "octosense-module")]
 pub use module::{OctoBuddyModule, OCTOBUDDY_MODULE};
+pub use plugins::native_tui::own_terminal_settings;
 mod chat;
 mod context;
 pub mod flow;
@@ -576,7 +577,8 @@ script_mod! {
     // out of the terminal's crate (`self:../../widgets/…`): a packaged
     // OctoBuddy finds a resource only by its crate's name, so the terminal's
     // own fonts drew nothing there (a blank terminal). The same members, in
-    // the same order.
+    // the same order. Bold text has its own family. (The terminal keeps them
+    // only while its settings name no fonts: `native_tui::own_terminal_settings`.)
     let AgentTerm = MpTerm{
         draw_bg +: {corner_radius: 6.0 frame_width: 1.0 frame_color: th_line}
         draw_text +: {
@@ -589,6 +591,16 @@ script_mod! {
                     symbols := FontMember{res: crate_resource("makepad_widgets:resources/Inter.ttf") asc: 0.0 desc: 0.0}
                     chinese := FontMember{res: crate_resource("makepad_widgets:resources/LXGWWenKaiRegular.ttf") asc: 0.0 desc: 0.0}
                 }
+            }
+        }
+        bold_text_style +: {
+            font_family +: {
+                latin := FontMember{res: crate_resource("makepad_widgets:resources/jetbrains_mono_variable.ttf") asc: 0.0 desc: 0.0 weight: 800.0}
+                nerd := FontMember{res: crate_resource("makepad_terminal:resources/SymbolsNerdFontMono-Regular.ttf") asc: 0.0 desc: 0.0}
+                icons := FontMember{res: crate_resource("makepad_widgets:resources/fa-solid-900.ttf") asc: 0.0 desc: 0.0}
+                emoji := FontMember{res: crate_resource("makepad_widgets:resources/NotoColorEmoji.ttf") asc: 0.0 desc: 0.0}
+                symbols := FontMember{res: crate_resource("makepad_widgets:resources/Inter.ttf") asc: 0.0 desc: 0.0}
+                chinese := FontMember{res: crate_resource("makepad_widgets:resources/LXGWWenKaiBold.ttf") asc: 0.0 desc: 0.0}
             }
         }
     }
