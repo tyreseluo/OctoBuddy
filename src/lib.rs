@@ -2366,6 +2366,13 @@ pub struct OctoBuddyView {
     /// Which mark each provider icon shows (`provider_icons::show`).
     #[rust]
     icons_shown: HashMap<WidgetUid, usize>,
+    /// The conversation each chat list shows (`draw_chat`).
+    #[rust]
+    chat_shown: HashMap<WidgetUid, String>,
+    /// Where the person left each conversation: its first item shown, that
+    /// item's offset, and whether it was at the end (`draw_chat`).
+    #[rust]
+    chat_places: HashMap<String, (usize, f64, bool)>,
     /// The app workbench beside the conversation (`plugins/workbench.rs`).
     #[rust]
     wb: Workbench,
@@ -4897,6 +4904,28 @@ impl OctoBuddyView {
     /// Draws `rows` into a ChatList; `key` names the conversation for the
     /// cards the person opened.
     fn draw_chat(&mut self, cx: &mut Cx2d, list: &mut PortalList, rows: &[chat::Row], key: &str) {
+        // Another conversation in this list, as Robrix switches rooms: the
+        // one left keeps where the person was, and this one goes back to
+        // where they left it, or to its end. (Left alone, the list kept the
+        // last one's place, which can lie past this one's end when they had
+        // scrolled up there: it drew nothing, a blank stage, until a message
+        // sent scrolled it.)
+        let uid = list.widget_uid();
+        if self.chat_shown.get(&uid).map(String::as_str) != Some(key) {
+            if let Some(left) = self.chat_shown.insert(uid, key.to_string()) {
+                self.chat_places.insert(left, (list.first_id(), list.first_scroll(), list.is_at_end()));
+            }
+            match self.chat_places.get(key).copied().filter(|(first, _, at_end)| !at_end && *first < rows.len()) {
+                Some((first, scroll, _)) => {
+                    list.set_tail_range(false);
+                    list.set_first_id_and_scroll(first, scroll);
+                }
+                None => {
+                    list.set_tail_range(true);
+                    list.set_first_id_and_scroll(rows.len().saturating_sub(1), 0.0);
+                }
+            }
+        }
         list.set_item_range(cx, 0, rows.len());
         // Room for a user bubble: the list's width last frame, less its padding.
         let width = list.area().rect(cx).size.x;
