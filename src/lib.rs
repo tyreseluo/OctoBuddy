@@ -2350,8 +2350,8 @@ script_mod! {
                     na_tpl_note := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
                     View{
                         width: Fill height: Fit flow: Flow.Right{wrap: true} spacing: 10 margin: Inset{top: 2 bottom: 6}
-                        nt0 := TemplateCard{} nt1 := TemplateCard{} nt2 := TemplateCard{}
-                        nt3 := TemplateCard{} nt4 := TemplateCard{} nt5 := TemplateCard{}
+                        nt0 := TemplateCard{} nt1 := TemplateCard{} nt2 := TemplateCard{} nt3 := TemplateCard{}
+                        nt4 := TemplateCard{} nt5 := TemplateCard{} nt6 := TemplateCard{} nt7 := TemplateCard{}
                     }
                     View{
                         width: Fill height: Fit flow: Right spacing: 12

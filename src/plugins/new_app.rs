@@ -5,8 +5,8 @@
 //! (github.com/tyreseluo/octosense-app-templates), so they can be fixed
 //! without a new OctoBuddy: a copy is kept in `<data>/templates/` and brought
 //! up to date each time the dialog opens (`OCTOBUDDY_TEMPLATES_REPO` names
-//! another). Without one (offline, never fetched) the design flow's own
-//! template is offered.
+//! another). A blank app is OctoBuddy's own (`blank`), first in the dialog,
+//! offline too.
 use crate::events::{self, LoopEvent};
 use crate::plugins::octosense_app;
 use crate::plugins::workbench::{save_permissions, CAPS};
@@ -19,8 +19,9 @@ use std::sync::Mutex;
 
 pub const TEMPLATES_REPO: &str = "https://github.com/tyreseluo/octosense-app-templates.git";
 
-/// The dialog's template cards, and its capability boxes (in `CAPS`' order).
-const CARDS: [LiveId; 6] = [live_id!(nt0), live_id!(nt1), live_id!(nt2), live_id!(nt3), live_id!(nt4), live_id!(nt5)];
+/// The dialog's template cards (the first the blank app's), and its
+/// capability boxes (in `CAPS`' order).
+const CARDS: [LiveId; 8] = [live_id!(nt0), live_id!(nt1), live_id!(nt2), live_id!(nt3), live_id!(nt4), live_id!(nt5), live_id!(nt6), live_id!(nt7)];
 const CAP_BOXES: [LiveId; 9] = [live_id!(nc_storage), live_id!(nc_net), live_id!(nc_images), live_id!(nc_web), live_id!(nc_camera),
     live_id!(nc_microphone), live_id!(nc_library), live_id!(nc_location), live_id!(nc_mail)];
 
@@ -150,6 +151,52 @@ pub fn id_problem(id: &str) -> Option<String> {
     id.starts_with("os.").then(|| i18n::t("Ids under “os.” are the system's own apps.", "「os.」开头的 ID 留给系统应用。").into())
 }
 
+/// A blank app: a page and the skeleton the templates share (its parts,
+/// its manifest asking for nothing, a listing to fill in, an icon, the
+/// design flow's AGENTS.md), and nothing else.
+const BLANK: &[(&str, &str)] = &[
+    ("app/parts/00-state.splash", "// 整个应用共用的东西：标题、状态和样式。\n// OctoBuddy 新建应用时会把下面这行换成你起的名字。\nlet app_title = \"我的应用\"\n\nlet ink = #x1c1c1e\nlet secondary = #x8e8e93\n"),
+    ("app/parts/10-home.splash", "// 首页：它的模板和函数（id 以 home_ 开头）。\nlet HomePage = View{width: Fill height: Fill flow: Down spacing: 8 align: Align{x: 0.5 y: 0.45}\n    Label{text: \"这里还什么都没有\" draw_text.color: secondary draw_text.text_style.font_size: 15}\n}\n"),
+    ("app/parts/90-root.splash", "// 启动和根视图：每个页面都在这里放进来。\nfn boot(){\n    // 打开时要做的事放在这里（ui 在这之后才能用）。\n}\nstart_timeout(0.05, || boot())\n\nSolidView{width: Fill height: Fill flow: Down padding: 20 spacing: 12 draw_bg.color: #xffffff\n    Label{text: app_title draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 28}}\n    home := HomePage{}\n}\n"),
+    ("bundle/manifest.json", "{\n  \"schema\": 1,\n  \"id\": \"my-app\",\n  \"name\": \"My App\",\n  \"version\": \"0.1.0\",\n  \"integrity\": {\"bundle_blake3\": \"\"},\n  \"capabilities\": []\n}\n"),
+    ("bundle/listing.json", "{\n  \"schema\": 1,\n  \"subtitle\": \"Replace with your app's short description\",\n  \"description\": \"Replace with what your app does and who it helps.\",\n  \"category\": \"utilities\",\n  \"keywords\": [],\n  \"screenshots\": [\"screenshots/01-main.png\"],\n  \"icon\": \"assets/icon.svg\",\n  \"platforms\": [\"android\"],\n  \"publisher\": {\n    \"name\": \"Replace with your publisher name\",\n    \"support\": \"https://example.com/support\",\n    \"privacy_policy_url\": \"https://example.com/privacy\"\n  },\n  \"release_notes\": \"Replace with the changes in this version.\",\n  \"age_rating\": \"all\",\n  \"license\": \"Apache-2.0\"\n}\n"),
+    ("bundle/assets/icon.svg", BLANK_ICON),
+    ("CLAUDE.md", include_str!("../../resources/design-flow/templates/script-app/CLAUDE.md")),
+    ("GEMINI.md", include_str!("../../resources/design-flow/templates/script-app/GEMINI.md")),
+    (".gitignore", include_str!("../../resources/design-flow/templates/script-app/.gitignore")),
+];
+const BLANK_ICON: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#636366"/>
+  <path d="M32 21V43M21 32H43" stroke="#ffffff" stroke-width="5" stroke-linecap="round"/>
+</svg>
+"##;
+const PARTS_NOTE: &str = "
+## This app is built from parts
+
+`bundle/main.splash` is generated: it is `app/parts/*.splash` put together in
+name order. Edit the parts, never `bundle/main.splash`; OctoBuddy puts them
+together. Each part owns one page or one concern and its ids start with that
+page's name, so separate pages can be worked on at once.
+";
+
+fn write_blank(dest: &Path, name: &str) -> Result<(), String> {
+    let write = |rel: &str, text: &str| -> Result<(), String> {
+        let path = dest.join(rel);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&path, text).map_err(|e| format!("{rel}: {e}"))
+    };
+    for (rel, text) in BLANK {
+        write(rel, text)?;
+    }
+    let agents = include_str!("../../resources/design-flow/templates/script-app/AGENTS.md");
+    write("AGENTS.md", &format!("{}\n{PARTS_NOTE}", agents.trim_end()))?;
+    write("README.md", &format!("# {}\n\n{}\n", name.trim(), i18n::t(
+        "An OctoSense script app. Edit `app/parts/*.splash`; how to run, check and publish it: `AGENTS.md`.",
+        "一个 OctoSense 脚本应用。改 `app/parts/*.splash`；怎么运行、检查和发布，见 `AGENTS.md`。")))
+}
+
 /// What the dialog makes.
 pub struct Request<'a> {
     pub template: Option<&'a Template>,
@@ -207,7 +254,7 @@ pub fn create(r: &Request) -> Result<(), String> {
     }
     match r.template {
         Some(t) => copy_dir(&t.dir, r.dest).map_err(|e| e.to_string())?,
-        None => octosense_app::create(r.dest)?,
+        None => write_blank(r.dest, r.name)?,
     }
     let dest = r.dest.to_string_lossy().into_owned();
     retitle(r.dest, r.name);
@@ -238,14 +285,15 @@ pub fn create(r: &Request) -> Result<(), String> {
     if !r.dest.join(".git").exists() {
         git(&["init", "-q"], r.dest)?;
     }
+    // OctoBuddy's own files in it (`.octobuddy/`: the parts' line map…) stay out of git.
+    crate::workspace::exclude_agent_files(&dest);
     git(&["add", "-A"], r.dest)?;
     let message = match r.template {
         Some(t) => format!("chore: 从模板「{}」创建应用", t.name.1),
-        None => "chore: 应用名称和权限".to_string(),
+        None => "chore: 新建空白应用".to_string(),
     };
-    // Nothing to commit (the design flow's template already was): fine.
-    let _ = git(&["commit", "-q", "-m", &message], r.dest);
-    Ok(())
+    git(&["commit", "-q", "-m", &message], r.dest)
+        .map_err(|e| i18n::pick(format!("the first commit failed: {e}"), format!("第一次提交失败：{e}")))
 }
 
 /// The dialog's state.
@@ -253,7 +301,7 @@ pub fn create(r: &Request) -> Result<(), String> {
 pub struct NewApp {
     pub open: bool,
     pub templates: Vec<Template>,
-    /// The template picked (an index into `templates`); none: the built-in one.
+    /// The template picked (an index into `templates`); none: the blank app.
     pub picked: Option<usize>,
     pub syncing: bool,
     pub sync_error: Option<String>,
@@ -277,7 +325,6 @@ impl OctoBuddyView {
     pub(crate) fn open_new_app(&mut self, cx: &mut Cx) {
         let parent = self.store.new_app_dir.as_ref().map(PathBuf::from).filter(|p| p.is_dir()).unwrap_or_else(default_parent);
         self.new_app = NewApp { open: true, templates: list(), parent, syncing: true, ..Default::default() };
-        self.new_app.picked = (!self.new_app.templates.is_empty()).then_some(0);
         self.new_app_defaults(cx);
         let inbox = self.rt.inbox.clone();
         std::thread::spawn(move || events::post(&inbox, LoopEvent::TemplatesSynced(sync())));
@@ -294,8 +341,7 @@ impl OctoBuddyView {
         }
         let picked_id = app.picked.and_then(|i| app.templates.get(i)).map(|t| t.id.clone());
         app.templates = list();
-        app.picked = picked_id.and_then(|id| app.templates.iter().position(|t| t.id == id))
-            .or((!app.templates.is_empty()).then_some(0));
+        app.picked = picked_id.and_then(|id| app.templates.iter().position(|t| t.id == id));
         self.new_app_reset = true;
     }
 
@@ -307,7 +353,8 @@ impl OctoBuddyView {
         let id = t.as_ref().map(|t| t.app_id.clone()).unwrap_or_else(|| "my-app".into());
         self.view.text_input(cx, ids!(na_id)).set_text(cx, &id);
         self.new_app.id_typed = false;
-        let caps: Vec<String> = t.as_ref().map(|t| t.capabilities.clone()).unwrap_or_else(|| vec!["storage".into()]);
+        // The blank app asks for nothing until a screen needs it.
+        let caps: Vec<String> = t.as_ref().map(|t| t.capabilities.clone()).unwrap_or_default();
         for ((cap, ..), slot) in CAPS.iter().zip(CAP_BOXES) {
             self.view.check_box(cx, &[slot]).set_active(cx, caps.iter().any(|c| c == cap), Animate::No);
         }
@@ -336,24 +383,25 @@ impl OctoBuddyView {
         let where_from = TEMPLATES_REPO.trim_start_matches("https://").trim_end_matches(".git");
         let note = match (&self.new_app, self.new_app.templates.is_empty()) {
             (a, true) if a.syncing => t("Fetching the templates…", "正在获取模板…").to_string(),
-            (a, true) => i18n::pick(format!("Could not fetch the templates ({}): the built-in one is offered.", a.sync_error.as_deref().unwrap_or("?")),
-                format!("没拿到模板（{}）：先用内置的。", a.sync_error.as_deref().unwrap_or("?"))),
+            (a, true) => i18n::pick(format!("Could not fetch the templates ({}): a blank app can be made now.", a.sync_error.as_deref().unwrap_or("?")),
+                format!("没拿到模板（{}）：可以先建空白应用。", a.sync_error.as_deref().unwrap_or("?"))),
             (a, false) if a.syncing => i18n::pick(format!("From {where_from} · checking for newer ones…"), format!("来自 {where_from} · 正在检查更新…")),
             (a, false) if a.sync_error.is_some() => i18n::pick(format!("From {where_from} · offline: the copy fetched before."), format!("来自 {where_from} · 离线：用上次获取的。")),
             _ => i18n::pick(format!("From {where_from} · up to date."), format!("来自 {where_from} · 已是最新。")),
         };
         self.view.label(cx, ids!(na_tpl_note)).set_text(cx, &note);
         let (accent, line, soft, raised) = (crate::theme::hex("accent"), crate::theme::hex("line"), crate::theme::hex("accent_soft"), crate::theme::hex("raised"));
-        let builtin = self.new_app.templates.is_empty();
+        // The first card is the blank app; the templates follow.
         for (i, slot) in CARDS.iter().enumerate() {
             let card = self.view.view(cx, &[*slot]);
-            let shown = if builtin { i == 0 } else { i < self.new_app.templates.len() };
+            let template = i.checked_sub(1);
+            let shown = template.is_none_or(|j| j < self.new_app.templates.len());
             card.set_visible(cx, shown);
             if !shown {
                 continue;
             }
-            let chosen = if builtin { true } else { self.new_app.picked == Some(i) };
-            match self.new_app.templates.get(i) {
+            let chosen = self.new_app.picked == template;
+            match template.and_then(|j| self.new_app.templates.get(j)) {
                 Some(tpl) => {
                     card.label(cx, ids!(card.name)).set_text(cx, tpl.name());
                     card.label(cx, ids!(card.summary)).set_text(cx, tpl.summary());
@@ -362,10 +410,11 @@ impl OctoBuddyView {
                     crate::provider_icons::show(&card.widget(cx, ids!(card.icon)), svg, &mut self.icons_shown);
                 }
                 None => {
-                    card.label(cx, ids!(card.name)).set_text(cx, t("Built-in template", "内置模板"));
-                    card.label(cx, ids!(card.summary)).set_text(cx, t("The design flow's own: a page to start from, built from parts.", "Design Flow 自带的：一个起始页面，按 parts 组织。"));
-                    card.label(cx, ids!(card.features)).set_text(cx, t("Works offline", "离线可用"));
-                    crate::provider_icons::show(&card.widget(cx, ids!(card.icon)), include_str!("../../resources/octos.svg"), &mut self.icons_shown);
+                    card.label(cx, ids!(card.name)).set_text(cx, t("Blank app", "空白应用"));
+                    card.label(cx, ids!(card.summary)).set_text(cx, t("An empty page and the skeleton every app shares (parts, manifest, listing, icon). It asks for no permission: start from nothing.",
+                        "一个空页面，加上每个应用都有的骨架（parts、manifest、listing、图标）。不申请任何权限，从零开始。"));
+                    card.label(cx, ids!(card.features)).set_text(cx, t("No permissions · Works offline", "不申请权限 · 离线可用"));
+                    crate::provider_icons::show(&card.widget(cx, ids!(card.icon)), BLANK_ICON, &mut self.icons_shown);
                 }
             }
             let (bg, border, size) = if chosen { (soft, accent, 2.0) } else { (raised, line, 1.0) };
@@ -406,8 +455,9 @@ impl OctoBuddyView {
             return;
         }
         for (i, slot) in CARDS.iter().enumerate() {
-            if crate::tapped(&self.view.view(cx, &[*slot, live_id!(card)]), actions) && i < self.new_app.templates.len() && self.new_app.picked != Some(i) {
-                self.new_app.picked = Some(i);
+            let template = i.checked_sub(1).filter(|j| *j < self.new_app.templates.len());
+            if crate::tapped(&self.view.view(cx, &[*slot, live_id!(card)]), actions) && (i == 0 || template.is_some()) && self.new_app.picked != template {
+                self.new_app.picked = template;
                 self.new_app_defaults(cx);
                 self.relayout(cx);
             }
@@ -494,6 +544,24 @@ mod tests {
         assert!(id_problem("Big").is_some());
         assert!(id_problem("os.camera").is_some());
         assert!(id_problem("").is_some());
+    }
+
+    #[test]
+    fn a_blank_app_is_made_offline_and_asks_for_nothing() {
+        let dest = std::env::temp_dir().join(format!("octobuddy-blank-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        create(&Request { template: None, name: "空的", id: "blank-test", dest: &dest, caps: vec![], hosts: "" }).unwrap();
+        let m: Value = serde_json::from_str(&std::fs::read_to_string(dest.join("bundle/manifest.json")).unwrap()).unwrap();
+        assert_eq!((m["id"].as_str(), m["name"].as_str()), (Some("blank-test"), Some("空的")));
+        assert_eq!(m["capabilities"], serde_json::json!([]));
+        assert_eq!(m["integrity"]["bundle_blake3"].as_str().unwrap().len(), 64);
+        let main = std::fs::read_to_string(dest.join("bundle/main.splash")).unwrap();
+        assert!(main.contains("let app_title = \"空的\"") && main.contains("home := HomePage{}"), "{main}");
+        assert!(std::fs::read_to_string(dest.join("AGENTS.md")).unwrap().contains("built from parts"));
+        assert!(dest.join(".git").is_dir() && dest.join("bundle/assets/icon.svg").is_file());
+        let tracked = Command::new("git").args(["ls-files"]).current_dir(&dest).output().unwrap();
+        assert!(!String::from_utf8_lossy(&tracked.stdout).contains(".octobuddy"), "OctoBuddy's own files are not committed");
+        let _ = std::fs::remove_dir_all(&dest);
     }
 
     /// Makes an app from the templates kept in `OCTOBUDDY_HOME` (fetch them

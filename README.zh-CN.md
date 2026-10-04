@@ -79,8 +79,9 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 一个应用项目（带 `bundle/manifest.json` 的文件夹）的全部功能，都在 **OctoSense 应用**这一个插件里。
 
-- **新建应用。**侧栏的 **+ › 新建 OctoSense 应用…** 打开对话框：选模板，起名字（应用 ID 跟着名字生成，手动改过就不再跟），选保存位置，勾选权限（能力和可访问的域名，按模板预先填好）。点**创建**后，OctoBuddy 复制模板，把名称、ID 和权限写进 manifest，拼好 parts，盖 digest，做第一次提交，并在工作台的预览里打开。
-  - **模板**单独放在一个仓库：[tyreseluo/octosense-app-templates](https://github.com/tyreseluo/octosense-app-templates)，模板有问题时单独改那个仓库，不用发新版 OctoBuddy。每个模板演示 OctoSense 给应用的一组能力：**沙箱起步**（沙箱给了什么、拒绝什么，自己的存储，主屏卡片）、**资讯阅读**（域名白名单、网络图片、系统网页视图）、**天气**（单一域名、设备定位、离线缓存）、**相机日记**（相机、麦克风、相册）。每个模板都在 App Hub 的 `card-host` 里跑过，并通过了 `hub check`。OctoBuddy 在 `<data>/templates/` 留一份副本，每次打开对话框时拉取最新的；离线而且从没拉取过时，提供 Design Flow 自带的模板。`OCTOBUDDY_TEMPLATES_REPO` 可以换成别的仓库。
+- **新建应用。**侧栏的 **+ › 新建 OctoSense 应用…** 打开对话框：选模板（或空白应用），起名字（应用 ID 跟着名字生成，手动改过就不再跟），选保存位置，勾选权限（能力和可访问的域名，按模板预先填好）。点**创建**后，OctoBuddy 复制模板，把名称、ID 和权限写进 manifest，拼好 parts，盖 digest，做第一次提交，并在工作台的预览里打开。
+  - **模板**单独放在一个仓库：[tyreseluo/octosense-app-templates](https://github.com/tyreseluo/octosense-app-templates)，模板有问题时单独改那个仓库，不用发新版 OctoBuddy。每个模板演示 OctoSense 给应用的一组能力：**沙箱起步**（沙箱给了什么、拒绝什么，自己的存储，主屏卡片）、**资讯阅读**（域名白名单、网络图片、系统网页视图）、**天气**（单一域名、设备定位、离线缓存）、**相机日记**（相机、麦克风、相册）。每个模板都在 App Hub 的 `card-host` 里跑过，并通过了 `hub check`。OctoBuddy 在 `<data>/templates/` 留一份副本，每次打开对话框时拉取最新的。`OCTOBUDDY_TEMPLATES_REPO` 可以换成别的仓库。
+  - **空白应用**排在第一个：一个空页面，加上每个应用都有的骨架（parts、不申请任何权限的 manifest、待填写的 listing、图标、AGENTS.md）。它是 OctoBuddy 内置的，离线也能建。
 - **应用工作台。**点**应用 · 工作台**按钮，在对话旁边打开，有四个标签：
   - **预览**：从项目文件运行应用，文件一改就重新加载；脚本出错可以一键交给外环修。
   - **文件**：项目文件夹的目录树（`bundle/` 和 `app/parts/` 默认展开），选中文件后显示带行号的源码；**在访达中显示**可以定位到它。
