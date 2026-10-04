@@ -262,17 +262,18 @@ pub fn group_of(family: &catalog::CatalogFamily) -> Group {
 }
 
 /// The agents that can run on `p`, by its endpoint's protocol: Claude Code
-/// and pi on an Anthropic-compatible one; Codex where there is a Chat
+/// and pi on an Anthropic-compatible one (its own, or the one its provider
+/// runs beside it: `providers::anthropic_url`); Codex where there is a Chat
 /// Completions endpoint (OctoBuddy's bridge turns its Responses calls into
 /// those); octos on any.
 pub fn agents_for(p: &Provider) -> Vec<&'static str> {
     let family = octosense_llm_config::registry::lookup(&p.family);
     let base = p.base_url.clone().or_else(|| family.and_then(|f| f.default_base_url).map(String::from)).unwrap_or_default();
     let mut out = Vec::new();
-    if crate::providers::anthropic_compatible(&base) {
+    if crate::providers::anthropic_url(&p.family, &base).is_some() {
         out.extend(["Claude Code", "pi"]);
     }
-    if !base.is_empty() && (crate::providers::chat_url(&p.family, &base).is_some() || !crate::providers::anthropic_compatible(&base)) {
+    if crate::providers::chat_endpoint(&p.family, &base).is_some() {
         out.push("Codex");
     }
     out.push("octos");
@@ -375,8 +376,11 @@ mod tests {
         let on = |family: &str| agents_for(&Provider::new(family, None));
         // An Anthropic-compatible coding endpoint: every agent.
         assert_eq!(on("zai-coding"), ["Claude Code", "pi", "Codex", "octos"]);
+        // An OpenAI-style API with an Anthropic one beside it: every agent.
+        assert_eq!(on("minimax-cn"), ["Claude Code", "pi", "Codex", "octos"]);
+        assert_eq!(on("deepseek"), ["Claude Code", "pi", "Codex", "octos"]);
         // Chat Completions only: Codex (through the bridge) and octos.
-        assert_eq!(on("deepseek"), ["Codex", "octos"]);
+        assert_eq!(on("openai"), ["Codex", "octos"]);
     }
 
     #[test]

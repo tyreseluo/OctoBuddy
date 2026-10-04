@@ -51,6 +51,7 @@ mod claude_proxy;
 mod claude_inner;
 mod card_tabs;
 mod picker;
+mod provider_icons;
 mod appearance;
 pub mod plugins;
 mod tools_info;
@@ -514,6 +515,9 @@ script_mod! {
 
     // What a loop runs, under its input: the agent's mark and name, the model's.
     let ModelIcon = Svg{width: 14 height: 14 animating: false draw_svg +: {svg: crate_resource("self:resources/claude.svg")}}
+    // A provider's mark beside a model (`provider_icons.rs` sets which; no
+    // resource of its own, or that would replace the one set).
+    let ProviderIcon = Svg{width: 14 height: 14 animating: false}
     let ModelText = Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style.font_size: 9}
     // The engine picker's rows: an agent (its icon, its name, its current
     // model under it), a model of the agent chosen.
@@ -563,6 +567,7 @@ script_mod! {
         padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
         cursor: MouseCursor.Hand grab_key_focus: false
         draw_bg.color: #x00000000 draw_bg.border_radius: 6.0
+        picon := ProviderIcon{}
         label := Label{width: Fill text: "" padding: 0 max_lines: 1 draw_text.color: ink draw_text.text_style.font_size: 9.5}
         mark := Label{text: "" padding: 0 draw_text.color: th_success draw_text.text_style: theme.font_bold{font_size: 10}}
     }
@@ -825,6 +830,7 @@ script_mod! {
             width: Fill height: Fit new_batch: true flow: Right spacing: 10 align: Align{y: 0.5}
             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
             draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            picon := ProviderIcon{width: 22 height: 22}
             View{
                 width: Fill height: Fit flow: Down spacing: 3
                 name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
@@ -860,6 +866,7 @@ script_mod! {
             padding: Inset{left: 14 right: 14 top: 10 bottom: 10}
             cursor: MouseCursor.Hand grab_key_focus: false
             draw_bg.color: th_raised draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+            picon := ProviderIcon{width: 22 height: 22}
             View{
                 width: Fill height: Fit flow: Down spacing: 3
                 name := Label{width: Fill text: "" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 11}}
@@ -1774,7 +1781,7 @@ script_mod! {
                                 }
                                 View{
                                     width: Fit height: Fit flow: Right spacing: 5 align: Align{y: 0.5}
-                                    inner_model_icon := ModelIcon{draw_svg +: {svg: crate_resource("self:resources/zai.svg")}}
+                                    inner_model_icon := ProviderIcon{}
                                     inner_model := ModelText{}
                                 }
                               }
@@ -2198,6 +2205,9 @@ enum FlowOpen {
 pub struct OctoBuddyView {
     #[deref]
     view: View,
+    /// Which mark each provider icon shows (`provider_icons::show`).
+    #[rust]
+    icons_shown: HashMap<WidgetUid, usize>,
     #[rust]
     store: Store,
     #[rust]
@@ -2913,7 +2923,12 @@ impl OctoBuddyView {
         let model = p.model.clone().unwrap_or_else(|| i18n::t("model not reported yet", "模型尚未上报").into());
         let effort = p.effort.as_deref().map(|e| i18n::pick(format!("{e} effort"), format!("{e} effort"))).unwrap_or_else(|| i18n::t("default effort", "默认 effort").into());
         self.view.label(cx, ids!(inner_model)).set_text(cx, &format!("{model} · {effort}"));
-        self.view.widget(cx, ids!(inner_model_icon)).set_visible(cx, model.to_ascii_lowercase().starts_with("glm"));
+        // The provider's mark: the one it was put on, else the model's maker.
+        let family = p.model_pick.as_deref().and_then(|m| m.split_once('/')).map(|(f, _)| f)
+            .unwrap_or_else(|| provider_icons::family_of_model(&model));
+        let icon = self.view.widget(cx, ids!(inner_model_icon));
+        icon.set_visible(cx, !family.is_empty());
+        provider_icons::show(&icon, provider_icons::svg(family), &mut self.icons_shown);
         self.view.portal_list(cx, ids!(peer_messages)).redraw(cx);
         let waiting: Vec<(String, String, String)> = self.rt.waiting(&p.id).into_iter().map(|(id, who, text)| (id, who.to_string(), text)).collect();
         self.inner_queue_ids = self.sync_queue(cx, live_id!(inner_queue), &waiting);

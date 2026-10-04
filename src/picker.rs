@@ -128,6 +128,8 @@ impl OctoBuddyView {
             if let Some((label, p)) = m {
                 let on = *p == now;
                 row.label(cx, ids!(label)).set_text(cx, label);
+                let family = crate::provider_icons::family_of(&p.engine, p.model.as_deref());
+                crate::provider_icons::show(&row.widget(cx, ids!(picon)), crate::provider_icons::svg(family), &mut self.icons_shown);
                 row.label(cx, ids!(mark)).set_text(cx, if on { "✓" } else { "" });
                 let bg = if on { crate::theme::vec4("accent_soft") } else { crate::theme::vec4("raised") };
                 let mut w = row.clone();

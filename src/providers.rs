@@ -52,6 +52,57 @@ pub(crate) fn anthropic_compatible(url: &str) -> bool {
     url.contains("/anthropic") || url.contains("api.anthropic.com") || url.contains("api.kimi.com/coding")
 }
 
+/// The host of `url` (`https://api.minimaxi.com/v1` → `api.minimaxi.com`).
+fn host_of(url: &str) -> &str {
+    url.split("://").nth(1).unwrap_or(url).split(['/', ':']).next().unwrap_or("")
+}
+
+/// The Anthropic Messages endpoint a provider runs beside its own API
+/// (OpenAI-style for most): each one checked to answer `/v1/messages`
+/// (an authentication error without a key, not a 404). Only for the
+/// provider's own host: a third-party route (autodl, wisemodel…) keeps
+/// its own protocol.
+fn known_anthropic(family: &str, base: &str) -> Option<&'static str> {
+    let host = host_of(base);
+    let url = match family {
+        "minimax-cn" => "https://api.minimaxi.com/anthropic",
+        "minimax" if host == "api.minimaxi.com" => "https://api.minimaxi.com/anthropic",
+        "minimax" => "https://api.minimax.io/anthropic",
+        "deepseek" => "https://api.deepseek.com/anthropic",
+        "moonshot" if host == "api.moonshot.cn" => "https://api.moonshot.cn/anthropic",
+        "moonshot" => "https://api.moonshot.ai/anthropic",
+        "zhipu" => "https://open.bigmodel.cn/api/anthropic",
+        "zai" | "zai-coding" => "https://api.z.ai/api/anthropic",
+        "dashscope" if host == "dashscope-intl.aliyuncs.com" => "https://dashscope-intl.aliyuncs.com/apps/anthropic",
+        "dashscope" => "https://dashscope.aliyuncs.com/apps/anthropic",
+        "openrouter" => "https://openrouter.ai/api",
+        _ => return None,
+    };
+    (host.is_empty() || host == host_of(url)).then_some(url)
+}
+
+/// Where Claude Code (and pi) reach a provider whose endpoint is `base`:
+/// that endpoint when it speaks Anthropic's Messages API, else the one the
+/// provider runs beside it (`known_anthropic`); none: they cannot use it.
+pub(crate) fn anthropic_url(family: &str, base: &str) -> Option<String> {
+    if anthropic_compatible(base) {
+        return Some(base.to_string());
+    }
+    known_anthropic(family, base).map(String::from)
+}
+
+/// Where Codex reaches it (Chat Completions): `base` itself when it is not
+/// an Anthropic one, else that one's sibling.
+pub(crate) fn chat_endpoint(family: &str, base: &str) -> Option<String> {
+    if base.is_empty() {
+        return None;
+    }
+    if !anthropic_compatible(base) {
+        return Some(base.to_string());
+    }
+    chat_url(family, base)
+}
+
 /// A key the profile holds: itself, or a keychain marker resolved the way
 /// octos does (`security`, service `octos`, the marker's account).
 pub(crate) fn resolve_key(value: &str, env_name: &str) -> Option<String> {
@@ -80,12 +131,17 @@ fn lane_label(lane: &serde_json::Value) -> String {
     format!("{}/{}", lane["family_id"].as_str().unwrap_or(""), lane["model_id"].as_str().unwrap_or(""))
 }
 
-/// A lane's Anthropic-compatible endpoint: its route's, else its family's.
-fn lane_url(lane: &serde_json::Value) -> Option<String> {
+/// A lane's endpoint: its route's, else its family's.
+fn lane_base(lane: &serde_json::Value) -> String {
     let family = octosense_llm_config::registry::lookup(lane["family_id"].as_str().unwrap_or(""));
     lane["route"]["base_url"].as_str().map(String::from)
         .or_else(|| family.and_then(|f| f.default_base_url).map(String::from))
-        .filter(|u| anthropic_compatible(u))
+        .unwrap_or_default()
+}
+
+/// A lane's Anthropic-compatible endpoint (`anthropic_url`).
+fn lane_url(lane: &serde_json::Value) -> Option<String> {
+    anthropic_url(lane["family_id"].as_str().unwrap_or(""), &lane_base(lane))
 }
 
 /// The route for the provider `label` (`family/model`, as the picker lists
@@ -102,7 +158,7 @@ pub fn claude_route(label: &str) -> Result<ClaudeRoute, String> {
         .ok_or_else(|| format!("no key for {label} (set it in AI providers)"))?;
     let model = lane["model_id"].as_str().filter(|m| !m.is_empty()).map(String::from)
         .or_else(|| family.and_then(|f| f.default_model).map(String::from)).unwrap_or_default();
-    let chat_url = chat_url(lane["family_id"].as_str().unwrap_or(""), &base_url);
+    let chat_url = chat_endpoint(lane["family_id"].as_str().unwrap_or(""), &lane_base(&lane));
     Ok(ClaudeRoute { label: label.to_string(), base_url, model, key, chat_url })
 }
 
@@ -399,6 +455,28 @@ fn link_profile(data_dir: &std::path::Path, name: &str, target: &std::path::Path
 
 #[cfg(test)]
 mod tests {
+    /// Claude Code (and pi) reach the main providers through the Anthropic
+    /// endpoint each runs beside its own API, in the right region; Codex
+    /// keeps the OpenAI-style one; a third-party route keeps its own.
+    #[test]
+    fn providers_reach_claude_code_by_their_anthropic_endpoints() {
+        use super::{anthropic_url, chat_endpoint};
+        let a = |f: &str, b: &str| anthropic_url(f, b);
+        assert_eq!(a("minimax-cn", "https://api.minimaxi.com/v1").as_deref(), Some("https://api.minimaxi.com/anthropic"));
+        assert_eq!(a("minimax", "https://api.minimax.io/v1").as_deref(), Some("https://api.minimax.io/anthropic"));
+        assert_eq!(a("deepseek", "https://api.deepseek.com/v1").as_deref(), Some("https://api.deepseek.com/anthropic"));
+        assert_eq!(a("moonshot", "https://api.moonshot.ai/v1").as_deref(), Some("https://api.moonshot.ai/anthropic"));
+        assert_eq!(a("moonshot", "https://api.moonshot.cn/v1").as_deref(), Some("https://api.moonshot.cn/anthropic"));
+        assert_eq!(a("zhipu", "https://open.bigmodel.cn/api/paas/v4").as_deref(), Some("https://open.bigmodel.cn/api/anthropic"));
+        assert_eq!(a("dashscope", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").as_deref(), Some("https://dashscope-intl.aliyuncs.com/apps/anthropic"));
+        assert_eq!(a("zai-coding", "https://api.z.ai/api/anthropic").as_deref(), Some("https://api.z.ai/api/anthropic"));
+        assert_eq!(a("deepseek", "https://www.autodl.art/api/v1"), None, "a third-party route keeps its protocol");
+        assert_eq!(a("openai", "https://api.openai.com/v1"), None);
+        assert_eq!(chat_endpoint("minimax-cn", "https://api.minimaxi.com/v1").as_deref(), Some("https://api.minimaxi.com/v1"));
+        assert_eq!(chat_endpoint("moonshot", "https://api.moonshot.ai/v1").as_deref(), Some("https://api.moonshot.ai/v1"));
+        assert_eq!(chat_endpoint("zai-coding", "https://api.z.ai/api/anthropic").as_deref(), Some("https://api.z.ai/api/coding/paas/v4"));
+    }
+
 
     #[test]
     fn an_inner_loop_on_octos_gets_a_profile_with_its_tools() {
@@ -433,10 +511,12 @@ mod tests {
             "primary":{"family_id":"zai-coding","model_id":"glm-5.3","route":{"route_id":"zai-coding","label":"GLM Coding Plan","api_key_env":"ZAI_API_KEY"}},
             "fallbacks":[{"family_id":"deepseek","model_id":"deepseek-chat"}]},
             "env_vars":{"ZAI_API_KEY":"keychain:octos/ZAI_API_KEY","DEEPSEEK_API_KEY":"sk-secret"}}}"#).unwrap();
-        // SAFETY of the env var: this test is the only one reading it.
-        std::env::set_var("OCTOS_APP_CORE_DIR", &core);
+        // SAFETY of the env var: this test is the only one setting it. It
+        // names the profile whatever this machine's Settings chose (its own
+        // providers, or OctoSense's).
+        std::env::set_var("OCTOBUDDY_PROVIDERS", &core);
         let providers = read();
-        std::env::remove_var("OCTOS_APP_CORE_DIR");
+        std::env::remove_var("OCTOBUDDY_PROVIDERS");
         assert_eq!(providers.error, None);
         let rows: Vec<_> = providers.rows.iter().map(|r| (r.label.as_str(), r.role.as_str(), r.key)).collect();
         assert_eq!(rows, [("zai-coding/glm-5.3", "primary", KeyState::Keychain), ("deepseek/deepseek-chat", "fallback 1", KeyState::InProfile)]);

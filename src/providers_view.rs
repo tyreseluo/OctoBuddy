@@ -316,6 +316,7 @@ impl OctoBuddyView {
                     let n = f.models.len();
                     let meta = i18n::pick(format!("{key} · {n} model{} · {}", if n == 1 { "" } else { "s" }, own_providers::agents_for(&probe).join(" · ")),
                         format!("{key} · {n} 个模型 · {}", own_providers::agents_for(&probe).join(" · ")));
+                    crate::provider_icons::show(&item.widget(cx, ids!(picon)), crate::provider_icons::svg(f.id()), &mut self.icons_shown);
                     item.label(cx, ids!(name)).set_text(cx, f.label());
                     item.label(cx, ids!(meta)).set_text(cx, &meta);
                     item.label(cx, ids!(tag)).set_text(cx, if mine.iter().any(|m| m == f.id()) { i18n::t("added", "已添加") } else { "" });
@@ -375,6 +376,8 @@ impl OctoBuddyView {
                 (true, false) => id!(OwnFallback),
             };
             let item = list.item(cx, index, template);
+            let family = row.label.split_once('/').map(|(f, _)| f).unwrap_or(&row.label);
+            crate::provider_icons::show(&item.widget(cx, ids!(picon)), crate::provider_icons::svg(family), &mut self.icons_shown);
             item.label(cx, ids!(name)).set_text(cx, &row.label);
             item.label(cx, ids!(detail)).set_text(cx, &format!("route: {} · {}", row.route, row.key.label()));
             item.label(cx, ids!(agents)).set_text(cx, &i18n::pick(format!("Runs: {}", row.agents.join(" · ")), format!("可运行：{}", row.agents.join(" · "))));

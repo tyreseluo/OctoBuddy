@@ -370,6 +370,31 @@ mod tests {
         assert!(String::from_utf8_lossy(&ps.stdout).trim().is_empty(), "still there: {:?}", String::from_utf8_lossy(&ps.stdout));
     }
 
+    /// Live (`cargo test -- --ignored claude_code_on_a_provider`): Claude
+    /// Code answers on one of the person's providers through the Anthropic
+    /// endpoint the provider runs beside its own API (`OCTOBUDDY_LIVE_PROVIDER`,
+    /// `family/model`; MiniMax China by default); the key stays here.
+    #[test]
+    #[ignore]
+    fn claude_code_on_a_provider() {
+        let label = std::env::var("OCTOBUDDY_LIVE_PROVIDER").unwrap_or_else(|_| "minimax-cn/MiniMax-M3".into());
+        let route = crate::providers::claude_route(&label).expect("in AI providers");
+        eprintln!("{label}: {} ({})", route.base_url, route.model);
+        let proxy = Proxy::start().unwrap();
+        let dir = std::env::temp_dir().join(format!("octobuddy-claude-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut cmd = Command::new("claude");
+        for k in SCRUB {
+            cmd.env_remove(k);
+        }
+        let out = cmd.current_dir(&dir).envs(proxy.env_for(&route))
+            .args(["-p", "Reply with exactly the word: pineapple", "--output-format", "text"])
+            .output().unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(!text.contains(&route.key), "the key never reaches Claude Code");
+        assert!(text.to_lowercase().contains("pineapple"), "{text}");
+    }
+
     /// Live (`cargo test -- --ignored codex_on_glm`): Codex answers on the
     /// person's GLM through the Responses bridge; the key stays here.
     #[test]
