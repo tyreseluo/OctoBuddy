@@ -43,3 +43,42 @@ serde_json = "1"
 sha2 = "0.10"
 base64 = "0.22"
 
+
+# Packaged as Robrix is (`cargo packager --release`): robius-packaging-commands
+# (0.4 or later) builds it with Makepad's `apple_bundle` and
+# `MAKEPAD_PACKAGE_DIR` set, so it reads its fonts and icons from the package,
+# and gathers every Makepad crate's resources into ./dist/resources. In the
+# package each crate's resources sit under the crate's name: ours under
+# `octosense_octobuddy`, not the binary's `octosense-octobuddy`.
+[package.metadata.packager]
+product_name = "OctoBuddy"
+identifier = "org.octosense.octobuddy"
+category = "DeveloperTool"
+license_file = "LICENSE"
+homepage = "https://github.com/tyreseluo/OctoBuddy"
+description = "OctoSense's coding app: an outer loop plans, inner loops build"
+icons = [
+    "./packaging/icons/icon_32.png",
+    "./packaging/icons/icon_128.png",
+    "./packaging/icons/icon_256.png",
+    "./packaging/icons/icon_512.png",
+    "./packaging/icons/icon.ico",
+]
+out_dir = "./dist"
+resources = [
+    { src = "./dist/resources/makepad_widgets", target = "makepad_widgets" },
+    { src = "./dist/resources/makepad_terminal", target = "makepad_terminal" },
+    { src = "./dist/resources/octosense-octobuddy", target = "octosense_octobuddy" },
+]
+before-each-package-command = """
+robius-packaging-commands before-each-package \
+    --force-makepad \
+    --binary-name octosense-octobuddy \
+    --path-to-binary ./target/release/octosense-octobuddy
+"""
+
+[package.metadata.packager.macos]
+minimum_system_version = "11.0"
+# Ad hoc: no Developer ID yet, so the release is not notarized (its notes say
+# how to open it the first time).
+signing_identity = "-"
