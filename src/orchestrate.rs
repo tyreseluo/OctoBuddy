@@ -545,7 +545,10 @@ impl OctoBuddyView {
         // The project's map, current before the outer loop plans: it reads
         // that instead of sending scouts to find its way.
         if !self.store.is_plain(at) {
-            self.write_project_map(at);
+            // The first turn reads it before planning: written now, not on a
+            // thread that may finish after the outer loop has already looked.
+            let first = !self.store.session(at).is_some_and(|s| s.messages.iter().any(|m| m.role() == Role::Lead));
+            self.write_project_map(at, first);
         }
         // The context pack goes first (memory searched, docs indexed: what
         // the outer loop would spend its first minutes on), built off the UI
@@ -1271,7 +1274,7 @@ impl OctoBuddyView {
             self.rt.notes.entry(session_id.clone()).or_default()
                 .push(format!("your plan's shared part was {n} characters and goes whole to every slice: keep it under 1,500 (who owns which files OctoBuddy adds from the cards)"));
         }
-        self.write_project_map(at);
+        self.write_project_map(at, false);
         for ((id, _, brief), slice) in started.into_iter().zip(&slices) {
             let mut line = Line::default();
             // What every slice shares, said once by the outer loop, with each.
@@ -1315,6 +1318,14 @@ impl OctoBuddyView {
             self.rt.opened.clear();
         }
         Ok(self.rt.serve.as_ref().unwrap())
+    }
+
+    /// Every inner loop's queued message ids, by slug: what a dispatch
+    /// confirmation can point at (Cindy's queued_message_id).
+    pub(crate) fn queued_ids(&self, at: SessionRef) -> Vec<(String, Vec<String>)> {
+        self.store.session(at).map(|s| s.peers().iter()
+            .map(|p| (p.slug.clone(), self.rt.lines.get(&p.id).map(|l| l.queue.iter().map(|d| d.id.clone()).collect()).unwrap_or_default()))
+            .collect()).unwrap_or_default()
     }
 
     /// Hands a message to a peer, as queue or interrupt (see `dispatch`).
@@ -1463,7 +1474,8 @@ What the person says to you after it stays between you and them.");
         let profile = match self.tools_profile(peer, &base, &p).filter(|_| !opened && !self.on_claude(peer)) {
             Some(id) => serde_json::json!({"profile_id": id}),
             None if p.model_pick.is_some() => serde_json::json!({"profile_id": base}),
-            None => serde_json::json!({}),
+            // octos refuses session/open with a cwd when no profile runs it.
+            None => serde_json::json!({"profile_id": base}),
         };
         let result = if self.on_claude(peer) {
             self.claude_inner_start(peer, &text)
@@ -1595,7 +1607,10 @@ What the person says to you after it stays between you and them.");
                 && !self.rt.unreported.get(&id).is_some_and(|v| v.iter().any(|(r, _, _)| r == &p.id))
         }).count()).unwrap_or(0);
         let since = *self.rt.batch_since.entry(id.clone()).or_insert_with(now_secs);
-        if others > 0 && now_secs().saturating_sub(since) < BATCH_SECS {
+        // A blocked or questioning report goes now: waiting for the batch
+        // would hold the whole round on one inner loop's question.
+        let blocking = self.rt.unreported.get(&id).is_some_and(|v| v.iter().any(|(_, r, f)| crate::handoff::blocks_lead(r, *f)));
+        if !blocking && others > 0 && now_secs().saturating_sub(since) < BATCH_SECS {
             return;
         }
         let waiting = self.rt.outer_queue.get(&id).is_some_and(|q| !q.is_empty());
@@ -3188,7 +3203,7 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
             crate::memory::remember(&self.store.projects[at.0].path, "calibration", text);
         }
         if accepted_any {
-            self.write_project_map(at);
+            self.write_project_map(at, false);
         }
         for slug in &reply.close {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| &p.slug == slug && p.status != "closed").map(|p| p.id.clone()));

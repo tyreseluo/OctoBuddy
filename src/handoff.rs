@@ -30,6 +30,9 @@ pub const READ_MAX: usize = 6000;
 const READ_EACH: usize = 2500;
 /// An inner loop's map of its own files.
 const MAP_MAX: usize = 1500;
+/// The whole project map stops here: past it the outer loop would spend its
+/// context finding its way through the map instead of the project.
+pub const MAP_TOTAL: usize = 12000;
 /// What of the memory an inner loop is given.
 pub const MEMORY_MAX: usize = 1000;
 /// Reads of the same thing in one turn before OctoBuddy says so.
@@ -62,7 +65,9 @@ pub fn card_files(brief: &str) -> Vec<String> {
         .filter_map(|l| l.strip_prefix("- ").or_else(|| l.strip_prefix("* ")))
         // "src/a.rs (the parser)": the path, without what is said of it.
         .map(|l| l.split([' ', '\t']).next().unwrap_or("").trim_matches('`').trim_end_matches([',', ';']).to_string())
-        .filter(|p| !p.is_empty() && (p.contains('/') || p.contains('.') || p.contains('*')))
+        // A bare name (README, Makefile) is a path too; prose here matches
+        // no file and so holds its loop to nothing.
+        .filter(|p| !p.is_empty() && p.chars().count() <= 128)
         .collect()
 }
 
@@ -167,6 +172,13 @@ pub fn excerpts(dir: &Path, reads: &[String]) -> String {
             Some((rel, range)) if range.trim_start_matches('L').starts_with(|c: char| c.is_ascii_digit()) => (rel.trim(), Some(range)),
             _ => (want.trim(), None),
         };
+        let outside = std::path::Path::new(rel).is_absolute()
+            || std::path::Path::new(rel).components().any(|c| matches!(c, std::path::Component::ParentDir))
+            || matches!((dir.canonicalize(), dir.join(rel).canonicalize()), (Ok(root), Ok(file)) if !file.starts_with(&root));
+        if outside {
+            out.push_str(&format!("\n{rel}: (not in this project)\n"));
+            continue;
+        }
         let Ok(text) = std::fs::read_to_string(dir.join(rel)) else {
             out.push_str(&format!("\n{rel}: (not found)\n"));
             continue;
@@ -210,6 +222,15 @@ pub fn cap_report(report: &str, whole_at: &str) -> String {
     }
     let start: String = report.chars().take(REPORT_MAX).collect();
     format!("{start} …\n(The report is longer than {REPORT_MAX} characters: the whole of it is in {whole_at}.)")
+}
+
+/// A report the outer loop should hear at once, not in the next batch: its
+/// first line says it is blocked or asking.
+pub fn blocks_lead(report: &str, forwarded: bool) -> bool {
+    !forwarded && report.lines().next().map(str::trim).is_some_and(|l| {
+        let l = l.to_ascii_lowercase();
+        l.starts_with("status: question") || l.starts_with("status: blocked") || l.starts_with("status: block")
+    })
 }
 
 /// Who owns which files, from the cards: for every slice, said once.
@@ -293,6 +314,10 @@ and the work accepted so far. Read a file's ranges from here instead of searchin
             out.push_str("- … (more files: `git ls-files`)\n");
             break;
         }
+        if out.len() > MAP_TOTAL {
+            out.push_str("- … (the map stops here, to stay small: `git ls-files` lists every file)\n");
+            break;
+        }
         let Ok(text) = std::fs::read_to_string(dir.join(rel)) else { continue };
         let defs = if rel.ends_with(".json") || rel.ends_with(".toml") { Vec::new() } else { definitions(rel, &text) };
         let shown: Vec<&String> = defs.iter().take(12).collect();
@@ -313,15 +338,15 @@ and the work accepted so far. Read a file's ranges from here instead of searchin
 mod tests {
     use super::*;
 
-    const CARD: &str = "## Goal\nAdd the stats page.\n## Files\n- app/parts/20-stats.splash (its page)\n- `tests/stats/`\n- docs/*.md\n## Facts\n- totals are cents\n## Done when\n- the page draws\n";
+    const CARD: &str = "## Goal\nAdd the stats page.\n## Files\n- app/parts/20-stats.splash (its page)\n- `tests/stats/`\n- docs/*.md\n- README\n## Facts\n- totals are cents\n## Done when\n- the page draws\n";
 
     #[test]
     fn a_card_names_its_files_and_holds_its_loop_to_them() {
-        assert_eq!(card_files(CARD), ["app/parts/20-stats.splash", "tests/stats/", "docs/*.md"]);
+        assert_eq!(card_files(CARD), ["app/parts/20-stats.splash", "tests/stats/", "docs/*.md", "README"]);
         let contract = "spec: task\n## Boundaries\n### Allowed Changes\n- src/calc.py\n### Forbidden\n- src/db.py\n";
         assert_eq!(card_files(contract), ["src/calc.py"]);
         let card = card_files(CARD);
-        let touched = ["app/parts/20-stats.splash", "tests/stats/a.py", "docs/x.md", "docs/sub/y.md", "app/parts/10-home.splash"].map(String::from);
+        let touched = ["app/parts/20-stats.splash", "tests/stats/a.py", "docs/x.md", "docs/sub/y.md", "app/parts/10-home.splash", "README"].map(String::from);
         assert_eq!(outside(&card, &touched), ["docs/sub/y.md", "app/parts/10-home.splash"]);
         assert!(outside(&[], &touched).is_empty(), "no files named: nothing to hold it to");
         assert!(matches("src/**/*.rs", "src/a/b/c.rs") && matches("src/**/*.rs", "src/c.rs") && !matches("src/*.rs", "src/a/c.rs"));
@@ -335,9 +360,10 @@ mod tests {
         std::fs::write(dir.join("app/parts/20-stats.splash"), "// stats\nlet total = 0\nfn stats_sum(){\n    total = 1\n}\nlet StatsPage = View{\n    stats_list := ScrollYView{}\n}\n").unwrap();
         let map = file_map(&dir, &["app/parts/20-stats.splash".to_string()]);
         assert!(map.contains("app/parts/20-stats.splash (8 lines): L2 let total = 0 · L3 fn stats_sum() · L6 let StatsPage = View · L7 stats_list := ScrollYView"), "{map}");
-        let got = excerpts(&dir, &["app/parts/20-stats.splash:L3-L5".to_string(), "missing.rs".to_string()]);
+        let got = excerpts(&dir, &["app/parts/20-stats.splash:L3-L5".to_string(), "missing.rs".to_string(), "../../etc/hosts".to_string()]);
         assert!(got.contains("app/parts/20-stats.splash:3-5\n   3  fn stats_sum(){\n   4      total = 1\n   5  }\n"), "{got}");
         assert!(got.contains("missing.rs: (not found)"));
+        assert!(got.contains("../../etc/hosts: (not in this project)"), "a read stays inside the project: {got}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -350,11 +376,19 @@ mod tests {
     }
 
     #[test]
+    fn a_blocked_or_questioning_report_wakes_the_lead_at_once() {
+        assert!(blocks_lead("status: question\ndecide: which color?", false));
+        assert!(blocks_lead("STATUS: Blocked\nit needs a key", false));
+        assert!(!blocks_lead("status: done\nverified: tests pass", false));
+        assert!(!blocks_lead("status: question\n...", true), "a forwarded tail is not a question");
+    }
+
+    #[test]
     fn the_inner_memory_leaves_out_calibration() {
         let pack = "CONTEXT\n\nMEMORY (OctoBuddy searched…):\nwing \"p\":\n- [lessons] use cents\nwing \"p\", room \"calibration\":\n- [calibration] 1.5 min a round\n\nDOCS INDEX (…):\n.octobuddy/docs/A.md";
         let m = inner_memory(pack);
         assert!(m.contains("use cents") && !m.contains("1.5 min") && !m.contains("DOCS"), "{m}");
-        assert_eq!(ownership(&[("stats".into(), CARD.into()), ("x".into(), "no card".into())]), "- stats: app/parts/20-stats.splash, tests/stats/, docs/*.md");
+        assert_eq!(ownership(&[("stats".into(), CARD.into()), ("x".into(), "no card".into())]), "- stats: app/parts/20-stats.splash, tests/stats/, docs/*.md, README");
     }
 
     #[test]

@@ -50,7 +50,9 @@ rounds each peer really uses, and sizes the review budget from your `reviews`. \
 TOOLS. You have OctoBuddy's tools: octobuddy_plan (start slices), octobuddy_send (message inner loops, close them, \
 change what you queued), octobuddy_review (your verdicts), octobuddy_status. Use them instead of the fenced blocks \
 below: a tool checks what you give it at once and tells you what is wrong, so you fix it in the same turn. Their \
-fields are the blocks' fields. (Without the tools, the blocks below do the same.)
+fields are the blocks' fields. octobuddy_plan answers {ok, started, held} and octobuddy_send answers per message \
+with its queue id (queued_as): trust those signals — a slice in held waits for its wave, a queued_as message waits \
+in its line. (Without the tools, the blocks below do the same.)
 
 To start slices, end your reply with exactly one fenced block, the closing fence on its own line \
 (inside JSON the contract is one string, newlines as \\n):
@@ -139,7 +141,8 @@ closing fence on its own line (any list may be left out):
 WHAT YOU RECEIVE. OctoBuddy's messages start with a tag: \
 INNER RESULTS: the reports peers sent when they finished or got blocked, as each one finishes (others may \
 still be working: review what came, do not wait for them), one per task: a few lines (status, what it ran, what \
-you must decide, notes; a longer one is cut, with the path of the whole), with the agent-spec verdict when there was \
+you must decide, notes; a longer one is cut, with the path of the whole; a status of question or blocked reaches \
+you at once, not with the next batch), with the agent-spec verdict when there was \
 a contract and a [files] line when it changed files outside its card's Files; a report marked as forwarded means \
 the peer did not report and OctoBuddy sent the end of its reply (the whole of it at the path given). Review each (read the files it changed, listed with it) with a verdict: \
 verified, partially verified or unverified, and the evidence, naming which peer did which part. \

@@ -44,9 +44,10 @@ impl OctoBuddyView {
         out
     }
 
-    /// The project's map (`handoff::KNOWLEDGE`), written again off the UI
-    /// thread: its files with their definitions, and the work accepted.
-    pub(crate) fn write_project_map(&self, at: SessionRef) {
+    /// The project's map (`handoff::KNOWLEDGE`): its files with their
+    /// definitions, and the work accepted. Off the UI thread, unless the
+    /// outer loop reads it this moment (`now`: its first turn).
+    pub(crate) fn write_project_map(&self, at: SessionRef, now: bool) {
         let Some(session) = self.store.session(at) else { return };
         let dir = PathBuf::from(session.work_dir.clone().unwrap_or_else(|| self.store.projects[at.0].path.clone()));
         let mut accepted: Vec<String> = Vec::new();
@@ -57,13 +58,18 @@ impl OctoBuddyView {
                 accepted.push(format!("{} [{}]{files}: {goal}", p.slug, p.role()));
             }
         }
-        std::thread::spawn(move || {
+        let write = move || {
             let path = dir.join(handoff::KNOWLEDGE);
             if let Some(parent) = path.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
             let _ = std::fs::write(&path, handoff::project_map(&dir, &accepted));
-        });
+        };
+        if now {
+            write();
+        } else {
+            std::thread::spawn(write);
+        }
     }
 
     /// The latest context pack (`pack.md`: memory hits, the docs index), for

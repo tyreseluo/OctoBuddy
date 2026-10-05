@@ -173,12 +173,12 @@ fn tools() -> Value {
         "independent_review": {"type": "boolean"}
     }});
     json!([
-        {"name": "octobuddy_plan", "description": "Start inner loops, one per slice (1-8, no shared files; later waves wait until you accept the earlier). Same fields as the octobuddy-plan block.",
+        {"name": "octobuddy_plan", "description": "Start inner loops, one per slice (1-8, no shared files; later waves wait until you accept the earlier). Answers {ok, started, held}: what began now and which wave waits. Same fields as the octobuddy-plan block.",
          "inputSchema": {"type": "object", "required": ["slices"], "properties": {
             "estimate": {"type": "object", "properties": {"rounds": {"type": "number"}, "waves": {"type": "integer"}, "minutes": {"type": "number"}}},
             "shared": {"type": "string", "description": "what every slice needs alike (data structures, storage keys, names), under 1,500 characters: said once, given to each slice (OctoBuddy adds who owns which files from the cards)"},
             "slices": {"type": "array", "items": slice}}}},
-        {"name": "octobuddy_send", "description": "Message inner loops by slug (mode interrupt, steer or queue), close the ones done for good, change what you queued. Same fields as the octobuddy-send block.",
+        {"name": "octobuddy_send", "description": "Message inner loops by slug (mode interrupt, steer or queue), close the ones done for good, change what you queued. Answers per message with its mode and queue id (queued_as). Same fields as the octobuddy-send block.",
          "inputSchema": {"type": "object", "properties": {
             "messages": {"type": "array", "items": {"type": "object", "required": ["to", "message"], "properties": {"to": {"type": "string"}, "mode": {"type": "string", "enum": ["queue", "steer", "interrupt"]}, "message": {"type": "string"}}}},
             "close": {"type": "array", "items": {"type": "string"}},
@@ -262,9 +262,13 @@ impl OctoBuddyView {
                 if self.halted.contains(session) {
                     return Err("the person stopped this session: no new inner loops".into());
                 }
-                let names: Vec<String> = reply.slices.iter().map(|s| s.slug.clone()).collect();
+                let first_wave = reply.slices.iter().map(|s| s.wave.unwrap_or(1)).min().unwrap_or(1);
+                let started: Vec<String> = reply.slices.iter().filter(|s| s.wave.unwrap_or(1) <= first_wave).map(|s| s.slug.clone()).collect();
+                let held: Vec<(String, u32)> = reply.slices.iter().filter(|s| s.wave.unwrap_or(1) > first_wave)
+                    .map(|s| (s.slug.clone(), s.wave.unwrap_or(1))).collect();
                 self.apply_reply(at, session, reply);
-                Ok(format!("Started {} inner loop(s): {} (later waves wait for your accept). Their reports come to you as INNER RESULTS.", names.len(), names.join(", ")))
+                let held = held.into_iter().map(|(slug, wave)| format!("\"{slug}\":{wave}")).collect::<Vec<_>>().join(",");
+                Ok(format!("{{\"ok\":true,\"started\":{:?},\"held\":{{{held}}}}}", started))
             }
             "octobuddy_send" => {
                 let reply = plan::split_reply(&format!("```octobuddy-send\n{args}\n```"));
@@ -275,9 +279,21 @@ impl OctoBuddyView {
                 named.extend(reply.close.iter().map(String::as_str));
                 named.extend(reply.queue_ops.iter().map(|o| o.to.as_str()));
                 self.known_slugs(at, &named)?;
-                let what = format!("{} message(s), {} closed, {} queue change(s)", reply.sends.len(), reply.close.len(), reply.queue_ops.len());
+                let before = self.queued_ids(at);
+                let (n_close, n_ops) = (reply.close.len(), reply.queue_ops.len());
+                let sends: Vec<(String, String)> = reply.sends.iter().map(|s| (s.to.clone(), s.mode.clone())).collect();
                 self.apply_reply(at, session, reply);
-                Ok(format!("Done: {what}."))
+                let after = self.queued_ids(at);
+                let messages = sends.iter().map(|(to, mode)| {
+                    let new = after.iter().find(|(slug, _)| slug == to).and_then(|(_, ids)| ids.iter()
+                        .find(|id| before.iter().find(|(slug, _)| slug == to).is_none_or(|(_, old)| !old.contains(id)))
+                        .cloned());
+                    match new {
+                        Some(id) => format!("{{\"to\":\"{to}\",\"mode\":\"{}\",\"queued_as\":\"{id}\"}}", crate::dispatch::Mode::parse(mode).as_str()),
+                        None => format!("{{\"to\":\"{to}\",\"mode\":\"{}\",\"delivered\":\"now\"}}", crate::dispatch::Mode::parse(mode).as_str()),
+                    }
+                }).collect::<Vec<_>>().join(",");
+                Ok(format!("{{\"ok\":true,\"messages\":[{messages}],\"closed\":{n_close},\"queue_changes\":{n_ops}}}"))
             }
             "octobuddy_review" => {
                 let doc = json!({"branches": args.get("reviews").cloned().unwrap_or(json!([]))});

@@ -28,6 +28,16 @@ impl Mode {
     }
 }
 
+impl Mode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Mode::Interrupt => "interrupt",
+            Mode::Steer => "steer",
+            Mode::Queue => "queue",
+        }
+    }
+}
+
 /// Who a message comes from: it decides who hears about the reply.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum From {
