@@ -47,6 +47,8 @@ delivery 回队（`refused` + `inflight`）。
 - 就绪报告在 `BATCH_SECS`（120s）内合批；外环忙则进外环队列占一个 Reports 槽。
 - **不变量 6：阻塞即醒。** 首行为 `status: question` / `status: blocked` 的汇报
   跳过合批窗口立即送达；forwarded 尾巴不算阻塞。
+  `status: question` 的回合还跳过检查与自修（它没有可检查的成果；点名要提交的
+  commit 照做）——问题不排在检查后面。
 - wave 门：后面的 wave 等前面全部 accept/close；无结论时 `verdict_nudge` 提醒一次。
 
 ## 持久化（`src/persist.rs`）
@@ -59,4 +61,3 @@ held wave、每条 Line 的队列（含 id）、inflight、pending、person_task
 
 每次请求前与每次验收后刷新；首条请求同步写（外环马上要读）。总量封顶
 `MAP_TOTAL`（12k）：地图是省上下文的，不是新的上下文负担。
-

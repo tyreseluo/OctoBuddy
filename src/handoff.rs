@@ -1,6 +1,5 @@
-//! What passes between the outer loop and an inner loop, kept small (after
-//! Cindy's team mode, where a worker's task is a thin envelope and its
-//! answer one short message): the outer loop writes a task card, OctoBuddy
+//! What passes between the outer loop and an inner loop, kept small: the
+//! outer loop writes a task card, OctoBuddy
 //! adds what the inner loop would otherwise go and read (its files' map, the
 //! excerpts the outer loop already read, the memory that bears on it), and
 //! the inner loop answers with a short report OctoBuddy completes with the
@@ -224,13 +223,19 @@ pub fn cap_report(report: &str, whole_at: &str) -> String {
     format!("{start} …\n(The report is longer than {REPORT_MAX} characters: the whole of it is in {whole_at}.)")
 }
 
+/// A report whose turn asks the outer loop to decide something: its work is
+/// not done, so OctoBuddy checks nothing of it either.
+pub fn asks_lead(report: &str) -> bool {
+    report.lines().next().map(str::trim).is_some_and(|l| l.to_ascii_lowercase().starts_with("status: question"))
+}
+
 /// A report the outer loop should hear at once, not in the next batch: its
 /// first line says it is blocked or asking.
 pub fn blocks_lead(report: &str, forwarded: bool) -> bool {
-    !forwarded && report.lines().next().map(str::trim).is_some_and(|l| {
+    !forwarded && (asks_lead(report) || report.lines().next().map(str::trim).is_some_and(|l| {
         let l = l.to_ascii_lowercase();
-        l.starts_with("status: question") || l.starts_with("status: blocked") || l.starts_with("status: block")
-    })
+        l.starts_with("status: blocked") || l.starts_with("status: block")
+    }))
 }
 
 /// Who owns which files, from the cards: for every slice, said once.
@@ -377,6 +382,8 @@ mod tests {
 
     #[test]
     fn a_blocked_or_questioning_report_wakes_the_lead_at_once() {
+        assert!(asks_lead("status: question\ndecide: which color?"));
+        assert!(!asks_lead("status: blocked\nit needs a key"), "blocked is not a question: its partial work is still checked");
         assert!(blocks_lead("status: question\ndecide: which color?", false));
         assert!(blocks_lead("STATUS: Blocked\nit needs a key", false));
         assert!(!blocks_lead("status: done\nverified: tests pass", false));

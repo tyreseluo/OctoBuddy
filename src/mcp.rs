@@ -319,7 +319,7 @@ impl OctoBuddyView {
 
 /// One send's confirmation: the queue id it waits under, or that it went
 /// into a turn now. `before`/`after` are the queued ids by slug, around
-/// the dispatch (Cindy's queued_message_id, said to the lead).
+/// the dispatch (the handle said to the lead).
 fn send_confirmation(to: &str, mode: &str, before: &[(String, Vec<String>)], after: &[(String, Vec<String>)]) -> String {
     let new = after.iter().find(|(slug, _)| slug == to).and_then(|(_, ids)| ids.iter()
         .find(|id| before.iter().find(|(slug, _)| slug == to).is_none_or(|(_, old)| !old.contains(id)))

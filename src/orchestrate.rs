@@ -263,8 +263,8 @@ fn key_of(store: &crate::model::Store, peer: &str) -> String {
 
 /// The first message to an inner loop: where it works, its task, what
 /// OctoBuddy gathered for it (`extra`: its files' map, the excerpts its lead
-/// already read, the memory), then the few rules (after Cindy's worker
-/// envelope: the task first, the rest short).
+/// already read, the memory), then the few rules (the task first, the rest
+/// short).
 fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str, extra: &str) -> String {
     let place = match branch {
         Some(branch) => format!("{dir}, the session's git worktree (branch {branch})"),
@@ -315,7 +315,7 @@ fn max_inners() -> usize {
 const COMMIT_RULE: &str = "\n- Do not run git commit or git add: OctoBuddy commits the files you changed. End a reply that changed \
 files with one line `Commit: <message>`, written the way this project writes them (see git log).";
 
-/// How a peer reports (after Cindy's worker rules): once per task, a few
+/// How a peer reports: once per task, a few
 /// short fields; OctoBuddy adds its files, its check and its commit.
 const REPORT_RULES: &str = "RULES\n\
 - Do the task; build and test when you can. If context you need is missing before a broad or destructive change, \
@@ -1321,7 +1321,7 @@ impl OctoBuddyView {
     }
 
     /// Every inner loop's queued message ids, by slug: what a dispatch
-    /// confirmation can point at (Cindy's queued_message_id).
+    /// confirmation can point at (the handle the lead holds).
     pub(crate) fn queued_ids(&self, at: SessionRef) -> Vec<(String, Vec<String>)> {
         self.store.session(at).map(|s| s.peers().iter()
             .map(|p| (p.slug.clone(), self.rt.lines.get(&p.id).map(|l| l.queue.iter().map(|d| d.id.clone()).collect()).unwrap_or_default()))
@@ -2527,9 +2527,11 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
     /// committed and checked first when its task is done.
     #[allow(clippy::too_many_arguments)]
     fn queue_report(&mut self, at: SessionRef, session_id: &str, peer: &str, p: &Peer, report: String, forwarded: bool, outcome: &str, more_queued: bool, commit: Option<String>) {
+        // A question asks the outer loop to decide now: its turn did no work
+        // to check (a commit it named still lands), so nothing delays it.
+        let asking = crate::handoff::asks_lead(&report) && !forwarded;
         self.rt.unreported.entry(session_id.to_string()).or_default().push((peer.to_string(), report, forwarded));
-        // Nothing to commit or check: the report is complete now.
-        if !self.finish(peer, p, commit, outcome == "completed" && !more_queued) {
+        if !self.finish(peer, p, commit, !asking && outcome == "completed" && !more_queued) {
             self.on_report_ready(at, peer);
         }
     }

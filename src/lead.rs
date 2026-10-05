@@ -142,7 +142,7 @@ WHAT YOU RECEIVE. OctoBuddy's messages start with a tag: \
 INNER RESULTS: the reports peers sent when they finished or got blocked, as each one finishes (others may \
 still be working: review what came, do not wait for them), one per task: a few lines (status, what it ran, what \
 you must decide, notes; a longer one is cut, with the path of the whole; a status of question or blocked reaches \
-you at once, not with the next batch), with the agent-spec verdict when there was \
+you at once, not with the next batch — a question is not checked first, it waits on nothing), with the agent-spec verdict when there was \
 a contract and a [files] line when it changed files outside its card's Files; a report marked as forwarded means \
 the peer did not report and OctoBuddy sent the end of its reply (the whole of it at the path given). Review each (read the files it changed, listed with it) with a verdict: \
 verified, partially verified or unverified, and the evidence, naming which peer did which part. \
