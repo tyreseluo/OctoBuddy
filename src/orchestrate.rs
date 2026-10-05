@@ -2814,20 +2814,12 @@ what the cookbook or the lessons already say. Then say in one line what you kept
 
     /// Starts the held peers whose earlier waves (same round) are all
     /// accepted by the lead, or closed.
-    fn release_waves(&mut self, at: SessionRef) {
+    pub(crate) fn release_waves(&mut self, at: SessionRef) {
         let Some(session) = self.store.session(at).cloned() else { return };
-        let accepted = |p: &Peer| p.review.as_deref().is_some_and(|r| r.starts_with("accept"));
-        let settled = |p: &Peer| p.status == "closed" || accepted(p);
-        // Its earlier waves are all settled, and one of them was accepted: a
-        // wave the outer loop closed whole (it gave up on the plan, or is
-        // stopping everything) starts nothing after it.
         let ready: Vec<(String, String)> = session.peers().iter()
             .filter_map(|p| self.rt.held.get(&p.id).map(|dir| (p, dir)))
             .filter(|(p, _)| p.status != "closed" && !self.halted.contains(&session.id))
-            .filter(|(p, _)| {
-                let earlier: Vec<&Peer> = session.peers().iter().filter(|o| o.round == p.round && o.wave.unwrap_or(1) < p.wave.unwrap_or(1)).collect();
-                earlier.iter().all(|o| settled(o)) && (earlier.is_empty() || earlier.iter().any(|o| accepted(o)))
-            })
+            .filter(|(p, _)| wave_may_start(p, session.peers()))
             .map(|(p, dir)| (p.id.clone(), dir.clone()))
             .collect();
         for (peer, dir) in ready {
@@ -3288,10 +3280,18 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
     /// files these changed is stale, and the outer loop is told to look again.
     fn stale_reviews(&mut self, at: SessionRef, by: &str, files: &[String]) {
         let Some(session) = self.store.session(at).cloned() else { return };
-        let who = session.peers().iter().find(|p| p.id == by).map(|p| p.slug.clone()).unwrap_or_default();
+        let Some(author) = session.peers().iter().find(|p| p.id == by).cloned() else { return };
+        let who = author.slug.clone();
         for p in session.peers().iter().filter(|p| p.id != by) {
             let Some(accepted) = p.accepted.as_ref() else { continue };
-            let touched: Vec<String> = accepted.iter().filter(|f| files.contains(&f.path)).map(|f| f.path.clone()).collect();
+            // A later wave of its plan builds on its files: what waves are for.
+            if author.round == p.round && author.wave.unwrap_or(1) > p.wave.unwrap_or(1) {
+                continue;
+            }
+            // A file OctoBuddy writes from others (an app's main.splash, from its
+            // parts) changes with every part: not a change to its work.
+            let generated = |f: &str| f == "bundle/main.splash" && Path::new(&p.dir).join("app/parts").is_dir();
+            let touched: Vec<String> = accepted.iter().filter(|f| files.contains(&f.path) && !generated(&f.path)).map(|f| f.path.clone()).collect();
             let now = workspace::file_hashes(&p.dir, &touched);
             let changed: Vec<String> = accepted.iter()
                 .filter(|f| touched.contains(&f.path) && !now.iter().any(|(path, hash)| path == &f.path && hash == &f.hash))
@@ -3454,6 +3454,17 @@ Go on now: do it (write the files), run your check, then end with your octobuddy
     }
 }
 
+/// Whether a held slice's wave may start: its round's earlier waves are all
+/// settled (accepted, or closed), and one of them was accepted — a wave the
+/// outer loop closed whole (it gave up on the plan) starts nothing after it.
+/// Accepted and since changed by another loop (`stale`) counts as accepted:
+/// the outer loop is told to look again, and the waves after it do not wait.
+fn wave_may_start(p: &Peer, peers: &[Peer]) -> bool {
+    let accepted = |o: &Peer| o.review.as_deref().is_some_and(|r| r.starts_with("accept") || r.starts_with("stale"));
+    let earlier: Vec<&Peer> = peers.iter().filter(|o| o.round == p.round && o.wave.unwrap_or(1) < p.wave.unwrap_or(1)).collect();
+    earlier.iter().all(|o| o.status == "closed" || accepted(o)) && (earlier.is_empty() || earlier.iter().any(|o| accepted(o)))
+}
+
 /// The end of a reply that came with no report, for the outer loop: its
 /// last part, and where the whole of it is (`write_context` keeps it).
 fn forwarded_tail(text: &str, session: &str, slug: &str) -> String {
@@ -3525,6 +3536,27 @@ mod tests {
         assert_eq!(auto_message("ledger-ui2", &["bundle/main.splash".into()]), "chore(ledger-ui): update main.splash (check passed)");
         assert_eq!(auto_message("Fix_3 Stats", &["a".into(), "b".into()]), "chore(fix-stats): update 2 files (check passed)");
         assert_eq!(auto_message("42", &["a".into()]), "chore(slice): update a (check passed)");
+    }
+
+    #[test]
+    fn a_wave_starts_once_the_waves_before_it_are_settled() {
+        let peer = |slug: &str, wave: u32, status: &str, review: Option<&str>| {
+            let mut p = crate::chat::tests::peer(Vec::new());
+            (p.slug, p.wave, p.round, p.status, p.review) = (slug.into(), Some(wave), 1, status.into(), review.map(String::from));
+            p
+        };
+        let held = peer("e2e", 3, "queued", None);
+        let mut peers = vec![peer("skeleton", 1, "idle", Some("accept: ok")), peer("home", 2, "idle", Some("accept: ok")), peer("itin", 2, "idle", None), held.clone()];
+        assert!(!wave_may_start(&held, &peers), "a wave-2 slice not reviewed yet");
+        peers[2].review = Some("accept: ok".into());
+        assert!(wave_may_start(&held, &peers));
+        // A later wave changed the skeleton's files after it was accepted: it still counts.
+        peers[0].review = Some("stale: itin changed app/parts/20-itin.splash after it was accepted".into());
+        assert!(wave_may_start(&held, &peers), "a stale accept does not hold the next wave");
+        peers[1].review = Some("fix: not yet".into());
+        assert!(!wave_may_start(&held, &peers));
+        let closed: Vec<Peer> = vec![peer("a", 1, "closed", None), held.clone()];
+        assert!(!wave_may_start(&held, &closed), "a wave closed whole starts nothing after it");
     }
 
     #[test]

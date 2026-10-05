@@ -5238,6 +5238,8 @@ impl OctoBuddyView {
 #[derive(Default)]
 struct PeerCounts {
     active: usize,
+    /// Waiting to start: for a slot, or for its wave.
+    queued: usize,
     done: usize,
     failed: usize,
     halted: usize,
@@ -5251,7 +5253,8 @@ impl PeerCounts {
         let mut c = PeerCounts::default();
         for p in peers {
             match p.status.as_str() {
-                "queued" | "running" | "checking" => c.active += 1,
+                "running" | "checking" => c.active += 1,
+                "queued" => c.queued += 1,
                 "done" | "idle" => c.done += 1,
                 "failed" => c.failed += 1,
                 "merged" => c.merged += 1,
@@ -5267,6 +5270,7 @@ impl PeerCounts {
         let mut parts = Vec::new();
         let mut add = |n: usize, en: &str, zh: &str| if n > 0 { parts.push(i18n::pick(format!("{n} {en}"), format!("{n} 个{zh}"))); };
         add(self.active, "running", "运行中");
+        add(self.queued, "queued", "排队中");
         add(self.done, "done", "完成");
         add(self.failed, "failed", "失败");
         add(self.halted, "stopped", "已停止");
@@ -5277,7 +5281,7 @@ impl PeerCounts {
     }
 
     fn long(&self, rounds: u64) -> String {
-        let total = self.active + self.done + self.failed + self.halted + self.merged + self.discarded + self.closed;
+        let total = self.active + self.queued + self.done + self.failed + self.halted + self.merged + self.discarded + self.closed;
         if total == 0 {
             return i18n::t("None created yet.", "还没有创建 inner。").to_string();
         }
@@ -5961,9 +5965,9 @@ mod tests {
             session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: None,
         };
         let c = PeerCounts::of(&[peer("running"), peer("queued"), peer("idle"), peer("failed"), peer("interrupted")]);
-        assert_eq!(c.short(), "2 running · 1 done · 1 failed · 1 stopped");
+        assert_eq!(c.short(), "1 running · 1 queued · 1 done · 1 failed · 1 stopped");
         assert_eq!(PeerCounts::of(&[peer("merged"), peer("discarded")]).short(), "1 merged · 1 discarded");
-        assert_eq!(c.long(2), "5 created over 2 round(s) · 2 running · 1 done · 1 failed · 1 stopped");
+        assert_eq!(c.long(2), "5 created over 2 round(s) · 1 running · 1 queued · 1 done · 1 failed · 1 stopped");
         assert_eq!((elapsed(42), elapsed(83), elapsed(3725)), ("42s".into(), "1m 23s".into(), "1h 02m".into()));
         assert_eq!((tokens(870), tokens(12_345), tokens(1_000_000)), ("870".into(), "12.3k".into(), "1.0M".into()));
     }

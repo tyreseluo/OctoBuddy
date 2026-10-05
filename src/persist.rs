@@ -156,5 +156,11 @@ impl OctoBuddyView {
             }
             self.drain_outer(at);
         }
+        // Waves held when it stopped: started now if their earlier waves are
+        // settled (a check that once kept them waiting may have changed).
+        let held: Vec<crate::model::SessionRef> = self.rt.held.keys().filter_map(|peer| self.store.find_peer(peer)).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+        for at in held {
+            self.release_waves(at);
+        }
     }
 }
