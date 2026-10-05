@@ -284,15 +284,7 @@ impl OctoBuddyView {
                 let sends: Vec<(String, String)> = reply.sends.iter().map(|s| (s.to.clone(), s.mode.clone())).collect();
                 self.apply_reply(at, session, reply);
                 let after = self.queued_ids(at);
-                let messages = sends.iter().map(|(to, mode)| {
-                    let new = after.iter().find(|(slug, _)| slug == to).and_then(|(_, ids)| ids.iter()
-                        .find(|id| before.iter().find(|(slug, _)| slug == to).is_none_or(|(_, old)| !old.contains(id)))
-                        .cloned());
-                    match new {
-                        Some(id) => format!("{{\"to\":\"{to}\",\"mode\":\"{}\",\"queued_as\":\"{id}\"}}", crate::dispatch::Mode::parse(mode).as_str()),
-                        None => format!("{{\"to\":\"{to}\",\"mode\":\"{}\",\"delivered\":\"now\"}}", crate::dispatch::Mode::parse(mode).as_str()),
-                    }
-                }).collect::<Vec<_>>().join(",");
+                let messages = sends.iter().map(|(to, mode)| send_confirmation(to, mode, &before, &after)).collect::<Vec<_>>().join(",");
                 Ok(format!("{{\"ok\":true,\"messages\":[{messages}],\"closed\":{n_close},\"queue_changes\":{n_ops}}}"))
             }
             "octobuddy_review" => {
@@ -325,6 +317,19 @@ impl OctoBuddyView {
     }
 }
 
+/// One send's confirmation: the queue id it waits under, or that it went
+/// into a turn now. `before`/`after` are the queued ids by slug, around
+/// the dispatch (Cindy's queued_message_id, said to the lead).
+fn send_confirmation(to: &str, mode: &str, before: &[(String, Vec<String>)], after: &[(String, Vec<String>)]) -> String {
+    let new = after.iter().find(|(slug, _)| slug == to).and_then(|(_, ids)| ids.iter()
+        .find(|id| before.iter().find(|(slug, _)| slug == to).is_none_or(|(_, old)| !old.contains(id)))
+        .cloned());
+    match new {
+        Some(id) => format!("{{\"to\":\"{to}\",\"mode\":\"{}\",\"queued_as\":\"{id}\"}}", crate::dispatch::Mode::parse(mode).as_str()),
+        None => format!("{{\"to\":\"{to}\",\"mode\":\"{}\",\"delivered\":\"now\"}}", crate::dispatch::Mode::parse(mode).as_str()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -353,5 +358,27 @@ mod tests {
         assert!(ok.starts_with("HTTP/1.1 200"), "{ok}");
         assert!(ok.contains("\"protocolVersion\":\"2025-06-18\"") && ok.contains("\"name\":\"octobuddy\""));
         assert!(post("/mcp/s1/wrong-secret").starts_with("HTTP/1.1 404"), "the secret guards it");
+    }
+
+    #[test]
+    fn a_send_answers_with_its_queue_id_or_that_it_went_now() {
+        let none: Vec<(String, Vec<String>)> = Vec::new();
+        let queued = vec![("stats".to_string(), vec!["q3".to_string(), "q7".to_string()])];
+        // A new id in the line after the dispatch: the handle the lead holds.
+        assert_eq!(
+            send_confirmation("stats", "queue", &none, &queued),
+            "{\"to\":\"stats\",\"mode\":\"queue\",\"queued_as\":\"q3\"}"
+        );
+        // It went into a running turn: no id to hold, and that is said.
+        assert_eq!(
+            send_confirmation("stats", "steer", &none, &none),
+            "{\"to\":\"stats\",\"mode\":\"steer\",\"delivered\":\"now\"}"
+        );
+        // An id the line already had before the dispatch is not the new one.
+        let before = vec![("stats".to_string(), vec!["q3".to_string()])];
+        assert_eq!(
+            send_confirmation("stats", "queue", &before, &queued),
+            "{\"to\":\"stats\",\"mode\":\"queue\",\"queued_as\":\"q7\"}"
+        );
     }
 }
