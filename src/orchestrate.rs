@@ -3459,7 +3459,7 @@ Go on now: do it (write the files), run your check, then end with your octobuddy
 /// outer loop closed whole (it gave up on the plan) starts nothing after it.
 /// Accepted and since changed by another loop (`stale`) counts as accepted:
 /// the outer loop is told to look again, and the waves after it do not wait.
-fn wave_may_start(p: &Peer, peers: &[Peer]) -> bool {
+pub(crate) fn wave_may_start(p: &Peer, peers: &[Peer]) -> bool {
     let accepted = |o: &Peer| o.review.as_deref().is_some_and(|r| r.starts_with("accept") || r.starts_with("stale"));
     let earlier: Vec<&Peer> = peers.iter().filter(|o| o.round == p.round && o.wave.unwrap_or(1) < p.wave.unwrap_or(1)).collect();
     earlier.iter().all(|o| o.status == "closed" || accepted(o)) && (earlier.is_empty() || earlier.iter().any(|o| accepted(o)))
@@ -3477,7 +3477,7 @@ fn forwarded_tail(text: &str, session: &str, slug: &str) -> String {
 }
 
 /// The commit message a peer named: its last `Commit: …` line.
-fn commit_message(text: &str) -> Option<String> {
+pub(crate) fn commit_message(text: &str) -> Option<String> {
     text.lines().rev()
         .find_map(|l| {
             let l = l.trim().trim_start_matches(['*', '`', '-', ' ']);
@@ -3490,7 +3490,7 @@ fn commit_message(text: &str) -> Option<String> {
 /// The message OctoBuddy commits a peer's files with when it named none and
 /// its check passed: conventional (`chore(<slug>): …`, the scope lowercase
 /// kebab without digits, as the projects' commit hooks want).
-fn auto_message(slug: &str, files: &[String]) -> String {
+pub(crate) fn auto_message(slug: &str, files: &[String]) -> String {
     let scope: String = slug.to_lowercase().chars().filter(|c| !c.is_ascii_digit())
         .map(|c| if c.is_ascii_lowercase() { c } else { '-' }).collect();
     let scope = scope.split('-').filter(|w| !w.is_empty()).collect::<Vec<_>>().join("-");

@@ -71,6 +71,9 @@ mod sidebar;
 mod system_chat;
 pub mod verify;
 pub mod workspace;
+
+#[cfg(test)]
+mod e2e_tests;
 use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};

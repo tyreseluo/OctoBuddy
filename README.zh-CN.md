@@ -133,6 +133,7 @@ OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直
 - **审查前先检查。**切片的检查没过时，OctoBuddy 先把输出交回它的内环修，遇到认得的错误还附上提示，最多 2 次，然后才交给外环审查。一轮以「接下来我会……」这类承诺结束时，会被提醒一次把事做完。
 - **从返工中学习。**某一轮被接受但有返工浪费了时间时，或点了「从中学习」后，外环用 `octobuddy_learn` 最多记下 3 条新经验。`splash` 类的经验进入每个项目的 cookbook 和 skill，`orchestration` 类的经验进入外环的规则。保存在 `<data>/lessons/`。
 - **已验证：**2026-10-02 做了小账本（pocket-ledger）：外环是 Claude Code · Opus，内环是跑在 MiniMax 和 GLM 上的 codex、octos、pi 和 Claude Code。它已发布到本地 App Hub（0.1.1）。那次用了约 2 小时，当时还没有分块、每种 agent 的工具和这两份总结；有了它们之后的计时重跑还没做。
+- **已在 CI 里验证：**`src/e2e_tests.rs::dual_loop_plans_two_slices_runs_inner_then_checks_commits_and_accepts`——`cargo test --locked` 在临时 `OCTOBUDDY_HOME` 下跑这条链路，不需要网络和 API key：`plan::split_reply`（计划块 `src/stubs/plan_two_waves.md` 解析出两个切片，第二个在 wave 2）→ 真实的 `inner::Serve` 连上一个伪 `octos serve --stdio`（`src/stubs/stub_octos.py`，它在 session 的 cwd 里写出切片源码）→ 信封变成 `LoopEvent` → `verify::run` 跑切片检查 → `workspace::commit_files` 提交 → 审查块（`src/stubs/review_wave_1.md`）接受 wave 1 → `orchestrate::wave_may_start` 放行 wave 2（stale / fix / closed 三种分支都验证过）。**没有覆盖**的部分（集成测试没法构造 Makepad widget 层）：`OctoBuddyView::apply_event`、外环的 agent 进程（`claude`/`codex`/`pi`）。
 
 ## 应用工厂
 
