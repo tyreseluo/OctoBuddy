@@ -7,7 +7,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **内环**在项目目录（或它的 git worktree）里并行做这些切片；
 - **对话**只和一个 agent 交谈，不跑循环。
 
-它既能作为原生应用跑在 OctoSense 里，也能单独开一个自己的窗口运行。OctoSense 会像引入 Rinx 那样，在自己的 `native-apps.json` 里把它登记为应用 `octobuddy`，钉在本仓库的某个 revision 上。桌面 shell 默认编进去，手机 shell 不带。这项登记已经在 OctoSense 的一个 fork 上的分支 [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) 里准备好了（钉的是 `main` 上较新的一个 revision）。**待完成：**还没有向 OctoSense 提 PR。
+它既能作为原生应用跑在 OctoSense 里，也能单独开一个自己的窗口运行。OctoSense 会像引入 Rinx 那样，在自己的 `native-apps.json` 里把它登记为应用 `octobuddy`，钉在本仓库的某个 revision 上。桌面 shell 默认编进去，手机 shell 不带。这项登记已经在 OctoSense 的一个 fork 上的分支 [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) 里准备好了（钉的是 `9d6f0d8`），正在 [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344) 评审；各项授权的用途见该 PR 的 `docs/native-apps/octobuddy.zh-CN.md`。
 
 2026-10-02 之前它叫 OctoLoop。
 

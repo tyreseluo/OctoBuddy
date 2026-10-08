@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md) | [Privacy](PRIVACY.md) ([中文](PRIV
 
 OctoBuddy is OctoSense's native coding app with two loops. An **outer loop** turns a request into a plan of slices and reviews what comes back. **Inner loops** work on the slices in parallel, in the project's folder (or its git worktree). A plain **chat** talks to one agent, with no loops.
 
-It runs inside OctoSense as a native app, and on its own in a window of its own. OctoSense registers it in its `native-apps.json` as the app `octobuddy`, pinned to a revision of this repository, the way it takes Rinx. Desktop shells build it by default; phone shells leave it out. That registration is ready on the branch [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) of a fork of OctoSense (it pins a recent revision of `main`). **Pending:** its pull request to OctoSense is not made yet.
+It runs inside OctoSense as a native app, and on its own in a window of its own. OctoSense registers it in its `native-apps.json` as the app `octobuddy`, pinned to a revision of this repository, the way it takes Rinx. Desktop shells build it by default; phone shells leave it out. That registration is ready on the branch [`feat/octobuddy-app`](https://github.com/tyreseluo/OctoSense/tree/feat/octobuddy-app) of a fork of OctoSense (it pins `9d6f0d8`), under review as [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344); what each of its grants is for is in that pull request's `docs/native-apps/octobuddy.md`.
 
 It was called OctoLoop until 2026-10-02.
 
