@@ -163,7 +163,7 @@ When OctoBuddy runs inside OctoSense:
 - It is a registered OctoSense module — `src/module.rs:11-49`.
 - Its data directory is the same `~/.octobuddy` (or `$OCTOBUDDY_HOME`) — `README.md:248`.
 - It reads the shell's AI providers, not its own (`src/providers.rs:222-232`).
-- On OctoSense the shell's `~/.octos` (under `$OCTOSENSE_HOME/octos-home/.octos`) holds AI providers; keys are in the same keychain service `octos` OctoBuddy uses on the host, but under OctoSense's account, not OctoBuddy's `<KEY_ENV>::octobuddy` — `src/providers.rs:217-220`, `src/own_providers.rs:11-13`.
+- On OctoSense, AI providers' profile is in the shell's kernel core dir (`<OCTOSENSE_HOME>/octos-home/.octos` on a desktop; `src/providers.rs:217-224`). Its keys are keychain markers whose accounts are the shell's (`<ENV>::<profile id>`, octosense-llm-config's `profile.rs`), not OctoBuddy's `<KEY_ENV>::octobuddy` (`src/own_providers.rs:11-13`).
 - The shell's system agent, the app factory (`octobuddy.request`), and the production loop (`octobuddy.report`) are only registered inside OctoSense (`src/plugins/mod.rs:72-78`, `src/plugins/app_factory.rs:9-15`, `src/plugins/card_loop.rs:1-23`).
 - The shell's own system-agent tool policy stays in the shell's profile; OctoBuddy copies the profile for `octos serve` and strips that block — `src/providers.rs:412-421`.
 

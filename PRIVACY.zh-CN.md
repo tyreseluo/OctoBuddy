@@ -163,7 +163,7 @@ OctoBuddy 跑在 OctoSense 里时：
 - 它是注册好的 OctoSense 模块 — `src/module.rs:11-49`。
 - 数据目录仍然是同一个 `~/.octobuddy`（或 `$OCTOBUDDY_HOME`）— `README.md:248`。
 - 读的是 shell 的 AI providers，不是自己的（`src/providers.rs:222-232`）。
-- 在 OctoSense 里，shell 的 `~/.octos`（在 `$OCTOSENSE_HOME/octos-home/.octos` 下）保存 AI providers；key 仍在同一个钥匙串 service `octos` 里，但 account 属于 OctoSense，不是 OctoBuddy 的 `<KEY_ENV>::octobuddy` — `src/providers.rs:217-220`，`src/own_providers.rs:11-13`。
+- 在 OctoSense 里，AI providers 的 profile 在 shell 内核的 core 目录（桌面上是 `<OCTOSENSE_HOME>/octos-home/.octos`；`src/providers.rs:217-224`）。其中的 key 是钥匙串标记，account 属于 shell（`<ENV>::<profile id>`，见 octosense-llm-config 的 `profile.rs`），不是 OctoBuddy 的 `<KEY_ENV>::octobuddy`（`src/own_providers.rs:11-13`）。
 - shell 的系统 agent、应用工厂（`octobuddy.request`）、生产回路（`octobuddy.report`）都只在 OctoSense 里注册（`src/plugins/mod.rs:72-78`，`src/plugins/app_factory.rs:9-15`，`src/plugins/card_loop.rs:1-23`）。
 - shell 自己系统 agent 的工具策略留在 shell 的 profile 里；OctoBuddy 拷一份给 `octos serve` 用，并删掉那段内容 — `src/providers.rs:412-421`。
 
