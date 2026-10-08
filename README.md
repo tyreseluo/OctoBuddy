@@ -10,7 +10,7 @@ It was called OctoLoop until 2026-10-02.
 
 ## Download
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have a DMG for Macs with Apple silicon (`macos-aarch64`), with its `.sha256`; Intel Macs are not supported. It is signed ad hoc, not notarized by Apple yet, so macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have two macOS DMGs, each with its `.sha256`: `OctoBuddy-<version>-macos-aarch64.dmg` for Macs with Apple silicon (M1 and later), and `OctoBuddy-<version>-macos-x86_64.dmg` for Intel Macs. The notarization workflow is wired up — when a Developer ID certificate is configured, the GitHub Action signs with Developer ID and runs `xcrun notarytool submit --wait` then `xcrun stapler staple`; until that certificate is in place, the DMGs are signed ad hoc, and macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
 
 ## Agents and models
 
@@ -247,7 +247,7 @@ As Rinx does, OctoBuddy runs first as an app of its own on this computer, and th
   - The agents' programs are its own copies (above), or yours.
 - **Its data** is in `~/.octobuddy` (`OCTOBUDDY_HOME` names another folder), the same on the host and in OctoSense.
 - **Not done yet:**
-  - a notarized package, and Linux and Windows ones (the DMG is ad hoc signed: Download, above);
+  - Linux and Windows packages (the notarization pipeline is wired up; once the Developer ID is in the repo's secrets, both macOS DMGs ship notarized);
   - octos shipped inside the app.
 - **Verified** on macOS (Apple silicon) on 2026-10-02: `cargo run` started `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`, in a window titled OctoBuddy, and its About and AI Providers pages said it runs on its own and named the profile it reads.
 

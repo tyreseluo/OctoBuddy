@@ -1,12 +1,35 @@
 # Packages OctoBuddy (as Robrix does: cargo-packager with
-# robius-packaging-commands) and publishes it as a GitHub release. macOS on
-# Apple silicon only for now.
+# robius-packaging-commands) and publishes it as a GitHub release.
+#
+# Builds two DMGs, one per macOS arch (Apple silicon + Intel), from
+# macos-15: cross-compiles to x86_64 with `--target x86_64-apple-darwin`
+# (chosen over a separate Intel runner — one runner, two parallel matrix
+# jobs, no shared runner pool contention, and we already verified the
+# cross-compile produces a runnable x86_64 binary on this machine).
+# `rust-cache` keys and artifact names both include the target triple
+# so the two DMGs don't clobber each other.
+#
+# Optional notarization. When ALL of these secrets are set on the
+# repo, the workflow signs with Developer ID and notarizes via
+# `xcrun notarytool` + `xcrun stapler` (cargo-packager does this for
+# you when it sees APPLE_CERTIFICATE + APPLE_ID / APPLE_PASSWORD /
+# APPLE_TEAM_ID; APPLE_SIGNING_IDENTITY overrides Cargo.toml's ad-hoc
+# `signing_identity = "-"`):
+#   APPLE_DEVELOPER_ID_CERT_P12_BASE64   base64 of the .p12 (APPLE_CERTIFICATE)
+#   APPLE_CERT_PASSWORD                  p12 password        (APPLE_CERTIFICATE_PASSWORD)
+#   APPLE_SIGNING_IDENTITY               "Developer ID Application: ... (TEAMID)"
+#   APPLE_ID                             Apple ID email
+#   APPLE_APP_PASSWORD                   app-specific password (APPLE_PASSWORD)
+#   APPLE_TEAM_ID                        10-char team id
+# Without them, the run prints a ::notice:: and falls back to ad-hoc
+# signing (the existing behavior).
 #
 # - A tag `vX.Y.Z` (or `vX.Y.Z-pre`) that matches Cargo.toml's version makes a
-#   draft release, builds the DMG and uploads it there, then publishes the
-#   release: no one sees it before its DMG is in it.
-# - Run by hand (workflow_dispatch), it builds the DMG as the run's artifact;
-#   with `create_release` it also makes the release and publishes it.
+#   draft release, builds both DMGs and uploads them there, then publishes
+#   the release: no one sees it before its DMGs are in it.
+# - Run by hand (workflow_dispatch), it builds both DMGs as the run's
+#   artifacts; with `create_release` it also makes the release and
+#   publishes it.
 name: Release
 
 on:
@@ -17,7 +40,7 @@ on:
   workflow_dispatch:
     inputs:
       create_release:
-        description: 'Also create and publish the release (otherwise only the run''s artifact)'
+        description: 'Also create and publish the release (otherwise only the run''s artifacts)'
         type: boolean
         default: false
       release_tag:
@@ -112,7 +135,7 @@ jobs:
             --notes-file "$body"
 
   macos:
-    name: macOS (Apple silicon)
+    name: macOS (${{ matrix.arch }})
     needs: [check_tag_version, create_release]
     if: >-
       ${{ always() && (
@@ -120,26 +143,92 @@ jobs:
         github.event_name == 'workflow_dispatch'
       ) }}
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two archs, one runner (macos-15, Apple silicon). The Intel job
+        # cross-compiles with --target x86_64-apple-darwin; cargo-packager
+        # reads CARGO_PACKAGER_TARGET and uses target/<triple>/release/ for
+        # its binary, so the aarch64 build that before-each-package-command
+        # runs (for resources and the rpath tweak) does not leak into the
+        # DMG.
+        include:
+          - arch: aarch64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            target: x86_64-apple-darwin
     env:
-      ARCH: aarch64
+      ARCH: ${{ matrix.arch }}
+      TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Add the cross target (Intel job on the Apple-silicon runner)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: rustup target add x86_64-apple-darwin
+
       - uses: Swatinem/rust-cache@v2
         with:
-          key: release-aarch64
+          key: release-${{ matrix.target }}
 
       - name: Install the packaging tools
         run: |
           cargo install cargo-packager --locked
           cargo install robius-packaging-commands --locked
 
-      # Ad hoc signed (Cargo.toml's signing_identity "-"), not notarized: there
-      # is no Developer ID for OctoBuddy yet.
+      # Ad hoc signed (Cargo.toml's signing_identity "-"), not notarized.
+      # When the notarization secrets are all set, the steps that follow
+      # override signing_identity and feed cargo-packager the cert + Apple
+      # ID creds it needs to sign with a Developer ID and run
+      # xcrun notarytool + xcrun stapler on the .app.
+      - name: Are the Apple notarization secrets all configured?
+        id: notarization
+        shell: bash
+        env:
+          CERT: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12_BASE64 }}
+          CERT_PWD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APP_PWD: ${{ secrets.APPLE_APP_PASSWORD }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -n "$CERT" && -n "$CERT_PWD" && -n "$IDENTITY" && -n "$APPLE_ID" && -n "$APP_PWD" && -n "$TEAM" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Apple notarization secrets: configured — Developer ID signing + notarytool enabled."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Apple notarization secrets not all set on this repo; packaging ad-hoc signed, not notarized. See README's Download."
+          fi
+
+      # Override signing_identity in Cargo.toml only on the runner's copy;
+      # the repo is not changed (the runner is discarded too, but be tidy).
+      - name: Use Developer ID for signing
+        if: steps.notarization.outputs.configured == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp Cargo.toml Cargo.toml.orig
+          sed -i.tmp "s|signing_identity = \"-\"|signing_identity = \"${{ secrets.APPLE_SIGNING_IDENTITY }}\"|g" Cargo.toml
+          rm Cargo.toml.tmp
+          # Be doubly sure: a follow-up step restores the original on failure.
+          echo "Cargo.toml signed-identity now: $(awk '/signing_identity/ {print; exit}' Cargo.toml)"
+          trap 'mv Cargo.toml.orig Cargo.toml' EXIT
+
+      # Cross-compile for the matrix target; cargo-packager with
+      # --target $TARGET then picks the binary up from target/$TARGET/release/.
+      - name: Build the binary for this target
+        run: cargo build --release --target "$TARGET"
+
       - name: Package the DMG
-        run: cargo packager --release --formats dmg
+        env:
+          APPLE_CERTIFICATE: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_DEVELOPER_ID_CERT_P12_BASE64 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_CERT_PASSWORD || '' }}
+          APPLE_ID: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_APP_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_TEAM_ID || '' }}
+        run: cargo packager --release --formats dmg --target "$TARGET"
 
       - name: Name it and sum it
         id: dmg
@@ -157,7 +246,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: OctoBuddy-macos-aarch64
+          name: OctoBuddy-macos-${{ matrix.arch }}
           path: |
             ${{ steps.dmg.outputs.file }}
             ${{ steps.dmg.outputs.file }}.sha256
@@ -180,15 +269,17 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      # Only a release with its DMG and that DMG's sum in it.
+      # Only a release with both DMGs and both sums in it.
       - name: Check its assets
         shell: bash
         run: |
           tag="${{ needs.create_release.outputs.tag }}"
           assets=$(gh release view "$tag" --repo "${{ github.repository }}" --json assets --jq '.assets[].name')
           echo "$assets"
-          grep -q 'macos-aarch64\.dmg$' <<< "$assets" || { echo "::error::No DMG in $tag."; exit 1; }
-          grep -q 'macos-aarch64\.dmg\.sha256$' <<< "$assets" || { echo "::error::No DMG sum in $tag."; exit 1; }
+          for arch in aarch64 x86_64; do
+            grep -q "macos-${arch}\.dmg$"       <<< "$assets" || { echo "::error::No macos-${arch}.dmg in $tag."; exit 1; }
+            grep -q "macos-${arch}\.dmg\.sha256$" <<< "$assets" || { echo "::error::No macos-${arch}.dmg.sha256 in $tag."; exit 1; }
+          done
 
       - name: Publish it
         shell: bash

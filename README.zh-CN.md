@@ -13,7 +13,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 ## 下载
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有适用于 Apple 芯片 Mac 的 DMG（`macos-aarch64`），附有 `.sha256`；暂不支持 Intel Mac。它只做了 ad-hoc 签名，还没经过 Apple 公证，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有两份 macOS DMG，都附 `.sha256`：`OctoBuddy-<version>-macos-aarch64.dmg` 适用于 Apple 芯片（M1 及以后）的 Mac，`OctoBuddy-<version>-macos-x86_64.dmg` 适用于 Intel Mac。公证流程已经接好——一旦配置好 Developer ID 证书，GitHub Action 就会用 Developer ID 签名，再走 `xcrun notarytool submit --wait` 和 `xcrun stapler staple`；在那之前，DMG 只做了 ad-hoc 签名，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
 
 ## Agent 与模型
 
@@ -263,7 +263,7 @@ OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直
   - agent 的程序用它自带的或你自己的（见上文）。
 - **数据**在 `~/.octobuddy`（用 `OCTOBUDDY_HOME` 可以换目录），宿主机上和 OctoSense 里是同一份。
 - **还没做：**
-  - 经过公证的安装包，以及 Linux 和 Windows 安装包（现在的 DMG 只做了 ad-hoc 签名，见上文「下载」）；
+  - Linux 和 Windows 安装包（公证流程已经接好；仓库里配上 Developer ID secrets 后，两份 macOS DMG 就会自动公证好再发）；
   - 把 octos 打进应用包里。
 - **已验证：**2026-10-02 在 macOS（Apple silicon）上验证：`cargo run` 启动了 `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`，窗口标题是 OctoBuddy；关于页和 AI Providers 页都说明它是单独运行的，并写明了读取的 profile。
 
