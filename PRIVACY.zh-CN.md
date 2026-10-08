@@ -154,6 +154,8 @@ OctoBuddy **没有这些**。代码里没有 Sentry、Bugsnag、Datadog、OpenTe
 
 Claude Code 子进程会带上 `DISABLE_TELEMETRY`、`DISABLE_ERROR_REPORTING`、`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`（`src/claude_proxy.rs:87-89`）。Claude Code 还会带上 `DISABLE_AUTOUPDATER=1`（`README.md:52`）。
 
+这些 agent 本身是其他厂商的程序。OctoBuddy 只为 Claude Code 设置了上面这些变量（`src/lead.rs:324-326`）；用你自己的 provider 时，它们的模型流量经过 OctoBuddy 的代理。除此之外，Claude Code（用你自己的登录时）、Codex、pi 和 octos 会发送什么，由它们自己的设置和隐私政策决定，不由 OctoBuddy 控制。
+
 ## OctoSense（`octosense-module` 构建）
 
 OctoBuddy 跑在 OctoSense 里时：
@@ -171,7 +173,7 @@ OctoSense 里 shell 自己的 AI providers app 是唯一来源；OctoBuddy 的 p
 
 - **OctoBuddy 自己的全部数据：** 删掉 `<data>` 目录（默认 `~/.octobuddy`，或者 `$OCTOBUDDY_HOME` 指向的目录）。
 - **项目侧的数据：** 删掉每个项目的 `.octobuddy/`。
-- **OctoBuddy 写入 macOS 钥匙串的条目**（`<KEY_ENV>::octobuddy`）：到「设置 › AI Providers」页面里 **Remove** 那个 key 对应的最后一行（它会顺手把钥匙串条目也删掉 — `src/own_providers.rs:70-73`，`src/own_providers.rs:118-122`）；或者手动用 `security -i delete-generic-password -s octos -a <account>` 删。
+- **OctoBuddy 写入 macOS 钥匙串的条目**（`<KEY_ENV>::octobuddy`）：到「设置 › AI Providers」页面里 **Remove** 那个 key 对应的最后一行（它会顺手把钥匙串条目也删掉 — `src/own_providers.rs:70-73`，`src/own_providers.rs:118-122`）；或者手动用 `security delete-generic-password -s octos -a <account>` 删。
 - **在 OctoSense 里：** 钥匙串条目归 shell 所有，不归 OctoBuddy，要 shell 自己去删。
 - **App Hub 发布者密钥**（仅宿主版，App Hub 用）：删 `<data>/publisher/<id>.key`。
 - **卸载：** `rm -rf /Applications/OctoBuddy.app`，再删 `<data>` 和项目的 `.octobuddy/` 文件夹。

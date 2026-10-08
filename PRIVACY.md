@@ -154,6 +154,8 @@ OctoBuddy sends **none**. There is no Sentry, Bugsnag, Datadog, OpenTelemetry, M
 
 `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` are set on Claude Code children (`src/claude_proxy.rs:87-89`). Claude Code runs with `DISABLE_AUTOUPDATER=1` (`README.md:52`).
 
+The agents themselves are other vendors' programs. OctoBuddy sets the variables above for Claude Code (`src/lead.rs:324-326`), and on a provider of yours their model traffic goes through its proxy; beyond that, what Claude Code (on your own login), Codex, pi and octos send is governed by their own settings and policies, not by OctoBuddy.
+
 ## OctoSense (the `octosense-module` build)
 
 When OctoBuddy runs inside OctoSense:
@@ -171,7 +173,7 @@ The shell's own AI providers app is the source of truth on OctoSense; OctoBuddy'
 
 - **Everything OctoBuddy keeps for itself:** delete the `<data>` directory (default `~/.octobuddy`, or what `$OCTOBUDDY_HOME` points to).
 - **Project-side data:** delete each project's `.octobuddy/` folder.
-- **macOS keychain items** OctoBuddy wrote (`<KEY_ENV>::octobuddy`): open the workbench's AI providers page and **Remove** the last row that uses a `KEY_ENV` (it deletes the keychain item too — `src/own_providers.rs:70-73`, `src/own_providers.rs:118-122`); or remove them by hand with `Security -i delete-generic-password -s octos -a <account>`.
+- **macOS keychain items** OctoBuddy wrote (`<KEY_ENV>::octobuddy`): open Settings › AI Providers and **Remove** the last row that uses a `KEY_ENV` (it deletes the keychain item too — `src/own_providers.rs:70-73`, `src/own_providers.rs:118-122`); or remove them by hand with `security delete-generic-password -s octos -a <account>`.
 - **Inside OctoSense:** the keychain items are the shell's, not OctoBuddy's, and stay until the shell pulls them.
 - **App Hub publisher key** (host, App Hub only): delete `<data>/publisher/<id>.key`.
 - **Uninstall:** `rm -rf /Applications/OctoBuddy.app`, then delete `<data>` and project `.octobuddy/` folders as above.
