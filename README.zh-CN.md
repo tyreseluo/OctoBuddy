@@ -1,6 +1,6 @@
 # OctoBuddy
 
-[English](README.md) | 简体中文
+[English](README.md) | 简体中文 | [隐私说明](PRIVACY.zh-CN.md) ([English](PRIVACY.md))
 
 OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 - **外环**把需求拆成若干切片的计划，并审查做回来的结果；
