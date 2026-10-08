@@ -10,7 +10,7 @@ It was called OctoLoop until 2026-10-02.
 
 ## Download
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have two macOS DMGs, each with its `.sha256`: `OctoBuddy-<version>-macos-aarch64.dmg` for Macs with Apple silicon (M1 and later), and `OctoBuddy-<version>-macos-x86_64.dmg` for Intel Macs (cross-built on Apple silicon; on an Intel Mac, octos is yours: Its own agents, below). The release workflow can sign with a Developer ID and notarize: it does once the repository has the Apple secrets its header lists. There is no Developer ID for OctoBuddy yet, so that path has not run, and the DMGs are signed ad hoc, and macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have two macOS DMGs, each with its `.sha256`: `OctoBuddy-<version>-macos-aarch64.dmg` for Macs with Apple silicon (M1 and later), and `OctoBuddy-<version>-macos-x86_64.dmg` for Intel Macs (cross-built on Apple silicon; on an Intel Mac, octos is yours: Its own agents, below). The release workflow can sign with a Developer ID and notarize: it does once the repository has the Apple secrets its header lists. The Intel DMG was built on an Apple silicon Mac and opened under Rosetta on 2026-10-08 (its window, icon and fonts); no Intel Mac has run it yet. There is no Developer ID for OctoBuddy yet, so that path has not run, and the DMGs are signed ad hoc, and macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
 
 ## Agents and models
 

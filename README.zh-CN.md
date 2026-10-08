@@ -13,7 +13,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
 
 ## 下载
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有两份 macOS DMG，都附 `.sha256`：`OctoBuddy-<version>-macos-aarch64.dmg` 适用于 Apple 芯片（M1 及以后）的 Mac，`OctoBuddy-<version>-macos-x86_64.dmg` 适用于 Intel Mac（在 Apple 芯片上交叉编译；Intel Mac 上 octos 用你自己的，见下文「自带的 agent」）。发布流程可以用 Developer ID 签名并公证：仓库配上流程文件开头列出的 Apple secrets 后就会走这条路。OctoBuddy 还没有 Developer ID，这条路还没跑过，DMG 目前只做了 ad-hoc 签名，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) 里有两份 macOS DMG，都附 `.sha256`：`OctoBuddy-<version>-macos-aarch64.dmg` 适用于 Apple 芯片（M1 及以后）的 Mac，`OctoBuddy-<version>-macos-x86_64.dmg` 适用于 Intel Mac（在 Apple 芯片上交叉编译；Intel Mac 上 octos 用你自己的，见下文「自带的 agent」）。发布流程可以用 Developer ID 签名并公证：仓库配上流程文件开头列出的 Apple secrets 后就会走这条路。Intel DMG 已于 2026-10-08 在 Apple 芯片 Mac 上构建，并在 Rosetta 下打开（窗口、图标、字体正常）；还没在真正的 Intel Mac 上跑过。OctoBuddy 还没有 Developer ID，这条路还没跑过，DMG 目前只做了 ad-hoc 签名，所以 macOS 第一次会拦下 OctoBuddy：先打开一次，再到「系统设置 › 隐私与安全性」点「仍要打开」；或者运行 `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`。
 
 ## Agent 与模型
 
