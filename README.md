@@ -10,7 +10,7 @@ It was called OctoLoop until 2026-10-02.
 
 ## Download
 
-[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have two macOS DMGs, each with its `.sha256`: `OctoBuddy-<version>-macos-aarch64.dmg` for Macs with Apple silicon (M1 and later), and `OctoBuddy-<version>-macos-x86_64.dmg` for Intel Macs. The notarization workflow is wired up — when a Developer ID certificate is configured, the GitHub Action signs with Developer ID and runs `xcrun notarytool submit --wait` then `xcrun stapler staple`; until that certificate is in place, the DMGs are signed ad hoc, and macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
+[Releases](https://github.com/tyreseluo/OctoBuddy/releases) have two macOS DMGs, each with its `.sha256`: `OctoBuddy-<version>-macos-aarch64.dmg` for Macs with Apple silicon (M1 and later), and `OctoBuddy-<version>-macos-x86_64.dmg` for Intel Macs (cross-built on Apple silicon; on an Intel Mac, octos is yours: Its own agents, below). The release workflow can sign with a Developer ID and notarize: it does once the repository has the Apple secrets its header lists. There is no Developer ID for OctoBuddy yet, so that path has not run, and the DMGs are signed ad hoc, and macOS stops OctoBuddy the first time: open it once, then choose **Open Anyway** in System Settings › Privacy & Security, or run `xattr -dr com.apple.quarantine /Applications/OctoBuddy.app`.
 
 ## Agents and models
 
@@ -247,7 +247,7 @@ As Rinx does, OctoBuddy runs first as an app of its own on this computer, and th
   - The agents' programs are its own copies (above), or yours.
 - **Its data** is in `~/.octobuddy` (`OCTOBUDDY_HOME` names another folder), the same on the host and in OctoSense.
 - **Not done yet:**
-  - Linux and Windows packages (the notarization pipeline is wired up; once the Developer ID is in the repo's secrets, both macOS DMGs ship notarized);
+  - a notarized package (the workflow is ready; it waits for a Developer ID: Download, above), and Linux and Windows ones;
   - octos shipped inside the app.
 - **Verified** on macOS (Apple silicon) on 2026-10-02: `cargo run` started `target/debug/OctoBuddy.app/Contents/MacOS/OctoBuddy`, in a window titled OctoBuddy, and its About and AI Providers pages said it runs on its own and named the profile it reads.
 
