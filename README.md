@@ -1,6 +1,6 @@
 # OctoBuddy
 
-English | [简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md) | [Privacy](PRIVACY.md) ([中文](PRIVACY.zh-CN.md))
 
 OctoBuddy is OctoSense's native coding app with two loops. An **outer loop** turns a request into a plan of slices and reviews what comes back. **Inner loops** work on the slices in parallel, in the project's folder (or its git worktree). A plain **chat** talks to one agent, with no loops.
 
