@@ -21,12 +21,12 @@ standalone = []
 octosense-module = ["dep:makepad-app-module"]
 
 [dependencies]
-makepad-widgets = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54" }
+makepad-widgets = { git = "https://github.com/OctoSense-org/makepad.git", rev = "32d6415fb7476345ad36ee4f98d6f844d1f07fd2" }
 # The module OctoSense hosts (feature `octosense-module`).
-makepad-app-module = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54", optional = true }
+makepad-app-module = { git = "https://github.com/OctoSense-org/makepad.git", rev = "32d6415fb7476345ad36ee4f98d6f844d1f07fd2", optional = true }
 # The native TUI plugin: an agent's own terminal UI, in a terminal of
 # Makepad's (its PTY and emulator), as Director embeds it.
-makepad-terminal = { git = "https://github.com/OctoSense-org/makepad.git", rev = "1f3b1dedfbb81424eb8dbf69e5e2c634fa73dc54" }
+makepad-terminal = { git = "https://github.com/OctoSense-org/makepad.git", rev = "32d6415fb7476345ad36ee4f98d6f844d1f07fd2" }
 # Reads the providers OctoSense's AI providers app enabled. Its loopback
 # proxy adds their key to the requests it forwards; no child sees the key.
 octosense-llm-config = { git = "https://github.com/OctoSense-org/OctoSense.git", rev = "c19984edbdc0da98ac5675076b8eedd3375728a2" }
@@ -35,7 +35,7 @@ octosense-llm-config = { git = "https://github.com/OctoSense-org/OctoSense.git",
 octosense-app-peers = { git = "https://github.com/OctoSense-org/OctoSense.git", rev = "c19984edbdc0da98ac5675076b8eedd3375728a2", features = ["octos-core"] }
 # An app project's app, previewed under its manifest the way the shell runs
 # one (admission, the isolate's jail and limits, its artwork's origin).
-octosense-app-policy = { git = "https://github.com/OctoSense-org/OctoSense-App-Hub", rev = "58c3c8aed8fc811a16d67c5f784a8a44214ff876", features = ["splash"] }
+octosense-app-policy = { git = "https://github.com/OctoSense-org/OctoSense-App-Hub", rev = "2e5768964f15916cdb66cc6824f7671dafc6445a", features = ["splash"] }
 # The octos server's JSON-RPC frames: deep and version-dependent, read by field.
 serde_json = "1"
 # The agents' programs OctoBuddy keeps: checked against their publishers'
