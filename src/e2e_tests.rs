@@ -321,6 +321,8 @@ fn a_report_the_facts_contradict_is_sent_back_and_its_accept_refused() {
     assert!(wrong.iter().any(|s| s.contains("README.md")), "README.md never changed: {found:?}");
     let lines = claims::lines(&found, &facts);
     assert!(lines.iter().all(|l| l.starts_with("[claims]")) && lines[0].starts_with("[claims] ✗"), "{lines:?}");
+    // Shown with --nocapture: what each step said (docs/evidence/claims/).
+    println!("REPORT (the stub's):\n{report}\n\nOCTOBUDDY'S RUN: `{check}` passed={} ({})\nCOMMIT: {made}\n\nCLAIMS:\n{}", outcome.passed, outcome.status, lines.join("\n"));
 
     // What goes back to it, and what its outer loop's accept meets.
     let gate = claims::gate(Some(&found[..]), Some(&ran), Some(&[][..]), Some(&sha));
@@ -331,6 +333,7 @@ fn a_report_the_facts_contradict_is_sent_back_and_its_accept_refused() {
     slice.gate = Some(gate);
     let why = claims::refuse(&slice).expect("its accept is refused");
     assert!(why.contains("failed") && why.contains("\"override\""), "{why}");
+    println!("\nBACK TO THE INNER LOOP:\n{back}\n\nACCEPT REFUSED: {why}");
 
     let wave_2 = peer_with("docs-write", 2, None, "queued");
     let accept = plan::split_reply("```octobuddy-review\n{\"branches\":[{\"slug\":\"feat-add\",\"verdict\":\"accept\",\"why\":\"done\"}]}\n```");
@@ -339,6 +342,7 @@ fn a_report_the_facts_contradict_is_sent_back_and_its_accept_refused() {
     let over = plan::split_reply("```octobuddy-review\n{\"branches\":[{\"slug\":\"feat-add\",\"verdict\":\"accept\",\"why\":\"done\",\"override\":\"the person asked for it as it is\"}]}\n```");
     slice.review = Some(claims::record(&slice, &over.reviews[0]).expect("an override is recorded"));
     assert_eq!(slice.review.as_deref(), Some("accept (override: the person asked for it as it is): done"));
+    println!("\nWITH AN OVERRIDE, RECORDED: {}", slice.review.as_deref().unwrap_or(""));
     assert!(wave_may_start(&wave_2, &[slice, wave_2.clone()]), "wave 2 starts once it is accepted over the check");
 
     drop(_env);

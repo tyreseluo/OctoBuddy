@@ -1,0 +1,33 @@
+# a_report_the_facts_contradict_is_sent_back_and_its_accept_refused — 2026-10-11 23:08 CST
+# OctoBuddy 00be93b (+ the printing in this test), macOS 26.0.1 arm64
+# command: cargo test --locked a_report_the_facts_contradict -- --nocapture
+# SYNTHETIC: the inner loop is a stub (src/stubs/stub_octos.py, [stub:lie] mode) that breaks calc.add yet reports success;
+# no model is called. OctoBuddy's side is real: its check run (python3), its git commit, the claims, the gate, the review parse.
+
+REPORT (the stub's):
+status: done
+verified: `python3 -c 'import calc; assert calc.add(1, 2) == 3'` passes; all tests pass
+decide: none
+notes: updated README.md
+
+OCTOBUDDY'S RUN: `python3 -c 'import calc; assert calc.add(1, 2) == 3'` passed=false (exit 1)
+COMMIT: 122f656 feat(calc): 新增 add
+
+CLAIMS:
+[claims] ✗ "`python3 -c 'import calc; assert calc.add(1, 2) == 3'` passes" — OctoBuddy's run of `python3 -c 'import calc; assert calc.add(1, 2) == 3'` FAILED (exit 1)
+[claims] ✗ "all tests pass" — OctoBuddy's run of `python3 -c 'import calc; assert calc.add(1, 2) == 3'` FAILED (exit 1)
+[claims] ✗ it changed `README.md` — `README.md` is the same as when it began, and not in its commit
+
+BACK TO THE INNER LOOP:
+OctoBuddy held your report against its own run and the files, and these claims do not hold:
+- "`python3 -c 'import calc; assert calc.add(1, 2) == 3'` passes" — OctoBuddy's run of `python3 -c 'import calc; assert calc.add(1, 2) == 3'` FAILED (exit 1)
+- "all tests pass" — OctoBuddy's run of `python3 -c 'import calc; assert calc.add(1, 2) == 3'` FAILED (exit 1)
+- it changed `README.md` — `README.md` is the same as when it began, and not in its commit
+
+Fix the work if it is wrong; if the work is right, correct the report. Then end with your octobuddy-report block again, claiming only what OctoBuddy's run will confirm (say plainly what you did not run).
+
+ACCEPT REFUSED: its check `python3 -c 'import calc; assert calc.add(1, 2) == 3'` failed (exit 1); its report claims what OctoBuddy found otherwise: "`python3 -c 'import calc; assert calc.add(1, 2) == 3'` passes" — OctoBuddy's run of `python3 -c 'import calc; assert calc.add(1, 2) == 3'` FAILED (exit 1); "all tests pass" — OctoBuddy's run of `python3 -c 'import calc; assert calc.add(1, 2) == 3'` FAILED (exit 1); it changed `README.md` — `README.md` is the same as when it began, and not in its commit. Send it back with what to fix (verdict fix), close it, or accept it with "override": "<why it is right anyway>" (the person sees it).
+
+WITH AN OVERRIDE, RECORDED: accept (override: the person asked for it as it is): done
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 195 filtered out; finished in 0.60s
