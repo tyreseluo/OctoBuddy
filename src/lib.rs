@@ -2804,6 +2804,8 @@ impl OctoBuddyView {
         self.sync(cx);
         // And what waited goes on.
         self.resume();
+        // Receipts a previous run left mid-way: read back, never done again.
+        self.receipts_recover();
         self.save();
         self.sync(cx);
     }
@@ -3534,8 +3536,9 @@ impl OctoBuddyView {
         self.view.text_input(cx, ids!(composer)).set_key_focus(cx);
     }
 
-    /// Publishes the shown app project to the local App Hub, off the UI thread.
-    fn publish_app(&mut self, cx: &mut Cx) {
+    /// Publishes the shown app project to the local App Hub, off the UI
+    /// thread: as `shown` (the app when its button was drawn), or not at all.
+    fn publish_app(&mut self, cx: &mut Cx, shown: receipts::Snapshot) {
         let Some(at) = self.selected.filter(|at| self.store.session(*at).is_some()) else { return };
         if self.publishing.is_some() {
             return;
@@ -3545,9 +3548,10 @@ impl OctoBuddyView {
         self.publishing = Some(session.clone());
         self.system(at, i18n::t("Publishing it to the local App Hub: a signed copy of the bundle, its screenshots taken, App Hub's gate run…",
             "正在发布到本地 App Hub：签名一份 bundle 副本、补截图、跑 App Hub 的检查……"));
-        let inbox = self.rt.inbox.clone();
+        let (inbox, lang) = (self.rt.inbox.clone(), i18n::lang());
         std::thread::spawn(move || {
-            let result = plugins::app_publish::publish(&project);
+            i18n::set(lang);
+            let result = plugins::app_publish::publish(&project, receipts::Kind::Publish, Some(&shown), "person");
             events::post(&inbox, events::LoopEvent::Published { session, result });
         });
         self.relayout(cx);
