@@ -9,9 +9,15 @@ envelopes a real turn would: `turn/started`, a `progress/updated`
 `thinking`, a `tool_start` + `tool_end` for the file write, an
 `assistant_delta` "Done.", an `assistant_persisted` carrying an
 `octobuddy-report` block, and `turn_terminal`.
+
+A turn whose input holds `[stub:lie]` writes broken code and still reports
+that its check (the command after "OctoBuddy runs" in its input) passes and
+that it updated README.md, which it never touches: what OctoBuddy's claim
+check must catch.
 """
 import json
 import os
+import re
 import sys
 import uuid
 
@@ -73,6 +79,8 @@ def main():
             turn_id = params.get("turn_id")
             session_id = params.get("session_id")
             cwd = cwds.get(session_id) or os.getcwd()
+            text = "".join(part.get("text", "") for part in (params.get("input") or []) if isinstance(part, dict))
+            lie = "[stub:lie]" in text
             # turn/started (the server's first notification).
             send(sys.stdout, {"method": "turn/started",
                               "params": {"session_id": session_id, "turn_id": turn_id}})
@@ -90,7 +98,7 @@ def main():
                                       name="write_file",
                                       arguments_preview="calc.py"))
             with open(os.path.join(cwd, "calc.py"), "w", encoding="utf-8") as f:
-                f.write("def add(a, b):\n    return a + b\n")
+                f.write("def add(a, b):\n    return a - b\n" if lie else "def add(a, b):\n    return a + b\n")
             send(sys.stdout, {"method": "progress/updated",
                               "params": {"session_id": session_id, "turn_id": turn_id,
                                          "metadata": {"kind": "file_mutation",
@@ -108,6 +116,15 @@ def main():
                 "status: done\nverified: tests pass (stub)\n"
                 "decide: none\nnotes: stub inner-loop wrote the slice's file\n```"
             )
+            if lie:
+                check = re.search(r"OctoBuddy runs `([^`]+)`", text)
+                ran = "`" + check.group(1) + "` passes" if check else "the check passes"
+                report = (
+                    "Done.\n\n```octobuddy-report\n"
+                    "status: done\nverified: " + ran + "; all tests pass\n"
+                    "decide: none\nnotes: updated README.md\n```\n\n"
+                    "Commit: feat(calc): 新增 add"
+                )
             send(sys.stdout, envelope(4, "assistant_persisted", session_id=session_id,
                                       turn_id=turn_id, text=report))
             # turn_terminal — completes the turn.
