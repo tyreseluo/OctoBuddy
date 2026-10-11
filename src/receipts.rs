@@ -1011,4 +1011,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(hub);
         let _ = std::fs::remove_dir_all(project);
     }
+
+    /// This machine's local App Hub, read back for an app it published from
+    /// `OCTOBUDDY_LIVE_APP` (else `../octobuddy-apps/pocket-ledger`): its
+    /// HEAD, as committed, confirmed on every check. Its working copy is
+    /// printed too: a change there since is told apart.
+    #[test]
+    #[ignore]
+    fn reads_back_a_published_app_from_the_local_hub() {
+        let project = std::env::var("OCTOBUDDY_LIVE_APP").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../octobuddy-apps/pocket-ledger").to_string());
+        let id = crate::plugins::app_publish::app_id(&project).expect("an app project");
+        let head = workspace::git(&project, &["rev-parse", "HEAD"]).ok();
+        let hub = crate::plugins::app_publish::hub_dir();
+        // Its HEAD as committed, out of the working copy's way.
+        let committed = std::env::temp_dir().join(format!("octobuddy-live-readback-{}", std::process::id()));
+        std::fs::create_dir_all(&committed).unwrap();
+        let out = std::process::Command::new("sh").arg("-c").arg(format!("git -C '{project}' archive HEAD | tar -x -C '{}'", committed.display())).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let content = crate::plugins::app_publish::content(&committed.display().to_string());
+        let (found, checks) = read_back_publish(&hub, &id, None, &content, None, head.as_deref());
+        for c in &checks {
+            println!("HEAD {:?}: {}: {:?} {}", head, c.what, c.ok, c.detail);
+        }
+        let worked = crate::plugins::app_publish::content(&project);
+        let (now, _) = read_back_publish(&hub, &id, None, &worked, None, head.as_deref());
+        println!("working copy ({}): {}", short(&worked), now.map(|v| format!("published as {v}")).unwrap_or_else(|| "not what is published".into()));
+        let _ = std::fs::remove_dir_all(&committed);
+        assert!(found.is_some() && checks.iter().all(|c| c.ok == Some(true)), "{checks:?}");
+    }
 }

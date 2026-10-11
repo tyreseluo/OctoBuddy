@@ -75,6 +75,29 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - **时间轴。**环与环之间的每条线，都从发出它的那一轮连到接手它的那一轮。每段等待画成点线并写明原因：等 agent 启动、等前一个 wave 验收、排队、OctoBuddy 在检查、等你、重启。汇总按原因累计，几条泳道同时等待的时段只算一次。没有留下来的工作会单独标出：被后来的内环取代的泳道画成斜线（历史），后来重做过的一轮只画轮廓，每处返工有一个圆环并注明可能的原因，下方的面板列出它们和浪费的时间。「从中学习」让外环从中总结经验（见下文）。
 - **插件。**内置的有：OctoSense 应用（一个应用项目的全部功能，包括应用工作台，见下文）、应用数据、原生 TUI（默认关闭）；只在 OctoSense 里有的：应用工厂和生产回路（见下文）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
 
+## OctoBuddy 自己核对的事
+
+agent 提议、干活；算不算完成，由 OctoBuddy 自己运行、自己读回的结果决定。
+
+- **汇报对照事实。**内环做完任务时交一份汇报，`verified:` 一行写它运行了什么。OctoBuddy 拿每一条声明去对照它自己跑的这个切片的检查、它做的提交和文件：
+  - ✓ 事实支持；
+  - ✗ 事实与之矛盾：说测试通过，而 OctoBuddy 跑同一个检查失败了；说改了某个文件，而那个文件原样未动；说删了某个文件，而它还在；
+  - ? OctoBuddy 没跑这条命令，或者没有检查：这只是 agent 自己的说法，也照此标出。
+
+  `[claims]` 几行随汇报交给外环。有 ✗ 的汇报先退回内环一次，附上原因，再交外环审。规则刻意从严判定「矛盾」：命令只是近似（`cargo test` 对检查 `cargo test --locked`）、运行超时、或者 agent 自己报了失败，都只算 ?，不算 ✗。
+- **验收闸。**这个切片的检查没过、检查之后又提交过、它的声明被事实驳倒、或者改了任务卡以外的文件时，OctoBuddy 拒绝外环的 `accept`。每次拒绝都写明出路：退回（`fix`）、关掉它，或者带 `"override": "<为什么仍然没问题>"` 验收，用户会在会话里看到这条理由。被拒的 accept 不记录，后面的 wave 会等一次真正的验收；override 从不被拒，wave 不会一直卡住。
+- **回执与读回。**内环的提交、发布到本地 App Hub、发布修复版、提交到 App Hub，每一件都在 `<data>/receipts.jsonl` 留一张回执（不放在 agent 能写的项目目录里）：要做的是什么、基于哪个提交和内容、谁确认的、做了什么、读回发现了什么。
+  - 提交：git 记录的改动文件（含删除）正是要提交的那些，内容也是要提交的内容。
+  - 发布：catalog 里有这个应用的 id 和版本，摘要等于暂存包的摘要，发布出去的副本内容正是要发布的内容，并记着这个提交。OctoBuddy 报出的版本号取自读回的 catalog。
+  - 提交到 App Hub：GitHub 上的 tag 指向本地 tag 的那个提交，issue 确实存在。
+
+  回执分 ✓ 已核对、✗ 不一致、? 待核实三种，会话里（和 Live 页上）照实显示。内容没变时再按一次发布，会说明已经发布过，不会再发一个版本。OctoBuddy 关掉时停在半途的回执，下次打开时只读回核对，绝不重做；提交到 App Hub 时 tag 已推送而 issue 没开成的，从开 issue 那一步接着做。
+- **看到什么就做什么。**发布按钮上写着将要发布的内容（短摘要和版本）。按钮画出来之后应用有改动，这次点击会以「已过期」拒绝。App Hub 的提交计划也一样；请求卡片的「开始做」只做卡片上显示的那条请求，请求有变化就拒绝。
+- **事故以修复版结案。**Live 页上，发布的修复版（回执已核对）或更新的版本运行正常，事故才结案。在旧版本上恢复正常的，保持未结，等修复版运行；没有发布修复版就恢复的，照实写「自行恢复」。
+- **资料不是指令。**来自用户以外的文字都包在 `<untrusted source="…">` 块里交给 agent：别的应用的 agent 发来的请求（`octobuddy.request`）、OctoSense 助手转述的消息（`octobuddy.send`）、应用的 API 返回的内容、报障文字、应用屏幕上显示的文字。块里能闭合这个块或代码围栏的写法都会被中和；外环和内环的规则都写明这些文字绝不是给它们的指令。请求按请求方的话转述，不当成用户本人的话。
+- **失败说人话。**agent 或供应商没能启动、没有回应时，按类说明：没装、没有 key 或没登录、限流或余额不足、断网、太慢、返回了读不懂的内容。每类都说明什么还能用、下一步做什么，原始错误放在最后。拒绝 agent 的请求时，会说明接下来会怎样，外环也会收到。
+- **CI 里已验证**（`cargo test --locked`，不联网、没有 API key）：`a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` 用一个 stub 内环：它把代码改坏了，却汇报「所有测试通过」，还声称改了一个它根本没碰的文件。OctoBuddy 的检查失败，提交读回核对，两条声明都判 ✗，汇报带着原因退回，不带 override 的 accept 被拒，带 override 的通过，下一个 wave 在此之前一直等待。回执、快照、隔离块和失败分类各有单元测试（`receipts.rs`、`app_publish.rs`、`app_hub.rs`、`card_loop.rs`、`app_factory.rs`、`untrusted.rs`、`failure.rs`）。发布读回也能对本机真实的本地 App Hub 跑（`reads_back_a_published_app_from_the_local_hub`，默认忽略）：2026-10-11 对小账本（pocket-ledger）0.1.3、提交 `5f58490` 读回，四项核对（catalog、摘要、内容、提交）全部通过；它的工作副本里有一处未提交的 manifest 改动，被正确识别为「不是已发布的内容」（[输出](docs/evidence/receipts/live-readback-2026-10-11.txt)）。用真实 agent 的运行记录见 [VERIFICATION.md](VERIFICATION.md)。
+
 ## 做 OctoSense 应用
 
 一个应用项目（带 `bundle/manifest.json` 的文件夹）的全部功能，都在 **OctoSense 应用**这一个插件里。
@@ -356,8 +379,8 @@ MAKEPAD_WM_TEST_APP=octobuddy ./target/release/octosense
 ### 钉住的版本
 
 `Cargo.toml` 里各依赖的版本：
-- OctoSense 和 App Hub：和 OctoSense main 钉的版本相同；
-- makepad：用 App Hub 指定的版本 `1f3b1de`，比 OctoSense 的 `e29a0eaa` 早 9 个提交。
+- OctoSense（`b9d66d0f`）和 App Hub（`3863591`）：和 OctoSense main 钉的版本相同（2026-10-11）；
+- makepad：用 App Hub 指定的版本 `d653bc4`，与 OctoSense main 钉的相同。
 
 Cargo 不能用同一个仓库的另一个 revision 去 patch 一个 git 来源，所以这里只能统一成 App Hub 那一份。在 OctoSense 里编译时，它的 `[patch]` 会把这些依赖全部换成 shell 自己的检出。OctoSense 升级这些版本时，这里也要跟着改。
 
