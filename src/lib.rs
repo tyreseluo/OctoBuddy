@@ -75,6 +75,8 @@ mod claims;
 mod failure;
 pub mod receipts;
 mod untrusted;
+mod acceptance;
+mod liveness;
 
 #[cfg(test)]
 mod e2e_tests;
@@ -5815,6 +5817,7 @@ impl Widget for OctoBuddyView {
         // The production loop's runs that are due (and its page kept fresh).
         if self.clock.is_event(event).is_some() {
             self.card_loop_tick();
+            self.review_watch_tick();
             if self.page == Page::Live && now_secs().is_multiple_of(5) {
                 self.relayout(cx);
             }
