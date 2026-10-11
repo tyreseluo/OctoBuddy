@@ -163,6 +163,8 @@ pub struct Runtime {
     /// When each loop was last heard from: by peer id, and by
     /// `liveness::outer_key` for an outer loop (`liveness`).
     pub(crate) heard: HashMap<String, u64>,
+    /// What each loop is in the middle of (tool calls, subagents), by the same key.
+    pub(crate) busy: HashMap<String, crate::liveness::Busy>,
     /// Loops silent now whose session was told so (once per silence).
     pub(crate) silent_said: HashSet<String>,
 }
@@ -1916,6 +1918,7 @@ It works for you now: message it, review its work, or close it.)\n"));
         let Some(event) = self.claude_inner_event(event) else { return };
         self.rt.live.log(&event);
         // A sign of life from a loop: when it was last heard from (`liveness`).
+        crate::liveness::track(&mut self.rt.busy, &event, now_secs());
         if let Some(key) = crate::liveness::heard_key(&event) {
             self.rt.heard.insert(key, now_secs());
         }

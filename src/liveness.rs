@@ -23,6 +23,49 @@ fn silent_from(var: Option<&str>) -> u64 {
     var.and_then(|v| v.trim().parse::<u64>().ok()).map(|s| s.max(10)).unwrap_or(SILENT_SECS)
 }
 
+/// How long one step of its own (a command, a build) may run, unheard,
+/// before the loop counts as silent all the same (`OCTOBUDDY_TOOL_SILENT_SECS`, at least 30).
+const TOOL_SILENT_SECS: u64 = 900;
+
+pub fn tool_silent_secs() -> u64 {
+    std::env::var("OCTOBUDDY_TOOL_SILENT_SECS").ok().and_then(|v| v.trim().parse::<u64>().ok()).map(|s| s.max(30)).unwrap_or(TOOL_SILENT_SECS)
+}
+
+/// What a loop is in the middle of: its tool calls not ended yet (id, name,
+/// since), and its subagents at work.
+#[derive(Clone, Debug, Default)]
+pub struct Busy {
+    pub tools: Vec<(String, String, u64)>,
+    pub agents: u64,
+}
+
+impl Busy {
+    /// Its oldest tool call not ended yet: its name, and since when.
+    pub fn oldest(&self) -> Option<(&str, u64)> {
+        self.tools.iter().min_by_key(|(_, _, at)| *at).map(|(_, name, at)| (name.as_str(), *at))
+    }
+}
+
+/// Keeps `busy` up to date with one event: a tool call begun or ended, a
+/// turn over, the subagents at work.
+pub fn track(busy: &mut std::collections::HashMap<String, Busy>, event: &LoopEvent, now: u64) {
+    use LoopEvent::*;
+    match event {
+        LeadTool { session, id, name, .. } => busy.entry(outer_key(session)).or_default().tools.push((id.clone(), name.clone(), now)),
+        PeerTool { peer, id, name, .. } => busy.entry(peer.clone()).or_default().tools.push((id.clone(), name.clone(), now)),
+        LeadToolEnd { session, id, .. } => busy.entry(outer_key(session)).or_default().tools.retain(|(t, _, _)| t != id),
+        PeerToolEnd { peer, id, .. } => busy.entry(peer.clone()).or_default().tools.retain(|(t, _, _)| t != id),
+        PeerAgents { peer, running } => busy.entry(peer.clone()).or_default().agents = *running,
+        LeadTurnDone { session, .. } => {
+            busy.remove(&outer_key(session));
+        }
+        PeerTurnEnded { peer, .. } => {
+            busy.remove(peer);
+        }
+        _ => {}
+    }
+}
+
 /// Whom a loop waits for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Who {
@@ -190,6 +233,12 @@ pub struct Inputs<'a> {
     pub unread: usize,
     /// Silent past this many seconds unheard (`silent_secs`).
     pub silent_after: u64,
+    /// Its oldest tool call not ended yet (its name, since), and its
+    /// subagents at work: a long step of its own is not silence.
+    pub tool: Option<(&'a str, u64)>,
+    pub agents: u64,
+    /// How long such a step may run before it counts as silent (`tool_silent_secs`).
+    pub tool_silent_after: u64,
 }
 
 /// What a loop is now, as of `now` (epoch seconds).
@@ -217,7 +266,17 @@ pub fn of(i: &Inputs, now: u64) -> State {
     if matches!(i.status, "running" | "queued") {
         let secs = i.heard.map(|h| now.saturating_sub(h));
         if let Some(secs) = secs.filter(|s| *s >= i.silent_after) {
-            return State::Silent { secs };
+            // In a long step of its own (a command, a build, its subagents): at work, until that step is too long.
+            match i.tool {
+                Some((name, since)) if now.saturating_sub(since) < i.tool_silent_after.max(i.silent_after) => {
+                    let took = span(now.saturating_sub(since));
+                    return State::Working { doing: i18n::pick(format!("running {name} ({took})"), format!("正在运行 {name}（{took}）")), secs };
+                }
+                None if i.agents > 0 => {
+                    return State::Working { doing: i18n::pick(format!("{} subagent(s) at work", i.agents), format!("{} 个子代理在做", i.agents)), secs };
+                }
+                _ => return State::Silent { secs },
+            }
         }
         if i.starting || i.status == "queued" {
             return State::wait(Why::Start);
@@ -461,6 +520,9 @@ impl crate::OctoBuddyView {
             review,
             verdict: p.review.as_deref(),
             silent_after: silent_secs(),
+            tool: rt.busy.get(&p.id).and_then(Busy::oldest),
+            agents: rt.busy.get(&p.id).map(|b| b.agents).unwrap_or(0),
+            tool_silent_after: tool_silent_secs(),
             ..Default::default()
         };
         (of(&inputs, now), heard)
@@ -495,6 +557,9 @@ impl crate::OctoBuddyView {
             inner: session.peers().iter().filter(|p| p.is_active() && !rt.held.contains_key(&p.id)).count(),
             unread: rt.unreported.get(id).map(Vec::len).unwrap_or(0),
             silent_after: silent_secs(),
+            tool: rt.busy.get(&outer_key(id)).and_then(Busy::oldest),
+            agents: rt.busy.get(&outer_key(id)).map(|b| b.agents).unwrap_or(0),
+            tool_silent_after: tool_silent_secs(),
             ..Default::default()
         };
         (of(&inputs, now), heard)
@@ -596,6 +661,30 @@ mod tests {
         }
         // Never heard from: it cannot be called silent.
         assert_eq!(of(&Inputs { heard: None, ..inner("running") }, NOW), State::Working { doing: String::new(), secs: 0 });
+    }
+
+    #[test]
+    fn a_long_step_of_its_own_is_not_silence() {
+        set(Lang::En);
+        // A test run for 4 min, nothing else heard: at work, until the step itself runs too long.
+        let testing = Inputs { heard: Some(NOW - 240), tool: Some(("bash", NOW - 240)), tool_silent_after: 900, ..inner("running") };
+        assert_eq!(of(&testing, NOW), State::Working { doing: "running bash (4 min)".into(), secs: 240 });
+        assert_eq!(of(&Inputs { tool: Some(("bash", NOW - 1000)), heard: Some(NOW - 1000), ..testing.clone() }, NOW), State::Silent { secs: 1000 });
+        assert_eq!(of(&Inputs { tool: None, agents: 2, ..testing.clone() }, NOW), State::Working { doing: "2 subagent(s) at work".into(), secs: 240 });
+        set(Lang::Zh);
+        assert_eq!(of(&testing, NOW), State::Working { doing: "正在运行 bash（4 分钟）".into(), secs: 240 });
+        set(Lang::En);
+        // What it is in the middle of, from its events: begun, ended, its turn over.
+        let mut busy = HashMap::new();
+        track(&mut busy, &LoopEvent::PeerTool { peer: "p".into(), id: "t1".into(), name: "bash".into(), detail: String::new() }, 10);
+        track(&mut busy, &LoopEvent::PeerTool { peer: "p".into(), id: "t2".into(), name: "read_file".into(), detail: String::new() }, 20);
+        assert_eq!(busy["p"].oldest(), Some(("bash", 10)));
+        track(&mut busy, &LoopEvent::PeerToolEnd { peer: "p".into(), id: "t1".into(), ok: true }, 30);
+        assert_eq!(busy["p"].oldest(), Some(("read_file", 20)));
+        track(&mut busy, &LoopEvent::PeerAgents { peer: "p".into(), running: 3 }, 30);
+        assert_eq!(busy["p"].agents, 3);
+        track(&mut busy, &LoopEvent::LeadTool { session: "s".into(), id: "l1".into(), name: "octobuddy_plan".into(), detail: String::new() }, 40);
+        assert_eq!(busy[&outer_key("s")].oldest(), Some(("octobuddy_plan", 40)));
     }
 
     #[test]
