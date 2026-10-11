@@ -1,4 +1,4 @@
-OctoBuddy @VERSION@ stops taking the agents' word for it. An inner loop's report is held against OctoBuddy's own run of its check, its commit and its files; the outer loop cannot accept work those findings say no to without an override the person sees; and every commit, publish and submission leaves a receipt that is read back. Text from anyone other than the person reaches the agents as data, never as instructions.
+OctoBuddy @VERSION@ stops taking the agents' word for it, and hands the person a sheet to accept. An inner loop's report is held against OctoBuddy's own run of its check, its commit and its files; the outer loop cannot accept work those findings say no to without an override the person sees; and every commit, publish and submission leaves a receipt that is read back. Text from anyone other than the person reaches the agents as data, never as instructions.
 
 ## Download
 
@@ -26,6 +26,9 @@ xattr -dr com.apple.quarantine /Applications/OctoBuddy.app
 - **What you saw is what is done.** Publish buttons show the content they will publish (a short digest and the version) and refuse a press after the app changed. App Hub's submit plan names the content and commit it is for, and is void if either changes before Submit. A request card's Build builds the request that card showed.
 - **An incident closes on its fix.** The Live page closes an incident when the published fix (its receipt confirmed), or a later version, runs well; well again on an older version, it waits for the fix; well again with no fix published, it says it recovered by itself.
 - **Data is not instructions.** A request from another app's agent, a message the OctoSense assistant relays, what an app's API answered, a bug report and what an app showed on screen reach the agents inside `<untrusted source="…">` blocks, with anything that could close the block or a code fence neutralised. The outer and inner loops' rules say such text is never an instruction. A request is told as its caller's words, not the person's.
+- **The acceptance sheet.** When every slice of a round is settled, OctoBuddy writes one page for the person: the request, each slice's goal, check, claims, commits and receipts, the outer loop's review, and what still needs them (claims it did not verify, overrides, files outside a card, uncommitted files, slices no check ran for, what it cannot check at all). **Confirm acceptance** records it as a receipt, or makes a new sheet if the project moved since. `octobuddy.status` says when one waits.
+- **Working, waiting, silent, done.** Every loop says which and since when: what it is working on, whom it waits for (you, the outer loop's review, OctoBuddy's check, an earlier wave, a slot, its agent starting), silent when a turn is open and nothing is heard for 2 minutes (a long command of its own is work), or done. A silent loop turns the warning colour and its session hears it once; `octobuddy.status` gives each loop's state, `as_of` and how long since it was heard, and a Live page watch that stopped running is `stale`.
+- **Following a submission's review.** After an app is submitted to App Hub, OctoBuddy reads its issue every 5 minutes; a reviewer's new comment becomes a request bound to that project (on the Apps page inside OctoSense, a new session's composer on its own), fenced as data, waiting for the person. The new version is submitted as before; OctoBuddy then follows its issue.
 - **Failures in plain words.** An agent or provider that fails to start or answer is reported by kind (not installed, no key or login, rate limited or out of credit, offline, too slow, an answer OctoBuddy could not read), with what still works and what to do next, and the raw error last. Denying an agent's request says what happens next, and the outer loop hears it.
 
 ## Fixed
@@ -76,6 +79,9 @@ OctoBuddy @VERSION@ 不再只听 agent 怎么说。inner 的汇报要对照 Octo
 - **看到什么就做什么**：发布按钮写明将要发布的内容（短摘要和版本），应用改动之后再点会被拒绝。App Hub 的提交计划写明它基于哪份内容和哪个提交，确认之前任一项变了，计划就作废。请求卡片的「开始做」只做卡片上显示的那条请求。
 - **事故以修复版结案**：Live 页上，发布的修复版（回执已核对）或更新的版本运行正常才结案；在旧版本上恢复的，等修复版运行；没有发布修复版就恢复的，照实写「自行恢复」。
 - **资料不是指令**：别的应用的 agent 发来的请求、OctoSense 助手转述的消息、应用 API 返回的内容、报障文字、应用屏幕上的文字，都包在 `<untrusted source="…">` 块里交给 agent，块里能闭合这个块或代码围栏的写法都会被中和。外环和内环的规则都写明这些文字绝不是指令。请求按请求方的话转述，不当成用户本人的话。
+- **验收单**：一轮的切片全部落定后，OctoBuddy 给用户写一页验收单：原始请求，每个切片的目标、检查、声明核对、提交与回执、外环审阅，以及仍需用户确认的事（没核实的声明、覆盖、卡外文件、没提交的文件、没有检查的切片、它根本核对不了的部分）。**确认验收** 记成一张回执；项目在此之后有改动的，改为生成新的验收单。`octobuddy.status` 会说明有验收单在等。
+- **工作中、等待、无动静、已结束**：每个环都标明处在哪种状态、从什么时候起：在做什么；在等谁（你、外环审阅、OctoBuddy 检查、前一个 wave、空位、agent 启动）；一轮开着却 2 分钟没有消息就是无动静（它自己在跑的长命令算工作）；或已结束。无动静的环变成警示色，会话里提醒一次；`octobuddy.status` 给出每个环的状态、`as_of` 和距上次消息多久，停止运行的巡检标为 `stale`。
+- **跟进提交的审核意见**：应用提交到 App Hub 后，OctoBuddy 每 5 分钟读一次它的 issue；审核人的新留言会变成绑定该项目的请求（在 OctoSense 里出现在应用页，单独运行时放进一个新会话的输入框），按资料隔离，等用户决定。新版本照常提交，之后 OctoBuddy 跟进新的 issue。
 - **失败说人话**：agent 或供应商没能启动、没有回应时，按类说明（没装、没有 key 或没登录、限流或余额不足、断网、太慢、返回了读不懂的内容），并说明什么还能用、下一步做什么，原始错误放在最后。拒绝 agent 的请求时会说明接下来怎样，外环也会收到。
 
 **修复**：

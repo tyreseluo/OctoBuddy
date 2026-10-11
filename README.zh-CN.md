@@ -96,7 +96,18 @@ agent 提议、干活；算不算完成，由 OctoBuddy 自己运行、自己读
 - **事故以修复版结案。**Live 页上，发布的修复版（回执已核对）或更新的版本运行正常，事故才结案。在旧版本上恢复正常的，保持未结，等修复版运行；没有发布修复版就恢复的，照实写「自行恢复」。
 - **资料不是指令。**来自用户以外的文字都包在 `<untrusted source="…">` 块里交给 agent：别的应用的 agent 发来的请求（`octobuddy.request`）、OctoSense 助手转述的消息（`octobuddy.send`）、应用的 API 返回的内容、报障文字、应用屏幕上显示的文字。块里能闭合这个块或代码围栏的写法都会被中和；外环和内环的规则都写明这些文字绝不是给它们的指令。请求按请求方的话转述，不当成用户本人的话。
 - **失败说人话。**agent 或供应商没能启动、没有回应时，按类说明：没装、没有 key 或没登录、限流或余额不足、断网、太慢、返回了读不懂的内容。每类都说明什么还能用、下一步做什么，原始错误放在最后。拒绝 agent 的请求时，会说明接下来会怎样，外环也会收到。
-- **CI 里已验证**（`cargo test --locked`，不联网、没有 API key）：`a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` 用一个 stub 内环：它把代码改坏了，却汇报「所有测试通过」，还声称改了一个它根本没碰的文件。OctoBuddy 的检查失败，提交读回核对，两条声明都判 ✗，汇报带着原因退回，不带 override 的 accept 被拒，带 override 的通过，下一个 wave 在此之前一直等待。回执、快照、隔离块和失败分类各有单元测试（`receipts.rs`、`app_publish.rs`、`app_hub.rs`、`card_loop.rs`、`app_factory.rs`、`untrusted.rs`、`failure.rs`）。发布读回也能对本机真实的本地 App Hub 跑（`reads_back_a_published_app_from_the_local_hub`，默认忽略）：2026-10-11 对小账本（pocket-ledger）0.1.3、提交 `5f58490` 读回，四项核对（catalog、摘要、内容、提交）全部通过；它的工作副本里有一处未提交的 manifest 改动，被正确识别为「不是已发布的内容」（[输出](docs/evidence/receipts/live-readback-2026-10-11.txt)）。验证记录（含真实与合成运行的区分、失败矩阵、尚未验证的部分）见 [VERIFICATION.zh-CN.md](VERIFICATION.zh-CN.md)。
+- **验收单。**一轮里每个切片都落定（验收、外环覆盖 OctoBuddy 的核对后验收、或关掉）时，OctoBuddy 给用户写一页验收单：用户自己的原话；每个切片的任务卡目标和完成条件、它的检查、汇报声明的核对（✓ ✗ ?）、提交及回执、外环的审阅；然后是**仍需你确认的事**：OctoBuddy 没核实的声明、外环的覆盖及 OctoBuddy 当时的理由、改到任务卡以外的文件、没验收就关掉的切片、没提交的文件、没有任何检查的切片，以及 OctoBuddy 根本核对不了的（用起来的观感和体验）。
+  - 写到 `<project>/.octobuddy/acceptance/<session>-r<round>.md`，摘要发到会话里。
+  - 「继续」旁边的 **确认验收 · 第 N 轮** 把用户的验收记成一张回执。验收单生成之后 HEAD 或这一轮的事实变了，就改为生成一张新的验收单（「项目在这张验收单之后有改动」）。
+  - `octobuddy.status` 会说明有验收单在等用户，以及前几项待确认的事。
+- **工作中、等待、无动静、已结束。**每个环都标明处在哪一种，以及从什么时候起：
+  - 工作中，以及在做什么（在跑的命令、在做的子代理）；
+  - 等待，以及在等谁：等你（一个审批、一个回答、你的下一条消息）、等外环审阅、等 OctoBuddy 检查、等前一个 wave、排队等空位、等它的 agent 启动；
+  - 无动静：一轮开着却 2 分钟没有任何消息（`OCTOBUDDY_SILENT_SECS`）。它自己的一步（比如一次很长的测试）最多 15 分钟内都算在工作（`OCTOBUDDY_TOOL_SILENT_SECS`）；
+  - 已结束：已验收、失败、关闭、被打断。
+
+  这些显示在 inner 的标签和卡片上、流程图里和外环处。无动静的环变成警示色，会话里提醒一次，并写明可以怎么做（打断并发送、结束或停止）。`octobuddy.status` 给出每个环的状态、在等谁、原因、距上次有消息多久，以及 `as_of`；Live 页上超过两倍巡检间隔没有运行的应用标为 `stale`，不再当作健康。
+- **CI 里已验证**（`cargo test --locked`，不联网、没有 API key）：`a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` 用一个 stub 内环：它把代码改坏了，却汇报「所有测试通过」，还声称改了一个它根本没碰的文件。OctoBuddy 的检查失败，提交读回核对，两条声明都判 ✗，汇报带着原因退回，不带 override 的 accept 被拒，带 override 的通过，下一个 wave 在此之前一直等待。回执、快照、隔离块和失败分类各有单元测试（`receipts.rs`、`app_publish.rs`、`app_hub.rs`、`card_loop.rs`、`app_factory.rs`、`untrusted.rs`、`failure.rs`），验收单（`acceptance.rs`；e2e 测试也用被覆盖验收的切片生成了一张）和各环的状态（`liveness.rs`）也是。发布读回也能对本机真实的本地 App Hub 跑（`reads_back_a_published_app_from_the_local_hub`，默认忽略）：2026-10-11 对小账本（pocket-ledger）0.1.3、提交 `5f58490` 读回，四项核对（catalog、摘要、内容、提交）全部通过；它的工作副本里有一处未提交的 manifest 改动，被正确识别为「不是已发布的内容」（[输出](docs/evidence/receipts/live-readback-2026-10-11.txt)）。验证记录（含真实与合成运行的区分、失败矩阵、尚未验证的部分）见 [VERIFICATION.zh-CN.md](VERIFICATION.zh-CN.md)。
 
 ## 做 OctoSense 应用
 
@@ -410,6 +421,8 @@ Cargo 不能用同一个仓库的另一个 revision 去 patch 一个 git 来源�
 | `OCTOBUDDY_HOME` | 数据目录，放项目、对话和插件（默认 `~/.octobuddy`） |
 | `OCTOBUDDY_<NAME>_BIN` | 指定 `claude`、`codex`、`pi`、`octos`（以及其他工具）运行哪个程序，优先于自带的和你自己的 |
 | `OCTOBUDDY_DEBUG_EVENTS=1` | 把每个循环事件打印到 stderr |
+| `OCTOBUDDY_SILENT_SECS` | 一轮开着的环多久没有消息就显示为无动静，单位秒（默认 120，至少 10） |
+| `OCTOBUDDY_TOOL_SILENT_SECS` | 环自己的一步（一条命令、一次构建）没有消息时最多算多久的工作，单位秒（默认 900，至少 30） |
 | `OCTOBUDDY_REVIEW_EVERY` | 多久读一次提交的 App Hub issue 来跟进审核意见，单位秒（默认 300，至少 30） |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | 追加记录 Codex 转换层每次失败的调用（状态、请求和响应，从不含 key） |
 
