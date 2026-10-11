@@ -796,7 +796,8 @@ impl OctoBuddyView {
                     match self.spawn_rpc(&engine, &session.id, &cwd, session.lead_session.as_deref(), &rules, session.outer_model(), session.outer_effort(), &mcp, mode) {
                         Ok(lead) => { self.rt.leads.insert(session.id.clone(), lead); }
                         Err(err) => {
-                            self.system(at, &i18n::pick(format!("The outer loop could not start: {err}"), format!("outer 无法启动：{err}")));
+                            let said = crate::failure::say(crate::failure::classify(&err), &Self::outer_on(&session), &err);
+                            self.system(at, &i18n::pick(format!("The outer loop could not start: {said}"), format!("outer 无法启动：{said}")));
                             return;
                         }
                     }
@@ -812,7 +813,8 @@ impl OctoBuddyView {
                             (env, Some(route.model.clone()))
                         }
                         Err(err) => {
-                            self.system(at, &i18n::pick(format!("The outer loop could not start: {err}"), format!("outer 无法启动：{err}")));
+                            let said = crate::failure::say(crate::failure::classify(&err), label, &err);
+                            self.system(at, &i18n::pick(format!("The outer loop could not start: {said}"), format!("outer 无法启动：{said}")));
                             return;
                         }
                     },
@@ -823,7 +825,8 @@ impl OctoBuddyView {
                     match Lead::spawn(&self.rt.inbox, &session.id, &cwd, session.lead_session.as_deref(), &extra, model.as_deref(), session.outer_effort(), &mcp, mode, &env) {
                         Ok(lead) => { self.rt.leads.insert(session.id.clone(), lead); }
                         Err(err) => {
-                            self.system(at, &i18n::pick(format!("The outer loop could not start: {err}"), format!("outer 无法启动：{err}")));
+                            let said = crate::failure::say(crate::failure::classify(&err), &Self::outer_on(&session), &err);
+                            self.system(at, &i18n::pick(format!("The outer loop could not start: {said}"), format!("outer 无法启动：{said}")));
                             return;
                         }
                     }
@@ -842,7 +845,8 @@ impl OctoBuddyView {
             }
             Err(err) => {
                 self.rt.leads.remove(&session.id);
-                self.system(at, &i18n::pick(format!("Could not reach the outer loop: {err}"), format!("无法连接 outer：{err}")));
+                let said = crate::failure::say(crate::failure::classify(&err), &Self::outer_on(&session), &err);
+                self.system(at, &i18n::pick(format!("Could not reach the outer loop: {said}"), format!("无法连接 outer：{said}")));
             }
         }
     }
@@ -1836,9 +1840,15 @@ It works for you now: message it, review its work, or close it.)\n"));
     pub(crate) fn answer_approval(&mut self, cx: &mut Cx, approve: bool, scope: Option<&str>) {
         let Some(at) = self.selected else { return };
         let Some(peer) = self.shown_peer(at).map(|p| p.id.clone()) else { return };
-        let Some((approval_id, _, _)) = self.rt.approvals.remove(&peer) else { return };
+        let Some((approval_id, title, _)) = self.rt.approvals.remove(&peer) else { return };
         if let Some(serve) = self.rt.serve.as_ref() {
             let _ = serve.answer_approval(&key_of(&self.store, &peer), &approval_id, approve, scope);
+        }
+        // Denied: the person hears what follows, and the outer loop in its next STATUS.
+        let slug = self.store.peer_mut(&peer).map(|p| p.slug.clone());
+        if let (false, Some(slug), Some(session_id)) = (approve, slug, self.store.session(at).map(|s| s.id.clone())) {
+            self.system(at, &crate::failure::say(crate::failure::Kind::Denied, &slug, &title));
+            self.rt.notes.entry(session_id).or_default().push(format!("the person denied {slug}'s request ({title}): it goes on without it and may report blocked"));
         }
         self.sync(cx);
     }
@@ -2135,11 +2145,10 @@ It works for you now: message it, review its work, or close it.)\n"));
                         self.drain_outer(at);
                     }
                     if why != "interrupted" && !why.contains("interrupted") && !stopped {
-                        // A provider's rate limit: what to do about it, too.
-                        let hint = if why.contains("429") || why.to_lowercase().contains("too many requests") {
-                            i18n::t(" — the model's provider is rate-limiting this key: try again in a minute, or pick another model.", "——模型的 provider 在限流：等一分钟再试，或换个模型。")
-                        } else { "" };
-                        self.system(at, &i18n::pick(format!("The outer loop failed: {why}{hint}"), format!("outer 出错：{why}{hint}")));
+                        // What happened, what to do about it (a rate limit, a key, the network), then its error.
+                        let on = self.store.session(at).map(Self::outer_on).unwrap_or_default();
+                        let said = crate::failure::say(crate::failure::classify(&why), &on, &why);
+                        self.system(at, &i18n::pick(format!("The outer loop failed: {said}"), format!("outer 出错：{said}")));
                     }
                     return;
                 }
@@ -2198,7 +2207,9 @@ It works for you now: message it, review its work, or close it.)\n"));
                 self.lead_status.remove(&session);
                 if let (Some(error), Some(at)) = (error, self.store.find_session(&session)) {
                     if !self.halted.contains(&session) {
-                        self.system(at, &i18n::pick(format!("The outer loop stopped: {error}"), format!("outer 已退出：{error}")));
+                        let on = self.store.session(at).map(Self::outer_on).unwrap_or_default();
+                        let said = crate::failure::say(crate::failure::classify(&error), &on, &error);
+                        self.system(at, &i18n::pick(format!("The outer loop stopped: {said}"), format!("outer 已退出：{said}")));
                     }
                 }
             }
@@ -2723,6 +2734,19 @@ what the cookbook or the lessons already say. Then say in one line what you kept
         true
     }
 
+    /// What a session's outer loop runs on, for a person: its agent, and the
+    /// model picked for it.
+    pub(crate) fn outer_on(session: &model::Session) -> String {
+        let agent = match session.engine() {
+            crate::system_chat::ENGINE => i18n::t("the OctoSense assistant", "系统 agent"),
+            engine => Self::agent_name(engine),
+        };
+        match session.outer_model() {
+            Some(m) => format!("{agent} · {m}"),
+            None => agent.to_string(),
+        }
+    }
+
     /// What `p` ran on: its agent and model.
     fn ran_on(&self, p: &Peer) -> String {
         let agent = p.agent.as_deref().unwrap_or("octos");
@@ -2748,9 +2772,11 @@ what the cookbook or the lessons already say. Then say in one line what you kept
                 fits.into_iter().map(move |m| format!("{} · {m}", Self::agent_name(name)))
             })
             .filter(|o| *o != on).take(6).collect();
+        // What happened in plain words (its key, a rate limit, the network), its error last.
+        let said = crate::failure::say(crate::failure::classify(error), &on, &said);
         self.system(at, &i18n::pick(
-            format!("{} could not run on {on}: it failed before any work (no file changed): {said}. This is its agent's or model's failure, not the slice's. The outer loop will look into it, run it on another agent or model and tell you. It can run on: {}.", p.slug, others.join(", ")),
-            format!("{} 在 {on} 上没能运行：还没开始干活就失败了（没改任何文件）：{said}。这是 agent 或模型的问题，不是这个切片的工作问题。外环会查明原因、换一个 agent 或模型重跑，并告诉你。可换的：{}。", p.slug, others.join("、"))));
+            format!("{} could not run on {on}: it failed before any work (no file changed). This is its agent's or model's failure, not the slice's. The outer loop will look into it, run it on another agent or model and tell you. It can run on: {}.\n{said}", p.slug, others.join(", ")),
+            format!("{} 在 {on} 上没能运行：还没开始干活就失败了（没改任何文件）。这是 agent 或模型的问题，不是这个切片的工作问题。外环会查明原因、换一个 agent 或模型重跑，并告诉你。可换的：{}。\n{said}", p.slug, others.join("、"))));
         Some(format!("(It could not run: its agent failed before doing any work — the agent's or the model's failure, not the slice's work. It ran on {on}. Its error is below. Find out why if it is not plain, then run it again on another of the AGENTS and MODELS with octobuddy-send's `rerun` ({{\"to\":\"{}\",\"agent\":…,\"model\":…}}), and tell the person in your reply what failed, why, and what you switched it to.)", p.slug))
     }
 
