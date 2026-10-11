@@ -100,7 +100,11 @@ pub enum LoopEvent {
     /// OctoBuddy's checks of a peer's work: agent-spec against its contract,
     /// and its test command (`passed` when one ran).
     /// `commit` is set when OctoBuddy committed the peer's files first (or could not).
-    PeerChecked { peer: String, verdict: String, passed: Option<bool>, commit: Option<Result<String, String>> },
+    /// `gate`: what the checks found, for its outer loop's `accept`.
+    PeerChecked { peer: String, verdict: String, passed: Option<bool>, commit: Option<Result<String, String>>, gate: Option<crate::model::Gate> },
+    /// Receipts left mid-way by a previous run, looked up (never redone):
+    /// `(project path, what was found)`.
+    ReceiptsReconciled { lines: Vec<(String, String)> },
     /// An approval was decided, resolved by policy or cancelled elsewhere: no longer the person's.
     PeerApprovalGone { peer: String, approval_id: String },
     /// A peer asks the person to approve a tool call.

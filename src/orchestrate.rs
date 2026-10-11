@@ -1191,7 +1191,7 @@ impl OctoBuddyView {
                 id: id.clone(), slug: slug.clone(), role: slice.role.clone(), agent: Some(named.clone().unwrap_or_else(|| agent.clone())),
                 brief: slice.brief.clone(), status: "queued".into(), dir: dir.clone(), branch: None,
                 round, started_at: now_secs(), finished_at: None, activity: Some("preparing".into()), result: None,
-                session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: slice.check.clone(), verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: slice.rounds, wave: slice.wave, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: pick.clone().or_else(|| pinned.clone()), agent_named: named.is_some().then_some(true), accepted: None, review_wanted: slice.independent_review, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: slice.read.clone(),
+                session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: slice.check.clone(), verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: slice.rounds, wave: slice.wave, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: pick.clone().or_else(|| pinned.clone()), agent_named: named.is_some().then_some(true), accepted: None, review_wanted: slice.independent_review, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: slice.read.clone(), gate: None,
             });
             started.push((id, slug, slice.brief.clone()));
         }
@@ -2366,7 +2366,8 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
                 self.check_budget(&peer);
             }
-            LoopEvent::PeerChecked { peer, verdict, passed, commit } => {
+            LoopEvent::ReceiptsReconciled { .. } => {}
+            LoopEvent::PeerChecked { peer, verdict, passed, commit, gate: _ } => {
                 self.rt.checking.remove(&peer);
                 self.rt.diffs.remove(&peer);
                 self.rt.worktrees.clear();
@@ -2619,7 +2620,7 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
                     verdict.insert(0, format!("[commit] {} file(s) not committed ({}): no `Commit:` line, and its check did not pass", files.len(), files.join(", ")));
                 }
             }
-            events::post(&inbox, LoopEvent::PeerChecked { peer: peer_id, verdict: verdict.join("\n"), passed, commit });
+            events::post(&inbox, LoopEvent::PeerChecked { peer: peer_id, verdict: verdict.join("\n"), passed, commit, gate: None });
         });
         true
     }
@@ -2898,7 +2899,7 @@ what the cookbook or the lessons already say. Then say in one line what you kept
             session_key: Some(session_key(&id)), log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None,
             model: None, effort: None, touched: None, base: workspace::git(&dir, &["rev-parse", "HEAD"]).ok(), commits: None, subagents: None,
             estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None,
-            inflight: None, uncommitted: None, model_pick: model.clone(), agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: Some(true), claude_session: None, specs: None, reads: None,
+            inflight: None, uncommitted: None, model_pick: model.clone(), agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: Some(true), claude_session: None, specs: None, reads: None, gate: None,
         });
         let mut line = Line::default();
         line.ready = true;

@@ -71,6 +71,10 @@ mod sidebar;
 mod system_chat;
 pub mod verify;
 pub mod workspace;
+mod claims;
+mod failure;
+pub mod receipts;
+mod untrusted;
 
 #[cfg(test)]
 mod e2e_tests;
@@ -5965,7 +5969,7 @@ mod tests {
         let peer = |status: &str| Peer {
             id: String::new(), slug: String::new(), role: None, agent: None, brief: String::new(), status: status.into(), dir: String::new(),
             branch: None, round: 1, started_at: 0, finished_at: None, activity: None, result: None,
-            session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: None,
+            session_key: None, log: None, contract: None, usage: None, check: None, verdict: None, review: None, landed: None, model: None, effort: None, touched: None, base: None, commits: None, subagents: None, estimate: None, wave: None, rounds_used: None, budget: None, over_budget: None, flow: None, joined_from: None, queued: None, inflight: None, uncommitted: None, model_pick: None, agent_named: None, accepted: None, review_wanted: None, reviews_for: None, by_person: None, claude_session: None, specs: None, reads: None, gate: None,
         };
         let c = PeerCounts::of(&[peer("running"), peer("queued"), peer("idle"), peer("failed"), peer("interrupted")]);
         assert_eq!(c.short(), "1 running · 1 queued · 1 done · 1 failed · 1 stopped");
