@@ -2645,6 +2645,7 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             });
         }
         let (inbox, peer_id, dir, touched) = (self.rt.inbox.clone(), peer.to_string(), p.dir.clone(), p.touched.clone().unwrap_or_default());
+        let by = format!("OctoBuddy, for inner loop {}", p.slug);
         // Where its work began, and its last commit: what its claims and its check are of.
         let (base, last) = (p.base.clone(), p.commits.as_ref().and_then(|c| c.last()).and_then(|c| c.split_whitespace().next()).unwrap_or("").to_string());
         let strays = check.then_some(strays);
@@ -2654,12 +2655,16 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             if (commit.is_some() || auto.is_some()) && files.iter().any(|f| f == "bundle/manifest.json") {
                 crate::plugins::octosense_app::repair_digest(&dir);
             }
-            let mut commit = commit.map(|message| workspace::commit_files(&dir, &files, &message));
+            // Its commit with a receipt, read back from git: what that found.
+            let receipt = |made: &Result<String, String>| made.as_ref().ok().and_then(|made| crate::receipts::latest(&dir, crate::receipts::Kind::Commit)
+                .filter(|r| r.result.as_deref() == Some(made.as_str()))).map(|r| format!("[receipt] {}", crate::receipts::line(&r)));
+            let mut commit = commit.map(|message| crate::receipts::commit(&dir, &files, &message, &by));
             match &commit {
                 Some(Ok(made)) => verdict.push(format!("[commit] {made} ({})", files.join(", "))),
                 Some(Err(err)) => verdict.push(format!("[commit] {err}")),
                 None => verdict.extend(loose),
             }
+            verdict.extend(commit.as_ref().and_then(receipt));
             if let Some(spec) = spec {
                 verdict.push(crate::contract::check(std::path::Path::new(&spec), &dir, &touched).unwrap_or_else(|err| format!("[agent-spec] {err}")));
             }
@@ -2679,11 +2684,14 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             // No `Commit:` line: its files go in when its check passed.
             if let Some(message) = auto {
                 if passed == Some(true) {
-                    let made = workspace::commit_files(&dir, &files, &message);
+                    let made = crate::receipts::commit(&dir, &files, &message, &by);
                     verdict.insert(0, match &made {
                         Ok(made) => format!("[commit] {made} ({}; auto: no `Commit:` line, its check passed)", files.join(", ")),
                         Err(err) => format!("[commit] {err}"),
                     });
+                    if let Some(line) = receipt(&made) {
+                        verdict.insert(1, line);
+                    }
                     commit = Some(made);
                 } else {
                     verdict.insert(0, format!("[commit] {} file(s) not committed ({}): no `Commit:` line, and its check did not pass", files.len(), files.join(", ")));
