@@ -1894,10 +1894,19 @@ It works for you now: message it, review its work, or close it.)\n"));
                 let Some(at) = self.store.find_session(&session) else { return };
                 // The production loop runs a version published anew.
                 let project = self.store.projects[at.0].path.clone();
-                self.card_loop_published(&project, result.as_ref().ok().map(|p| p.version.clone()));
-                // A requested app published: done, and watched.
-                self.factory_published(&project, result.as_ref().ok().map(|p| p.version.clone()));
+                self.card_loop_published(&project, result.as_ref().ok());
+                // A requested app published, as the catalog read back: done, and watched.
+                self.factory_published(&project, result.as_ref().ok().filter(|p| p.confirmed).map(|p| p.version.clone()));
                 match result {
+                    // That content was published already: said, nothing else.
+                    Ok(p) if p.again => {
+                        self.system(at, &i18n::pick(format!("{} ({}): {}.", p.name, p.id, p.line), format!("{}（{}）：{}。", p.name, p.id, p.line)));
+                    }
+                    // The script ran, but the catalog does not read back as meant.
+                    Ok(p) if !p.confirmed => {
+                        self.system(at, &i18n::pick(format!("Published {} ({}), but App Hub's catalog does not read back as meant:\n{}\nCheck App Hub before publishing again.", p.name, p.id, p.line),
+                            format!("已发布 {}（{}），但 App Hub 目录回读不符：\n{}\n再次发布前请先查看 App Hub。", p.name, p.id, p.line)));
+                    }
                     Ok(p) => {
                         let bumped = p.bumped.map(|c| i18n::pick(format!(" (version raised, commit {c})"), format!("（版本已提升，提交 {c}）"))).unwrap_or_default();
                         let how = if crate::plugins::app_publish::shell_reads_it() {
@@ -1909,8 +1918,9 @@ It works for you now: message it, review its work, or close it.)\n"));
                             i18n::pick(format!("This OctoSense does not read the local App Hub yet: start it with OCTOSENSE_HUB={dir} OCTOSENSE_HUB_ANCHOR={anchor}, then App Hub lists it (Get, Install, Open)."),
                                 format!("这个 OctoSense 还没读取本地 App Hub：用 OCTOSENSE_HUB={dir} OCTOSENSE_HUB_ANCHOR={anchor} 启动它，App Hub 里就会列出（Get、Install、Open）。"))
                         };
-                        self.system(at, &i18n::pick(format!("Published {} {} ({}) to the local App Hub{bumped}. {how}", p.name, p.version, p.id),
-                            format!("已把 {} {}（{}）发布到本地 App Hub{bumped}。{how}", p.name, p.version, p.id)));
+                        // The version is the catalog's, read back.
+                        self.system(at, &i18n::pick(format!("Published {} {} ({}) to the local App Hub{bumped}.\n{}\n{how}", p.name, p.version, p.id, p.line),
+                            format!("已把 {} {}（{}）发布到本地 App Hub{bumped}。\n{}\n{how}", p.name, p.version, p.id, p.line)));
                     }
                     Err(err) => {
                         let tail: String = err.lines().rev().take(14).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
@@ -2366,7 +2376,7 @@ It works for you now: message it, review its work, or close it.)\n"));
                 }
                 self.check_budget(&peer);
             }
-            LoopEvent::ReceiptsReconciled { .. } => {}
+            LoopEvent::ReceiptsReconciled { lines } => self.receipts_reconciled(lines),
             LoopEvent::PeerChecked { peer, verdict, passed, commit, gate: _ } => {
                 self.rt.checking.remove(&peer);
                 self.rt.diffs.remove(&peer);

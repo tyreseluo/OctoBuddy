@@ -29,6 +29,7 @@
 //! `offline-fresh` does it on a new device (no storage kept). The published
 //! copy itself is never touched.
 use crate::model::now_secs;
+use crate::receipts::{self, Kind, Snapshot, Status};
 use octosense_app_peers::host_tools::{ToolOutcome, ToolReply};
 use crate::{i18n, tapped, OctoBuddyView};
 use makepad_widgets::*;
@@ -248,7 +249,8 @@ pub fn bad_release(project: &str) -> Result<(String, String), String> {
         .and_then(|o| if o.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&o.stderr).trim().to_string()) });
     git(&["add", "bundle/main.splash"])?;
     git(&["commit", "-q", "-m", &format!("drill: 坏版本演练（{name} 的定义改了名，调用处没改）")])?;
-    let published = super::app_publish::publish(project)?;
+    // Its own kind of receipt: a broken version, published on purpose.
+    let published = super::app_publish::publish(project, Kind::Drill, None, "drill")?;
     Ok((published.version, name))
 }
 
@@ -564,6 +566,16 @@ fn repair_brief(name: &str, i: &Incident) -> String {
             i.version, i.health.word(), why.join("\n")))
 }
 
+/// The Live card's line on the last publish, as the catalog read back.
+fn publish_note(r: &receipts::Receipt) -> String {
+    let v = r.result.clone().unwrap_or_default();
+    match r.status {
+        Status::Confirmed => i18n::pick(format!("Last publish: ✓ read back {v}"), format!("上次发布：✓ 已回读核对 {v}")),
+        Status::Mismatch => i18n::pick(format!("Last publish: ✗ {v} did not read back as published — check App Hub"), format!("上次发布：✗ {v} 回读不符——请查看 App Hub")),
+        _ => i18n::t("Last publish: ? not confirmed — check App Hub before publishing again", "上次发布：? 未确认——再次发布前请先查看 App Hub").to_string(),
+    }
+}
+
 /// The watches of this window's projects.
 #[derive(Default)]
 pub struct Loops {
@@ -575,6 +587,9 @@ pub struct Loops {
     pub drilling: HashSet<String>,
     /// `octobuddy.report` calls answered once their run is back (project, asked at).
     pub waiting: Vec<(String, u64, ToolReply)>,
+    /// What a Publish button shown for a project would publish (as drawn):
+    /// a press publishes that, or nothing.
+    pub snaps: BTreeMap<String, Snapshot>,
     loaded: bool,
 }
 
@@ -765,6 +780,21 @@ impl OctoBuddyView {
             if let Some(shot) = incident.as_ref().and_then(|i| i.shot.clone()) {
                 lines.push(i18n::pick(format!("Screenshot: {shot}"), format!("截图：{shot}")));
             }
+            // Its last publish, as the catalog read back.
+            let last = receipts::latest_of(&project, &[Kind::Publish, Kind::PublishFix, Kind::Drill])
+                .filter(|r| !matches!(r.status, Status::Prepared | Status::Refused | Status::Stale));
+            if let Some(r) = last {
+                lines.push(publish_note(&r));
+            }
+            let fix_ready = incident.as_ref().is_some_and(|i| i.published.is_none())
+                && published.as_ref().is_ok_and(|(_, dir)| changed_since_published(&project, dir));
+            // What its Publish fix would publish, as shown: a press publishes that or nothing.
+            if fix_ready && self.publishing.is_none() {
+                let snap = super::app_publish::snapshot(&project);
+                let version = snap.version.clone().unwrap_or_default();
+                lines.push(i18n::pick(format!("Publish fix will publish content {} ({version}).", snap.short()), format!("「发布修复版」将发布内容 {}（{version}）。", snap.short())));
+                self.card_loop.snaps.insert(project.clone(), snap);
+            }
             card.label(cx, ids!(why)).set_visible(cx, !lines.is_empty());
             card.label(cx, ids!(why)).set_text(cx, &lines.join("\n"));
             // Its buttons.
@@ -776,8 +806,6 @@ impl OctoBuddyView {
             // A report the run did not confirm, in the last day: still the person's to hand over.
             let unconfirmed = incident.is_none() && watch.as_ref().and_then(|w| w.reports.last())
                 .is_some_and(|r| r.reproduced == Some(false) && now.saturating_sub(r.at) < 86_400);
-            let fix_ready = incident.as_ref().is_some_and(|i| i.published.is_none())
-                && published.as_ref().is_ok_and(|(_, dir)| changed_since_published(&project, dir));
             let show = [
                 (ids!(watch_on), watching, i18n::t("Watching", "巡检中")), (ids!(watch_off), can && !watching, i18n::t("Watch", "开启巡检")),
                 (ids!(run_now), watching && !running, i18n::t("Run now", "立即巡检")),
@@ -838,7 +866,7 @@ impl OctoBuddyView {
             } else if hit(ids!(repair)) {
                 self.card_loop_repair(cx, pi, &project, true);
             } else if hit(ids!(publish_fix)) {
-                self.card_loop_publish(cx, pi, &project);
+                self.card_loop_publish(cx, pi, &project, Kind::PublishFix);
             } else {
                 continue;
             }
@@ -920,19 +948,28 @@ impl OctoBuddyView {
         }
     }
 
-    /// The fixed version published to the local App Hub (as the session's
-    /// Publish does); `card_loop_published` hears how it went.
-    pub(crate) fn card_loop_publish(&mut self, cx: &mut Cx, pi: usize, project: &str) {
+    /// The app published to the local App Hub as `kind` (a request's
+    /// Publish, an incident's Publish fix), as its button showed it: the
+    /// snapshot taken when it was drawn, refused if the app moved since;
+    /// `card_loop_published` hears how it went.
+    pub(crate) fn card_loop_publish(&mut self, cx: &mut Cx, pi: usize, project: &str, kind: Kind) {
         if self.publishing.is_some() {
             return;
         }
         let Some(at) = self.live_session(pi, project) else { return };
         let Some(session) = self.store.session(at).map(|s| s.id.clone()) else { return };
         self.publishing = Some(session.clone());
-        self.system(at, i18n::t("Publishing the fixed version to the local App Hub…", "正在把修复版发布到本地 App Hub……"));
-        let (inbox, project) = (self.rt.inbox.clone(), project.to_string());
+        self.system(at, if kind == Kind::PublishFix {
+            i18n::t("Publishing the fixed version to the local App Hub…", "正在把修复版发布到本地 App Hub……")
+        } else {
+            i18n::t("Publishing it to the local App Hub…", "正在发布到本地 App Hub……")
+        });
+        // None drawn: nothing the person saw to bind to, so it is refused as out of date.
+        let shown = self.card_loop.snaps.get(project).cloned().unwrap_or_default();
+        let (inbox, project, lang) = (self.rt.inbox.clone(), project.to_string(), i18n::lang());
         std::thread::spawn(move || {
-            let result = super::app_publish::publish(&project);
+            i18n::set(lang);
+            let result = super::app_publish::publish(&project, kind, Some(&shown), "person");
             crate::events::post(&inbox, crate::events::LoopEvent::Published { session, result });
         });
         self.relayout(cx);
@@ -978,17 +1015,29 @@ impl OctoBuddyView {
     }
 
     /// A version of `project` was published (from here or its session): the
-    /// watch runs it next, and an open incident records the fix.
-    pub(crate) fn card_loop_published(&mut self, project: &str, version: Option<String>) {
-        let Some(version) = version else { return };
+    /// watch runs it next, and an open incident records the fix, once its
+    /// receipt has the catalog read back as published (else says so).
+    pub(crate) fn card_loop_published(&mut self, project: &str, published: Option<&super::app_publish::Published>) {
+        let Some(p) = published.filter(|p| !p.again) else { return };
+        let fix = receipts::find(&p.receipt).filter(|r| r.kind == Kind::PublishFix);
         let now = now_secs();
+        let mut unconfirmed = None;
         self.card_loop_update(project, |w| {
             w.last = 0;
             w.warm = w.drill.is_some();
-            if let Some(i) = w.incident.as_mut() {
-                i.published = Some((version, now));
+            if let (Some(i), Some(r)) = (w.incident.as_mut(), &fix) {
+                if r.status == Status::Confirmed {
+                    i.published = Some((p.version.clone(), now));
+                } else {
+                    unconfirmed = Some(receipts::line(r));
+                }
             }
         });
+        let at = self.store.projects.iter().position(|pr| pr.path == project).and_then(|pi| self.live_session(pi, project));
+        if let (Some(line), Some(at)) = (unconfirmed, at) {
+            self.system(at, &i18n::pick(format!("The fix is not counted as published: App Hub's catalog did not read back as meant ({line}). The incident stays open; check App Hub before publishing again."),
+                format!("修复版还不算发布成功：App Hub 目录回读不符（{line}）。故障保持未关闭；再次发布前请先查看 App Hub。")));
+        }
     }
 
     /// Incidents for their outer loop without asking (auto repair).

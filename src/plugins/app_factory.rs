@@ -307,12 +307,20 @@ impl OctoBuddyView {
                     format!("已发布 {} 到本地 App Hub，已开启巡检。", r.published.clone().unwrap_or_default())),
                 Status::Failed => i18n::pick(format!("Could not make it: {}", r.error.clone().unwrap_or_default()), format!("没能建好：{}", r.error.clone().unwrap_or_default())),
             });
+            // What its Publish would publish, as shown: a press publishes that or nothing.
+            let publish = r.status == Status::Building && !busy && !unsent && self.publishing.is_none();
+            if let Some(project) = r.project.as_deref().filter(|_| publish) {
+                let snap = super::app_publish::snapshot(project);
+                let version = snap.version.clone().unwrap_or_default();
+                details.push(i18n::pick(format!("Publish will publish content {} ({version}).", snap.short()), format!("「发布」将发布内容 {}（{version}）。", snap.short())));
+                self.card_loop.snaps.insert(project.to_string(), snap);
+            }
             card.label(cx, ids!(details)).set_text(cx, &details.join("\n"));
             let show = [
                 (ids!(build), r.status == Status::Waiting, i18n::t("Build", "开始做")),
                 (ids!(decline), r.status == Status::Waiting, i18n::t("Decline", "不做")),
                 (ids!(open), r.session.is_some(), i18n::t("Session", "打开会话")),
-                (ids!(publish), r.status == Status::Building && !busy && !unsent && self.publishing.is_none(), i18n::t("Publish", "发布")),
+                (ids!(publish), publish, i18n::t("Publish", "发布")),
                 (ids!(dismiss), matches!(r.status, Status::Failed), i18n::t("Dismiss", "移除")),
             ];
             for (b, visible, text) in show {
@@ -348,7 +356,7 @@ impl OctoBuddyView {
             } else if hit(ids!(publish)) {
                 let project = self.factory.requests[i].project.clone().unwrap_or_default();
                 if let Some(pi) = self.store.projects.iter().position(|p| p.path == project) {
-                    self.card_loop_publish(cx, pi, &project);
+                    self.card_loop_publish(cx, pi, &project, crate::receipts::Kind::Publish);
                 }
             } else {
                 continue;

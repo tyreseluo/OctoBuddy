@@ -293,9 +293,28 @@ fn parts(project: &str) -> Vec<PathBuf> {
 /// them: whether that changed the file. Where each part's lines landed is
 /// kept in `.octobuddy/parts-map.json`, for errors to name the part.
 pub fn assemble(project: &str) -> Result<bool, String> {
+    let Some((text, map)) = together(project)? else { return Ok(false) };
+    let _ = std::fs::create_dir_all(Path::new(project).join(".octobuddy"));
+    let _ = std::fs::write(Path::new(project).join(".octobuddy/parts-map.json"), serde_json::Value::Array(map).to_string());
+    let main = bundle(project).join("main.splash");
+    if std::fs::read_to_string(&main).ok().as_deref() == Some(text.as_str()) {
+        return Ok(false);
+    }
+    std::fs::write(&main, text).map_err(|e| format!("could not write bundle/main.splash: {e}"))?;
+    Ok(true)
+}
+
+/// What `bundle/main.splash` is once put together from the app's parts
+/// (none: it has none), nothing written: what a publish will publish.
+pub fn assembled(project: &str) -> Option<String> {
+    together(project).ok().flatten().map(|(text, _)| text)
+}
+
+/// The parts put together, and where each part's lines landed.
+fn together(project: &str) -> Result<Option<(String, Vec<serde_json::Value>)>, String> {
     let parts = parts(project);
     if parts.is_empty() {
-        return Ok(false);
+        return Ok(None);
     }
     let mut text = String::from(GENERATED);
     let mut map = Vec::new();
@@ -308,14 +327,7 @@ pub fn assemble(project: &str) -> Result<bool, String> {
         text.push('\n');
         map.push(serde_json::json!({"part": rel, "from": from, "to": text.lines().count()}));
     }
-    let _ = std::fs::create_dir_all(Path::new(project).join(".octobuddy"));
-    let _ = std::fs::write(Path::new(project).join(".octobuddy/parts-map.json"), serde_json::Value::Array(map).to_string());
-    let main = bundle(project).join("main.splash");
-    if std::fs::read_to_string(&main).ok().as_deref() == Some(text.as_str()) {
-        return Ok(false);
-    }
-    std::fs::write(&main, text).map_err(|e| format!("could not write bundle/main.splash: {e}"))?;
-    Ok(true)
+    Ok(Some((text, map)))
 }
 
 /// `text` (a check's output) with each `splash:…:<line>:<col>` naming the

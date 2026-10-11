@@ -7,6 +7,7 @@
 //! inside OctoSense).
 use crate::events::{self, LoopEvent};
 use crate::plugins::app_hub::{self, Listing};
+use crate::receipts::Snapshot;
 use crate::{i18n, system, tapped, OctoBuddyView};
 use makepad_widgets::*;
 use serde_json::{json, Value};
@@ -83,6 +84,8 @@ pub struct Workbench {
     hub_check: String,
     /// What Submit will do, shown for the person to confirm.
     hub_plan: Option<String>,
+    /// What this device's Publish button would publish, as drawn.
+    publish_snap: Option<(PathBuf, Snapshot)>,
     /// GitHub's gh: signed in (as whom), or why not.
     gh: Option<Result<String, String>>,
     /// What the tab says about the tools, the repository and the last
@@ -308,10 +311,14 @@ impl OctoBuddyView {
         }).filter(|s| !s.is_empty());
         self.view.label(cx, ids!(hub_status)).set_text(cx, busy.unwrap_or(&status));
         if hosted {
-            // Inside OctoSense: the local App Hub, where OctoSense installs it from.
-            self.view.label(cx, ids!(hub_hint)).set_text(cx, i18n::t(
-                "Publishes a signed copy to this device's App Hub (screenshots taken, App Hub's gate run); then install and run it from OctoSense's App Hub.",
-                "把签名副本发布到本机 App Hub（自动补截图、跑 App Hub 的检查），之后在 OctoSense 的 App Hub 里安装运行。"));
+            // Inside OctoSense: the local App Hub, where OctoSense installs it from;
+            // its button publishes the app as shown here, or nothing.
+            let snap = crate::plugins::app_publish::snapshot(&project.to_string_lossy());
+            let version = snap.version.clone().unwrap_or_default();
+            self.view.label(cx, ids!(hub_hint)).set_text(cx, &i18n::pick(
+                format!("Publishes a signed copy to this device's App Hub (screenshots taken, App Hub's gate run); then install and run it from OctoSense's App Hub. It will publish content {} ({version}).", snap.short()),
+                format!("把签名副本发布到本机 App Hub（自动补截图、跑 App Hub 的检查），之后在 OctoSense 的 App Hub 里安装运行。将发布内容 {}（{version}）。", snap.short())));
+            self.wb.publish_snap = Some((project.to_path_buf(), snap));
             self.view.button(cx, ids!(hub_publish)).set_text(cx, if self.publishing.is_some() { i18n::t("Publishing…", "发布中……") } else { i18n::t("Publish to this device's App Hub", "发布到本机 App Hub") });
             return;
         }
@@ -444,8 +451,9 @@ impl OctoBuddyView {
     fn hub_run(&mut self, project: &Path, step: HubStep) {
         self.wb.hub_busy = Some(step);
         self.wb.hub_status = None;
-        let (inbox, project) = (self.rt.inbox.clone(), project.to_path_buf());
+        let (inbox, project, lang) = (self.rt.inbox.clone(), project.to_path_buf(), i18n::lang());
         std::thread::spawn(move || {
+            i18n::set(lang);
             let result = match step {
                 HubStep::Prepare => app_hub::prepare(&project),
                 HubStep::Plan => app_hub::plan(&project),
@@ -530,7 +538,9 @@ impl OctoBuddyView {
         }
         // App Hub: inside OctoSense the local publish; on the host the form and its steps.
         if self.view.button(cx, ids!(hub_publish)).clicked(actions) {
-            self.publish_app(cx);
+            // As its hint showed it (none drawn for this project: refused as out of date).
+            let shown = self.wb.publish_snap.clone().filter(|(p, _)| *p == project).map(|(_, s)| s).unwrap_or_default();
+            self.publish_app(cx, shown);
         }
         let busy = self.wb.hub_busy.is_some_and(|s| s != HubStep::Gh);
         if self.view.button(cx, ids!(hub_save)).clicked(actions) {
