@@ -103,7 +103,7 @@ pub struct Runtime {
     /// uncommitted in it; read when first shown, dropped when work lands.
     pub worktrees: HashMap<String, (Result<workspace::BranchDiff, String>, Vec<String>)>,
     /// Session id → when the lead's running turn was given its message.
-    lead_started: HashMap<String, u64>,
+    pub(crate) lead_started: HashMap<String, u64>,
     /// Session id → what waits for its outer loop, in order.
     pub outer_queue: HashMap<String, std::collections::VecDeque<OuterItem>>,
     /// Peers of a later wave, held until the earlier waves are accepted: their directory.
@@ -160,6 +160,9 @@ pub struct Runtime {
     /// Peers that moved to another outer loop and have not described
     /// themselves to it yet: their next report says so.
     joined: HashSet<String>,
+    /// When each loop was last heard from: by peer id, and by
+    /// `liveness::outer_key` for an outer loop (`liveness`).
+    pub(crate) heard: HashMap<String, u64>,
 }
 
 impl Runtime {
@@ -676,6 +679,9 @@ impl OctoBuddyView {
     fn tool_status(&self, project: Option<&str>) -> serde_json::Value {
         use serde_json::json;
         let wanted = project.map(|p| p.to_ascii_lowercase());
+        // Each loop at work, waiting (on whom), silent or done, as of now (`liveness`).
+        let now = now_secs();
+        let seen = self.seen_all(now);
         let projects: Vec<serde_json::Value> = self.store.projects.iter()
             .filter(|p| wanted.as_ref().is_none_or(|w| p.name.to_ascii_lowercase().contains(w.as_str())))
             .map(|p| json!({
@@ -684,22 +690,26 @@ impl OctoBuddyView {
                 "sessions": p.sessions.iter().map(|s| {
                     let outer = self.lead_status.get(&s.id).cloned().unwrap_or_else(|| "idle".into());
                     let waiting = self.rt.outer_queue.get(&s.id).map(|q| q.len()).unwrap_or(0);
+                    let live = seen.get(&crate::liveness::outer_key(&s.id));
                     json!({
                         "id": s.id,
                         "title": s.title,
-                        "outer": {"cli": s.cli(), "status": outer, "cost_usd": s.lead_cost, "queued": waiting, "estimate": s.estimate},
+                        "outer": {"cli": s.cli(), "status": outer, "cost_usd": s.lead_cost, "queued": waiting, "estimate": s.estimate,
+                            "state": live.map(|l| l.state), "waiting_on": live.and_then(|l| l.waiting_on), "why": live.map(|l| &l.why), "last_heard_secs_ago": live.and_then(|l| l.ago)},
                         "inner": s.peers().iter().map(|q| json!({
                             "slug": q.slug, "role": q.role(), "status": q.status,
                             "estimated_rounds": q.estimate, "steps_used": q.rounds_used,
                             "cost_usd": q.usage.as_ref().map(|u| u.cost),
                             "outer_verdict": q.review, "commits": q.commits,
+                            "state": seen.get(&q.id).map(|l| l.state), "waiting_on": seen.get(&q.id).and_then(|l| l.waiting_on),
+                            "why": seen.get(&q.id).map(|l| &l.why), "last_heard_secs_ago": seen.get(&q.id).and_then(|l| l.ago),
                         })).collect::<Vec<_>>(),
                     })
                 }).collect::<Vec<_>>(),
             }))
             .collect();
         // Its published apps as the Live page has them.
-        json!({"projects": projects, "live": self.card_loop_status(), "requests": self.factory_status()})
+        json!({"as_of": now, "projects": projects, "live": self.card_loop_status(), "requests": self.factory_status()})
     }
 
     /// `octobuddy.send`: the system agent writes to a session's outer loop
@@ -1902,6 +1912,10 @@ It works for you now: message it, review its work, or close it.)\n"));
         let Some(event) = self.octos_outer_event(event) else { return };
         let Some(event) = self.claude_inner_event(event) else { return };
         self.rt.live.log(&event);
+        // A sign of life from a loop: when it was last heard from (`liveness`).
+        if let Some(key) = crate::liveness::heard_key(&event) {
+            self.rt.heard.insert(key, now_secs());
+        }
         // The outer loop's first sign of work on the message it was sent:
         // its turn begins here (the wait to get there is not its work).
         if let LoopEvent::LeadStatus { session, .. } | LoopEvent::LeadDelta { session, .. } | LoopEvent::LeadTool { session, .. } = &event {
