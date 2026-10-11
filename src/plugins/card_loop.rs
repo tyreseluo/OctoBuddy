@@ -750,6 +750,10 @@ impl OctoBuddyView {
             let state = match (&published, &watch, running) {
                 (Err(_), _, _) => i18n::t("Publish it from its session first: the watch runs the published version.", "先在它的会话里发布：巡检的是发布出去的版本。").to_string(),
                 (_, None, _) => i18n::t("Not watched", "未开启巡检").to_string(),
+                // No run for twice its pace (one hung, say): what it last saw is out of date.
+                (_, Some(w), _) if crate::liveness::stale_watch(w.last, w.every, now) => i18n::pick(
+                    format!("Stale: no run for {} ({}); its last health may no longer hold", span(now.saturating_sub(w.last)), pace(w.every)),
+                    format!("已过期：{}没有新的运行（{}），上次的健康状态可能已不成立", span(now.saturating_sub(w.last)), pace(w.every))),
                 (_, Some(_), true) => i18n::t("Checking…", "检查中…").to_string(),
                 (_, Some(w), false) => match w.health {
                     None => i18n::t("Watching: first run soon", "巡检中：马上第一次检查").to_string(),
@@ -1350,6 +1354,8 @@ impl OctoBuddyView {
                 "watching": w.is_some(),
                 "health": w.as_ref().and_then(|w| w.health).map(Health::key),
                 "last_run_secs_ago": w.as_ref().filter(|w| w.last > 0).map(|w| now.saturating_sub(w.last)),
+                // No run for more than twice its pace: the watch stopped, whatever its last health said.
+                "stale": w.as_ref().is_some_and(|w| crate::liveness::stale_watch(w.last, w.every, now)),
                 "every_secs": w.as_ref().map(|w| w.every),
                 "drill": w.as_ref().and_then(|w| w.drill.clone()),
                 "incident": w.as_ref().and_then(|w| w.incident.as_ref()).map(|i| json!({
