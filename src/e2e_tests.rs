@@ -343,6 +343,24 @@ fn a_report_the_facts_contradict_is_sent_back_and_its_accept_refused() {
     slice.review = Some(claims::record(&slice, &over.reviews[0]).expect("an override is recorded"));
     assert_eq!(slice.review.as_deref(), Some("accept (override: the person asked for it as it is): done"));
     println!("\nWITH AN OVERRIDE, RECORDED: {}", slice.review.as_deref().unwrap_or(""));
+
+    // Its round settled (accepted over its check): the sheet the person accepts it from
+    // names the override and what OctoBuddy found, under what still needs them.
+    crate::i18n::set(crate::i18n::Lang::En);
+    slice.brief = brief.clone();
+    slice.check = Some(check.to_string());
+    slice.verdict = Some(format!("[commit] {made} (calc.py)\n{}\n{}", outcome.summary(check).lines().next().unwrap_or(""), lines.join("\n")));
+    let input = crate::acceptance::SheetInput {
+        session: "s-e2e".into(), title: "calc".into(), project: "project".into(), round: 1, head: workspace::git(&cwd, &["rev-parse", "HEAD"]).ok(),
+        at: crate::model::now_secs(), request: Some("Add add(a, b) to calc.py.".into()),
+        slices: vec![crate::acceptance::Slice { peer: slice.clone(), on: "octos · stub".into(), rework: Vec::new() }],
+    };
+    assert_eq!(crate::acceptance::settled_round(&[slice.clone()]), Some(1), "accepted over its check: settled");
+    let sheet = crate::acceptance::sheet(&input);
+    assert!(sheet.open.iter().any(|o| o.contains("over OctoBuddy's findings") && o.contains("the person asked for it as it is") && o.contains("README.md")), "{:#?}", sheet.open);
+    assert_eq!((sheet.counts.contradicted, sheet.counts.overrides), (3, 1), "{:?}", sheet.counts);
+    assert!(sheet.markdown.contains(&format!("`{check}` FAILED")), "{}", sheet.markdown);
+    println!("\nACCEPTANCE SHEET:\n{}", sheet.markdown);
     assert!(wave_may_start(&wave_2, &[slice, wave_2.clone()]), "wave 2 starts once it is accepted over the check");
 
     drop(_env);
