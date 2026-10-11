@@ -443,6 +443,28 @@ impl Incident {
     }
 }
 
+/// How a healthy run ends an incident.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Resolution {
+    /// The fix published (this version, or one after it) runs well: closed.
+    Fixed(String),
+    /// Well again on a version before the fix (`.0`), the fix (`.1`) not
+    /// run yet: kept open.
+    Waiting(String, String),
+    /// Well with no fix published: closed, as it recovered by itself.
+    ByItself,
+}
+
+/// Whether a healthy run of `version` ends `inc`: its fix (published and
+/// read back from the catalog) is what runs, or there was none.
+pub fn resolves(inc: &Incident, version: &str) -> Resolution {
+    match &inc.published {
+        None => Resolution::ByItself,
+        Some((fix, _)) if version_key(version) >= version_key(fix) => Resolution::Fixed(fix.clone()),
+        Some((fix, _)) => Resolution::Waiting(version.to_string(), fix.clone()),
+    }
+}
+
 /// A watched app: `<project>/.octobuddy/card-loop/watch.json`.
 #[derive(Clone, Debug, Default)]
 pub struct Watch {
@@ -1146,6 +1168,14 @@ impl OctoBuddyView {
                         format!("巡检：已发布的 {name} {} 运行正常{drill}。这次运行作为基线（{} 个有文字的控件）。", p.version, w.texts)));
                 }
             }
+            // Well again, before its fix runs: kept open, said once.
+            (Some(inc), Health::Healthy) if matches!(resolves(&inc, &p.version), Resolution::Waiting(..)) => {
+                if let (Resolution::Waiting(on, fix), true) = (resolves(&inc, &p.version), was != Some(Health::Healthy)) {
+                    text = Some(i18n::pick(format!("Live watch: {name} is healthy again on {on}, waiting for the fix {fix} to run."),
+                        format!("巡检：{name} 在 {on} 上恢复正常，等修复版 {fix} 运行后再结案。")));
+                }
+                w.incident = Some(inc);
+            }
             // Well again: the incident's story, start to end.
             (Some(inc), Health::Healthy) => {
                 w.bad_release = None;
@@ -1157,9 +1187,13 @@ impl OctoBuddyView {
                     steps.push(i18n::pick(format!("{v} published after {}", span(at.saturating_sub(inc.since))), format!("{}后发布 {v}", span(at.saturating_sub(inc.since)))));
                 }
                 let steps = if steps.is_empty() { String::new() } else { format!(" {}", steps.join(i18n::t(", ", "，"))) };
+                let how = match resolves(&inc, &p.version) {
+                    Resolution::Fixed(fix) => i18n::pick(format!(" Fixed by {fix}."), format!("由 {fix} 修好。")),
+                    _ => i18n::t(" It recovered by itself (no fix was published).", "它自己恢复了（没有发布修复版）。").to_string(),
+                };
                 text = Some(i18n::pick(
-                    format!("✓ Live watch: the published {name} {} is well again{drill}, {} after it broke.{steps}", p.version, span(p.at.saturating_sub(inc.since))),
-                    format!("✓ 巡检：已发布的 {name} {} 恢复正常{drill}，距发现问题 {}。{steps}", p.version, span(p.at.saturating_sub(inc.since)))));
+                    format!("✓ Live watch: the published {name} {} is well again{drill}, {} after it broke.{steps}{how}", p.version, span(p.at.saturating_sub(inc.since))),
+                    format!("✓ 巡检：已发布的 {name} {} 恢复正常{drill}，距发现问题 {}。{steps}{how}", p.version, span(p.at.saturating_sub(inc.since)))));
             }
             // Still not well: kept, with what it shows now.
             (Some(mut inc), bad) => {
@@ -1326,6 +1360,18 @@ impl OctoBuddyView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A healthy run closes an incident on its fix (or one after it), keeps
+    /// it open on a version before the fix, and says when there was none.
+    #[test]
+    fn an_incident_closes_on_its_fix() {
+        let inc = Incident { version: "1.0.3".into(), health: Health::Broken, ..Default::default() };
+        assert_eq!(resolves(&inc, "1.0.3"), Resolution::ByItself);
+        let fixed = Incident { published: Some(("1.0.4".into(), 9)), ..inc };
+        assert_eq!(resolves(&fixed, "1.0.4"), Resolution::Fixed("1.0.4".into()));
+        assert_eq!(resolves(&fixed, "1.0.10"), Resolution::Fixed("1.0.4".into()), "a later version carries the fix");
+        assert_eq!(resolves(&fixed, "1.0.3"), Resolution::Waiting("1.0.3".into(), "1.0.4".into()));
+    }
 
     fn run(widgets: &[(&str, &str, &str)]) -> Probe {
         Probe {
