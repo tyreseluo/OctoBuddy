@@ -75,6 +75,8 @@ pub struct Request {
     pub session: Option<String>,
     pub published: Option<String>,
     pub error: Option<String>,
+    /// What it said when Build was pressed (`rev`).
+    pub built_rev: Option<String>,
 }
 
 impl Request {
@@ -83,8 +85,14 @@ impl Request {
             "id": self.id, "at": self.at, "caller": self.caller, "client": self.client, "for": self.for_whom,
             "what": self.what, "acceptance": self.acceptance, "data": self.data, "name": self.name,
             "status": self.status.key(), "project": self.project, "session": self.session,
-            "published": self.published, "error": self.error,
+            "published": self.published, "error": self.error, "built_rev": self.built_rev,
         })
+    }
+
+    /// What it asks, as a digest: a card pressed acts on the request only
+    /// if it still asks what the card showed.
+    pub fn rev(&self) -> String {
+        crate::receipts::digest(&[self.for_whom.as_bytes(), self.what.as_bytes(), self.acceptance.as_bytes(), self.data.as_bytes(), self.name.as_bytes()])
     }
 
     fn from_json(v: &Value) -> Option<Request> {
@@ -94,7 +102,7 @@ impl Request {
             id: v["id"].as_str()?.to_string(), at: v["at"].as_u64().unwrap_or(0), caller: s("caller"), client: o("client"),
             for_whom: s("for"), what: s("what"), acceptance: s("acceptance"), data: s("data"), name: s("name"),
             status: Status::parse(v["status"].as_str().unwrap_or("")), project: o("project"), session: o("session"),
-            published: o("published"), error: o("error"),
+            published: o("published"), error: o("error"), built_rev: o("built_rev"),
         })
     }
 
@@ -173,7 +181,23 @@ pub struct Factory {
     pub requests: Vec<Request>,
     /// A project made (its path, its data read) or why not: handled where a `Cx` is.
     pub ready: Vec<(String, Made)>,
+    /// The request each card shows, as drawn (its id and `rev`): what a
+    /// press on that card acts on.
+    pub shown: Vec<(String, String)>,
+    /// A press refused, said on its request's card (its id, why).
+    notice: Option<(String, String)>,
     loaded: bool,
+}
+
+/// The request a card stood for when it was drawn (`id`, then saying
+/// `rev`), or why a press on that card is refused: it is gone, or changed.
+fn bound(requests: &[Request], id: &str, rev: &str) -> Result<usize, String> {
+    let i = requests.iter().position(|r| r.id == id)
+        .ok_or_else(|| i18n::t("This request is gone since it was shown.", "这个请求在显示之后已经不在了。").to_string())?;
+    if requests[i].rev() != rev {
+        return Err(i18n::t("This request changed since it was shown — look at it again.", "这个请求在显示之后变了——请重新看一遍。").to_string());
+    }
+    Ok(i)
 }
 
 impl Factory {
@@ -272,6 +296,8 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(live_requests_title)).set_text(cx, i18n::t("Requests: apps asked for by the OctoSense assistant or other apps", "请求：系统 agent 或其他应用请你做的应用"));
         self.view.label(cx, ids!(live_apps_title)).set_text(cx, i18n::t("Published apps: the live watch", "已发布的应用：巡检"));
         let now = now_secs();
+        // What each card stands for, as drawn now: a press acts on that request, as it says now.
+        self.factory.shown = shown.iter().map(|&i| (self.factory.requests[i].id.clone(), self.factory.requests[i].rev())).collect();
         for (slot, id) in CARDS.iter().enumerate() {
             let card = self.view.view(cx, &[*id]);
             let Some(&i) = shown.get(slot) else {
@@ -283,6 +309,9 @@ impl OctoBuddyView {
             card.label(cx, ids!(who)).set_text(cx, &format!("{} · {}", r.who(), ago(now.saturating_sub(r.at))));
             card.label(cx, ids!(what)).set_text(cx, &r.what);
             let mut details = Vec::new();
+            if let Some((_, why)) = self.factory.notice.as_ref().filter(|(id, _)| *id == r.id) {
+                details.push(why.clone());
+            }
             if !r.acceptance.is_empty() {
                 details.push(i18n::pick(format!("Done when: {}", r.acceptance), format!("验收标准：{}", r.acceptance)));
             }
@@ -330,10 +359,24 @@ impl OctoBuddyView {
         }
     }
 
-    /// The requests' buttons on the Apps page.
+    /// The requests' buttons on the Apps page: each card's acts on the
+    /// request it showed when drawn, refused if that request changed since.
     pub(crate) fn requests_actions(&mut self, cx: &mut Cx, actions: &Actions) -> bool {
-        for (slot, i) in CARDS.iter().zip(self.shown_requests()) {
+        for (slot, (id, rev)) in CARDS.iter().zip(self.factory.shown.clone()) {
             let card = self.view.view(cx, &[*slot]);
+            let pressed = [ids!(build), ids!(decline), ids!(dismiss), ids!(open), ids!(publish)].into_iter().any(|b| card.button(cx, b).clicked(actions));
+            if !pressed {
+                continue;
+            }
+            let i = match bound(&self.factory.requests, &id, &rev) {
+                Ok(i) => i,
+                Err(why) => {
+                    self.factory.notice = Some((id, why));
+                    self.relayout(cx);
+                    return true;
+                }
+            };
+            self.factory.notice = None;
             let hit = |id: &[LiveId]| card.button(cx, id).clicked(actions);
             if hit(ids!(build)) {
                 self.factory_build(i);
@@ -372,6 +415,7 @@ impl OctoBuddyView {
         let r = self.factory.requests[i].clone();
         let dir = folder_for(&data_dir().join("apps"), &r);
         self.factory.requests[i].status = Status::Preparing;
+        self.factory.requests[i].built_rev = Some(r.rev());
         self.factory_save();
         let (inbox, lang) = (self.rt.inbox.clone(), i18n::lang());
         std::thread::spawn(move || {
@@ -463,9 +507,34 @@ mod tests {
     fn a_request_keeps_its_fields() {
         let r = Request { id: "r1".into(), at: 3, caller: "system".into(), client: Some("mini".into()), for_whom: "日历".into(), what: "做一个新闻卡片".into(),
             acceptance: "显示 5 条".into(), data: "https://example.com/news.json".into(), name: "News".into(), status: Status::Building,
-            project: Some("/p".into()), session: Some("s-1".into()), published: None, error: None };
+            project: Some("/p".into()), session: Some("s-1".into()), published: None, error: None, built_rev: Some("9f2c41".into()) };
         assert_eq!(Request::from_json(&r.to_json()), Some(r.clone()));
         assert_eq!(r.api(), Some("https://example.com/news.json"));
+    }
+
+    #[test]
+    fn a_requests_rev_is_what_it_asks() {
+        let r = Request { id: "r1".into(), what: "新闻卡片".into(), acceptance: "5 条".into(), ..Default::default() };
+        let moved = Request { status: Status::Building, project: Some("/p".into()), at: 9, ..r.clone() };
+        assert_eq!(r.rev(), moved.rev(), "where it is, not what it asks");
+        assert_ne!(r.rev(), Request { acceptance: "10 条".into(), ..r.clone() }.rev());
+        assert_ne!(Request { what: "ab".into(), ..Default::default() }.rev(), Request { what: "a".into(), for_whom: "b".into(), ..Default::default() }.rev(), "each field apart");
+    }
+
+    /// A request that comes in between the draw and the press shifts the
+    /// cards: the press still acts on the request its card showed.
+    #[test]
+    fn a_press_acts_on_the_request_its_card_showed() {
+        i18n::set(i18n::Lang::En);
+        let a = Request { id: "ra".into(), what: "A".into(), ..Default::default() };
+        let mut requests = vec![a.clone()];
+        let shown = (a.id.clone(), a.rev());
+        requests.insert(0, Request { id: "rb".into(), what: "B".into(), ..Default::default() });
+        assert_eq!(bound(&requests, &shown.0, &shown.1), Ok(1));
+        requests[1].what = "A, but other".into();
+        assert!(bound(&requests, &shown.0, &shown.1).unwrap_err().contains("changed since it was shown"));
+        requests.remove(1);
+        assert!(bound(&requests, &shown.0, &shown.1).is_err());
     }
 
     #[test]
