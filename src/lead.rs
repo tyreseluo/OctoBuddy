@@ -195,13 +195,14 @@ no project: your working folder is a scratch folder of its own, empty at first. 
 their language. You may read files and look things up on the web; you cannot change files or run commands here \
 (for work on a codebase, the person opens a project in OctoBuddy).";
 
-/// What the lead is told: its rules, then the estimation method.
+/// What the lead is told: its rules (with what an `<untrusted>` block is,
+/// last), then the estimation method.
 pub fn lead_prompt() -> String {
     // The skill's front matter is for skill loaders, not for the model.
     let method = ESTIMATION.splitn(3, "---").nth(2).unwrap_or(ESTIMATION).trim();
     // What earlier runs taught (`lessons`): planning, splitting, agents and models.
     let learned = crate::lessons::section("orchestration", "LESSONS FROM EARLIER RUNS (OctoBuddy's own, kept with octobuddy_learn; follow them unless this request says otherwise):");
-    format!("{LEAD_RULES}\n\nAGENT-ESTIMATION (the method to estimate every plan with):\n\n{method}\n\n{}{learned}", CALIBRATION.trim())
+    format!("{LEAD_RULES}\n\n{}\n\nAGENT-ESTIMATION (the method to estimate every plan with):\n\n{method}\n\n{}{learned}", crate::untrusted::RULE, CALIBRATION.trim())
 }
 
 /// Claude Code's own model and effort settings for a project: the user's
@@ -745,6 +746,7 @@ mod tests {
         assert!(prompt.starts_with("You are the lead"));
         assert!(prompt.contains("## Estimation Procedure") && prompt.contains("# Calibration Examples"));
         assert!(!prompt.contains("name: agent-estimation"), "front matter is dropped");
+        assert!(prompt.contains(&format!("{LEAD_RULES}\n\n{}\n\nAGENT-ESTIMATION", crate::untrusted::RULE)), "what a fence means closes its rules");
     }
 
     #[test]

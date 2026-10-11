@@ -116,7 +116,8 @@ impl OctoBuddyView {
             let Some(at) = self.store.find_session(&session) else { continue };
             let cwd = self.store.session(at).and_then(|s| s.work_dir.clone()).unwrap_or_else(|| self.store.projects[at.0].path.clone());
             if let Err(err) = self.octos_outer_start(at, &cwd, text) {
-                self.system(at, &i18n::pick(format!("Could not reach the outer loop: {err}"), format!("无法连接 outer：{err}")));
+                let said = crate::failure::say(crate::failure::classify(&err), &self.store.session(at).map(Self::outer_on).unwrap_or_default(), &err);
+                self.system(at, &i18n::pick(format!("Could not reach the outer loop: {said}"), format!("无法连接 outer：{said}")));
             }
         }
     }
@@ -182,7 +183,8 @@ impl OctoBuddyView {
                 if let Some(next) = next {
                     let cwd = self.store.session(at).and_then(|s| s.work_dir.clone()).unwrap_or_else(|| self.store.projects[at.0].path.clone());
                     if let Err(err) = self.octos_outer_start(at, &cwd, next) {
-                        self.system(at, &i18n::pick(format!("Could not reach the outer loop: {err}"), format!("无法连接 outer：{err}")));
+                        let said = crate::failure::say(crate::failure::classify(&err), &self.store.session(at).map(Self::outer_on).unwrap_or_default(), &err);
+                        self.system(at, &i18n::pick(format!("Could not reach the outer loop: {said}"), format!("无法连接 outer：{said}")));
                     }
                 }
                 // Its reply is one message: closed here, so the next turn's is a new one.
