@@ -120,6 +120,22 @@ On this computer the workbench's **App Hub** tab takes an app to OctoSense's App
 
 It needs GitHub's `gh`, signed in. `OCTOBUDDY_APP_HUB_REPO` names another repository for the issue.
 
+**Following its review.** After a submission, OctoBuddy follows its issue, so a reviewer's comment does not wait for you to look.
+- **What it reads:** the issue of each app's last submission, once its receipt has read the issue back. Every 5 minutes (`OCTOBUDDY_REVIEW_EVERY`, in seconds, at least 30), `gh` reads its comments and whether it is closed.
+- **A review** is the comments newer than the last it read, from someone other than you and not from a bot. The first read brings what reviewers wrote so far, unless the issue was closed by then.
+  - Inside OctoSense, it becomes a request on the Apps page from `app-hub-review`, bound to the project. Build opens a new session in that project with the comments as its brief, fenced as data. It makes no new project.
+  - On this computer there is no Apps page. It becomes a new session named for the review, and the brief goes in its composer when you open it.
+  - Either way nothing is sent until you send it, and the project's latest session says a review came in.
+- **The new version** is submitted from this tab, as before. Once its receipt is confirmed, OctoBuddy follows the new issue, and keeps following the old one until it is closed, or for 7 days.
+- **A closed issue** is said once in the session, then no longer read.
+- **When `gh` fails,** OctoBuddy tries again by itself, less often. The session hears it once: at once when `gh` is not installed or not signed in, after three failures in a row when GitHub cannot be reached. The same trouble is not said again within a day.
+- **Kept** in `<data>/reviews.json`.
+- **For a demo,** `OCTOBUDDY_APP_HUB_REPO` points the whole flow, the submission issue and its review, at a sandbox repository.
+- **Verified** on 2026-10-12, reading GitHub only:
+  - `reads_a_real_issue` (ignored by default): App Hub's issue 97 read open, its one reviewer's comment a review on a first read; issue 202 read closed (`completed`).
+  - OctoBuddy on this computer, with a scratch `OCTOBUDDY_HOME` and a hand-written confirmed receipt pointing at issue 97 (no real submission), `OCTOBUDDY_REVIEW_EVERY=30`: it followed the issue, read the comment as a review, said so in the project's session and made the session "Review: pocket-ledger 0.1.3" with the fenced brief. Restarted, it said nothing again.
+  - **Not run yet:** inside OctoSense (the Apps page request and its Build), and a real new submission taking the watch over.
+
 **Verified** on 2026-10-04 on a copy of 小账本: the form written, the screenshot taken, the gate `PASSED` (unsigned), seven questions; the plan listed making `github.com/<you>/pocket-ledger`, the commit and tag `v9.9.9` and the issue, with its body, and made nothing. **Not run yet:** a real submission.
 
 ### What the agents get
@@ -152,6 +168,7 @@ The plugin `app-factory` builds OctoSense apps asked for from outside OctoBuddy.
 - **Waits for you.** The request appears on the Apps page (the pulse button beside Settings, in the accent colour while a request waits), with who asked, what for, when it is done and its data. Nothing is made, and no model is paid for, until you press **Build**. **Decline** turns it down.
 - **Built.** Build makes the app project from the design flow's template under `<data>/apps/`, and reads the data API it names. It then opens a new session with the request's brief in its composer. Pick the models for its outer and inner loops in the picker under it, and send; the data's shape goes with the message.
 - **Published.** **Publish** on its card publishes it to the local App Hub once its outer loop has stopped. Its live watch then starts.
+- **A review to address.** A request from `app-hub-review` (a reviewer's comment on an App Hub submission, see "Following its review") is bound to its project. Build opens a new session there with it and makes no project; its card has no Publish, since the new version is submitted from the workbench.
 - **Followed.** `octobuddy.status` lists the requests under `requests`, each with its status: waiting for the person, declined, preparing, building (and whether an outer loop works on it), published (the version), or failed.
 - **Kept** in `<data>/requests.json`.
 - **Verified** in OctoSense on 2026-10-02 with a Shanghai weather card on Open-Meteo's API:
@@ -373,6 +390,7 @@ Run on its own, the divider beside the sidebar draws as a dark bar; inside OctoS
 | `OCTOBUDDY_HOME` | Its data directory: projects, chats, plugins (default `~/.octobuddy`) |
 | `OCTOBUDDY_<NAME>_BIN` | The program to run for `claude`, `codex`, `pi`, `octos` (and the other tools), over OctoBuddy's copy and yours |
 | `OCTOBUDDY_DEBUG_EVENTS=1` | Prints every loop event on stderr |
+| `OCTOBUDDY_REVIEW_EVERY` | How often a submission's App Hub issue is read for review, in seconds (default 300, at least 30) |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | Appends each Codex bridge call that failed (its status, request and answer; never the key) |
 
 ## Not done yet

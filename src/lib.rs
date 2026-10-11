@@ -86,6 +86,7 @@ use model::{now_secs, Peer, SessionRef, Store};
 use orchestrate::Runtime;
 use plugins::card_loop::Loops as CardLoops;
 use plugins::app_factory::Factory as AppFactory;
+use plugins::review_watch::Reviews;
 use providers::Providers;
 
 /// The outer-loop CLIs the picker offers, each with its selected and
@@ -2641,6 +2642,9 @@ pub struct OctoBuddyView {
     // Apps asked for from outside (`plugins::app_factory`).
     #[rust]
     factory: AppFactory,
+    // App Hub submissions' reviews followed (`plugins::review_watch`).
+    #[rust]
+    reviews: Reviews,
     // The projects the side menu's "move to" rows stand for, by name.
     #[rust]
     side_moves: Vec<String>,
@@ -5871,7 +5875,7 @@ impl Widget for OctoBuddyView {
         // The production loop's runs that are due (and its page kept fresh).
         if self.clock.is_event(event).is_some() {
             self.card_loop_tick();
-            self.review_watch_tick();
+            self.review_watch_tick(cx);
             if self.page == Page::Live && now_secs().is_multiple_of(5) {
                 self.relayout(cx);
             }
