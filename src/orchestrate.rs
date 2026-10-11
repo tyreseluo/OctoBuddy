@@ -694,6 +694,7 @@ impl OctoBuddyView {
                             "cost_usd": q.usage.as_ref().map(|u| u.cost),
                             "outer_verdict": q.review, "commits": q.commits,
                         })).collect::<Vec<_>>(),
+                        "acceptance": self.acceptance_status(&s.id),
                     })
                 }).collect::<Vec<_>>(),
             }))
@@ -2760,10 +2761,8 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
     /// the project's memory (room "rework"), so later plans start from it.
     fn save_rework(&mut self, at: SessionRef) {
         let Some(session) = self.store.session(at).cloned() else { return };
-        let Some(round) = session.peers().iter().map(|p| p.round).max() else { return };
-        let mine: Vec<&Peer> = session.peers().iter().filter(|p| p.round == round && p.status != "closed").collect();
-        let accepted = |p: &Peer| p.review.as_deref().is_some_and(|r| r.starts_with("accept"));
-        if mine.is_empty() || !mine.iter().all(|p| accepted(p)) || !self.rt.rework_saved.insert((session.id.clone(), round)) {
+        let Some(round) = crate::acceptance::settled_round(session.peers()) else { return };
+        if !self.rt.rework_saved.insert((session.id.clone(), round)) {
             return;
         }
         let tl = crate::timeline::build(&session, now_secs(), false, &|p| p.map(|p| self.ran_on(p)).unwrap_or_default());
@@ -2820,7 +2819,7 @@ what the cookbook or the lessons already say. Then say in one line what you kept
     }
 
     /// What `p` ran on: its agent and model.
-    fn ran_on(&self, p: &Peer) -> String {
+    pub(crate) fn ran_on(&self, p: &Peer) -> String {
         let agent = p.agent.as_deref().unwrap_or("octos");
         let model = p.model_pick.clone().unwrap_or_else(|| match agent {
             "octos" => self.providers.primary().map(|r| r.label.clone()).unwrap_or_else(|| "its profile's model".into()),
@@ -3183,6 +3182,8 @@ changed. Use what you read and go on with the change; read other lines only if y
         let Some(at) = self.selected else { return };
         let Some(peer) = self.shown_peer(at).map(|p| p.id.clone()) else { return };
         self.close_peer(&peer, "by you");
+        // The last of its round closed: the round may be settled now.
+        self.acceptance_due(at);
         self.save();
         self.sync(cx);
     }
@@ -3286,6 +3287,8 @@ close it, or accept it with an override:\n{}", tell.join("\n")));
         let mut calibration = Vec::new();
         let mut refused = Vec::new();
         let mut accepted_any = false;
+        // An accept or a close may settle its round.
+        let settling = !reply.reviews.is_empty() || !reply.close.is_empty();
         for review in reply.reviews {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == review.slug).map(|p| p.id.clone()));
             // OctoBuddy's checks say no (its check failed, its report's claims
@@ -3349,6 +3352,10 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
         // Accepting (or closing) the last of a wave starts the next.
         self.release_waves(at);
         self.save_rework(at);
+        // A round settled: the person's acceptance sheet (once).
+        if settling {
+            self.acceptance_due(at);
+        }
         for op in reply.queue_ops {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == op.to).map(|p| p.id.clone()));
             // Closed (this reply, say): what waited for it went with it.

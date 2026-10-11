@@ -38,6 +38,8 @@ pub enum Kind {
     Drill,
     /// An app submitted to OctoSense's App Hub: its tag pushed, its issue opened.
     HubSubmit,
+    /// A round's acceptance sheet (`acceptance`): made by OctoBuddy, confirmed by the person.
+    Acceptance,
 }
 
 impl Kind {
@@ -48,11 +50,12 @@ impl Kind {
             Kind::PublishFix => "publish-fix",
             Kind::Drill => "drill",
             Kind::HubSubmit => "hub-submit",
+            Kind::Acceptance => "acceptance",
         }
     }
 
     fn parse(s: &str) -> Option<Kind> {
-        [Kind::Commit, Kind::Publish, Kind::PublishFix, Kind::Drill, Kind::HubSubmit].into_iter().find(|k| k.key() == s)
+        [Kind::Commit, Kind::Publish, Kind::PublishFix, Kind::Drill, Kind::HubSubmit, Kind::Acceptance].into_iter().find(|k| k.key() == s)
     }
 
     /// What it changes: kinds that change the same thing (a publish, a fix,
@@ -62,6 +65,7 @@ impl Kind {
             Kind::Commit => "git",
             Kind::Publish | Kind::PublishFix | Kind::Drill => "catalog",
             Kind::HubSubmit => "hub",
+            Kind::Acceptance => "acceptance",
         }
     }
 
@@ -69,6 +73,7 @@ impl Kind {
     /// (the catalog serves that content already), a submission is (that
     /// version is in); a commit never is (files that differ from HEAD are
     /// not committed, whatever was before), nor a drill (it breaks on purpose).
+    /// A sheet is: the person confirmed it.
     fn repeats(self) -> bool {
         !matches!(self, Kind::Commit | Kind::Drill)
     }
@@ -716,25 +721,32 @@ fn what_word(what: &str) -> String {
 pub fn line(r: &Receipt) -> String {
     let result = r.result.clone().unwrap_or_default();
     let version = r.inputs.split_once(' ').map(|(_, v)| v.to_string()).unwrap_or_default();
+    // A sheet's inputs: `<session> r<round> <digest>`.
+    let round = r.inputs.split_whitespace().nth(1).and_then(|w| w.strip_prefix('r')).unwrap_or("?").to_string();
+    let sheet = short(&r.snap.content).to_string();
     let did = match r.kind {
         Kind::Commit => i18n::pick(format!("committed {}", result.split_whitespace().next().unwrap_or("")), format!("已提交 {}", result.split_whitespace().next().unwrap_or(""))),
         Kind::Publish => i18n::pick(format!("published {result}"), format!("已发布 {result}")),
         Kind::PublishFix => i18n::pick(format!("published the fix {result}"), format!("已发布修复版 {result}")),
         Kind::Drill => i18n::pick(format!("published the drill's {result}"), format!("已发布演练版本 {result}")),
         Kind::HubSubmit => i18n::pick(format!("submitted {version} to App Hub"), format!("已提交 {version} 到 App Hub")),
+        Kind::Acceptance => i18n::pick(format!("round {round} accepted by the person (sheet {sheet})"), format!("第 {round} 轮已由本人验收（验收单 {sheet}）")),
     };
     let noun = match r.kind {
-        Kind::Commit => i18n::t("the commit", "提交"),
-        Kind::Publish => i18n::t("the publish", "发布"),
-        Kind::PublishFix => i18n::t("the fix's publish", "修复版发布"),
-        Kind::Drill => i18n::t("the drill", "演练"),
-        Kind::HubSubmit => i18n::t("the submission", "提交 App Hub"),
+        Kind::Commit => i18n::t("the commit", "提交").to_string(),
+        Kind::Publish => i18n::t("the publish", "发布").to_string(),
+        Kind::PublishFix => i18n::t("the fix's publish", "修复版发布").to_string(),
+        Kind::Drill => i18n::t("the drill", "演练").to_string(),
+        Kind::HubSubmit => i18n::t("the submission", "提交 App Hub").to_string(),
+        Kind::Acceptance => i18n::pick(format!("round {round}'s acceptance"), format!("第 {round} 轮的验收")),
     };
     let named = |ok: Option<bool>, with_detail: bool| -> String {
         r.checks.iter().filter(|c| c.ok == ok).map(|c| if with_detail && !c.detail.is_empty() { format!("{} ({})", what_word(&c.what), c.detail) } else { what_word(&c.what) })
             .collect::<Vec<_>>().join(i18n::t(", ", "、"))
     };
     match r.status {
+        // A sheet nobody has confirmed yet: nothing was done, the person is to look.
+        Status::Prepared if r.kind == Kind::Acceptance => i18n::pick(format!("? round {round}'s acceptance sheet ({sheet}) waits for the person"), format!("? 第 {round} 轮的验收单（{sheet}）等待本人确认")),
         Status::Confirmed => i18n::pick(format!("✓ {did} — read back: {}", named(Some(true), false)), format!("✓ {did}——已回读核对：{}", named(Some(true), false))),
         Status::Mismatch => i18n::pick(format!("✗ {did} — read back differs: {}", named(Some(false), true)), format!("✗ {did}——回读不符：{}", named(Some(false), true))),
         Status::Unknown | Status::Executing | Status::Prepared if r.checks.is_empty() => i18n::pick(format!("? {did} — not read back yet"), format!("? {did}——还没有回读")),
@@ -764,6 +776,8 @@ pub fn reconcile(r: &mut Receipt) {
             let issue = checks.iter().find(|c| c.what == "issue" && c.ok == Some(true)).map(|c| c.detail.clone());
             settle(r, checks, issue);
         }
+        // Never left open: the person's word, nothing done to read back.
+        Kind::Acceptance => {}
     }
 }
 
@@ -924,6 +938,31 @@ mod tests {
         r.checks[1] = Check::new("digest", None, "no digest");
         r.status = status_of(&r.checks);
         assert!(line(&r).starts_with("? published 1.0.3 — not confirmed: digest"));
+    }
+
+    #[test]
+    fn a_sheets_line_says_it_waits_then_who_accepted_it() {
+        i18n::set(i18n::Lang::En);
+        let mut r = draft(Kind::Acceptance, "/p", "s-1 r2 d1e2f3a4", Snapshot { head: Some("abc".into()), content: "d1e2f3a4".into(), version: None }, "OctoBuddy");
+        assert_eq!(line(&r), "? round 2's acceptance sheet (d1e2f3) waits for the person");
+        r.by = "person".into();
+        r.checks = vec![Check::new("commit", Some(true), "abc"), Check::new("content", Some(true), "d1e2f3")];
+        r.status = status_of(&r.checks);
+        assert_eq!(line(&r), "✓ round 2 accepted by the person (sheet d1e2f3) — read back: commit, content");
+        r.status = Status::Stale;
+        r.result = Some("its commit moved (abc → def)".into());
+        assert_eq!(line(&r), "✗ round 2's acceptance not done, out of date: its commit moved (abc → def)");
+        i18n::set(i18n::Lang::Zh);
+        assert!(line(&r).starts_with("✗ 第 2 轮的验收没有进行，已过期"), "{}", line(&r));
+        i18n::set(i18n::Lang::En);
+        assert_eq!(Kind::parse("acceptance"), Some(Kind::Acceptance));
+        let dir = scratch("sheet");
+        let l = Ledger(dir.join("receipts.jsonl"));
+        let mut a = l.prepare(Kind::Acceptance, "/p", "s-1 r2 d", snap("d"), "OctoBuddy").unwrap();
+        assert!(l.prepare(Kind::Acceptance, "/p", "s-1 r3 e", snap("e"), "OctoBuddy").is_ok(), "another round's sheet is another");
+        l.settle(&mut a, vec![check(Some(true))], None);
+        assert!(matches!(l.prepare(Kind::Acceptance, "/p", "s-1 r2 d", snap("d"), "OctoBuddy"), Err(Prior::Done(_))), "the same sheet, confirmed, is done");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn repo(dir: &Path) -> String {

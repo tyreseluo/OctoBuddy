@@ -41,7 +41,7 @@ pub const KNOWLEDGE: &str = ".octobuddy/knowledge/MAP.md";
 
 /// The lines under a card's `## <heading>` (or a contract's `### Allowed
 /// Changes`), up to the next heading.
-fn section<'a>(brief: &'a str, names: &[&str]) -> Vec<&'a str> {
+pub(crate) fn section<'a>(brief: &'a str, names: &[&str]) -> Vec<&'a str> {
     let mut out = Vec::new();
     let mut inside = false;
     for line in brief.lines() {

@@ -1677,6 +1677,16 @@ script_mod! {
                                     }
                                     draw_text +: {color: th_accent_ink color_hover: th_accent_ink color_down: th_accent_ink color_focus: th_accent_ink}
                                 }
+                                // A round's acceptance sheet waits for the person (`acceptance.rs`).
+                                confirm_acceptance := ButtonFlat{
+                                    text: "Confirm acceptance" width: Fit height: 30 visible: false
+                                    padding: Inset{left: 12 right: 12}
+                                    draw_bg +: {
+                                        color: th_accent_soft color_hover: th_accent_selected color_down: th_accent_selected color_focus: th_accent_soft
+                                        border_size: 0.0 border_radius: 3.0
+                                    }
+                                    draw_text +: {color: th_accent_ink color_hover: th_accent_ink color_down: th_accent_ink color_focus: th_accent_ink}
+                                }
                                 send := SendButton{}
                             }
                         }
@@ -2545,6 +2555,10 @@ pub struct OctoBuddyView {
     /// may go on (`继续`), with what waited for them first.
     #[rust]
     resumable: HashSet<String>,
+    /// Each session's latest acceptance sheet receipt, as last read from
+    /// the ledger (`acceptance.rs`): only OctoBuddy changes them.
+    #[rust]
+    sheets: HashMap<String, Option<receipts::Receipt>>,
     /// Outer loops to start again once their turn ends (their effort was
     /// changed while they worked; the conversation is kept).
     #[rust]
@@ -2960,6 +2974,7 @@ impl OctoBuddyView {
             worktree.set_visible(cx, session.work_dir.is_none() && !project.is_chats());
             self.sync_worktree_bar(cx, at);
             let session_id = self.store.session(at).map(|s| s.id.clone()).unwrap_or_default();
+            self.sync_acceptance(cx, &session_id);
             let waiting = self.outer_waiting(&session_id);
             self.outer_queue_ids = self.sync_queue(cx, live_id!(outer_queue), &waiting);
             // The person's own messages may go into the turn running now.
@@ -3999,7 +4014,12 @@ impl OctoBuddyView {
                 self.flow_open = None;
             }
         } else if let Some(id) = key.strip_prefix("p:") {
+            let at = self.store.find_peer(id);
             self.close_peer(id, "by you");
+            // The last of its round closed: the round may be settled now.
+            if let Some(at) = at {
+                self.acceptance_due(at);
+            }
             if self.flow_open_key().as_deref() == Some(key) {
                 self.flow_open = None;
             }
@@ -4575,6 +4595,9 @@ impl OctoBuddyView {
         }
         if self.view.button(cx, ids!(go_on)).clicked(actions) {
             self.go_on(cx);
+        }
+        if self.view.button(cx, ids!(confirm_acceptance)).clicked(actions) {
+            self.confirm_acceptance(cx);
         }
         if self.view.text_input(cx, ids!(composer)).changed(actions).is_some() && self.selected.is_some_and(|at| self.session_busy(at)) {
             self.sync(cx);
