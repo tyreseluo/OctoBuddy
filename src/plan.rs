@@ -23,6 +23,9 @@ pub struct Review {
     pub slug: String,
     pub verdict: String,
     pub why: String,
+    /// An `accept` OctoBuddy's checks say no to, made anyway: why it is right
+    /// (`override`), shown to the person.
+    pub over: Option<String>,
 }
 
 #[derive(DeJson)]
@@ -30,6 +33,8 @@ struct ReviewItem {
     slug: String,
     verdict: String,
     why: Option<String>,
+    #[rename(override)]
+    over: Option<String>,
 }
 
 #[derive(DeJson)]
@@ -180,7 +185,7 @@ pub fn split_reply(reply: &str) -> Reply {
             .map(|r| {
                 // "merge" is how it said accept before one shared directory.
                 let verdict = match r.verdict.trim().to_ascii_lowercase().as_str() { "merge" => "accept".to_string(), v => v.to_string() };
-                Review { slug: slugify(&r.slug), verdict, why: r.why.unwrap_or_default().trim().to_string() }
+                Review { slug: slugify(&r.slug), verdict, why: r.why.unwrap_or_default().trim().to_string(), over: r.over.map(|o| o.trim().to_string()).filter(|o| !o.is_empty()) }
             })
             .filter(|r| !r.slug.is_empty() && matches!(r.verdict.as_str(), "accept" | "fix"))
             .collect();
@@ -388,7 +393,14 @@ mod tests {
         assert_eq!(r.slices[1].check, None);
         let r = split_reply("Both verified.\n```octobuddy-review\n{\"branches\":[{\"slug\":\"Feat A\",\"verdict\":\"Merge\",\"why\":\"tests pass\"},{\"slug\":\"b\",\"verdict\":\"maybe\"}]}\n```");
         assert_eq!(r.text, "Both verified.");
-        assert_eq!(r.reviews, vec![Review { slug: "feat-a".into(), verdict: "accept".into(), why: "tests pass".into() }]);
+        assert_eq!(r.reviews, vec![Review { slug: "feat-a".into(), verdict: "accept".into(), why: "tests pass".into(), over: None }]);
+    }
+
+    #[test]
+    fn an_accept_may_override_the_checks() {
+        let r = split_reply("```octobuddy-review\n{\"branches\":[{\"slug\":\"a\",\"verdict\":\"accept\",\"why\":\"done\",\"override\":\" the failing test needs the network \"},{\"slug\":\"b\",\"verdict\":\"accept\",\"override\":\"\"}]}\n```");
+        assert_eq!(r.reviews[0].over.as_deref(), Some("the failing test needs the network"));
+        assert_eq!(r.reviews[1].over, None, "an empty override is none");
     }
 
     #[test]
