@@ -1930,9 +1930,12 @@ script_mod! {
                                     move_t3 := SegOff{text: "" height: 24 visible: false}
                                     move_new := SegOff{text: "New outer loop" height: 24}
                                 }
+                                // At work, waiting (on whom), silent too long, or done (`liveness`): one of these says it.
                                 d_activity_row := View{
-                                    width: Fill height: Fit
+                                    width: Fill height: Fit flow: Down
                                     d_activity := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: accent draw_text.text_style.font_size: 9}
+                                    d_waiting := Label{width: Fill text: "" visible: false max_lines: 1 padding: 0 draw_text.color: th_ink2 draw_text.text_style.font_size: 9}
+                                    d_silent := Label{width: Fill text: "" visible: false padding: 0 draw_text.color: th_warning draw_text.wrap: Words draw_text.text_style: theme.font_bold{font_size: 9}}
                                 }
                                 d_changes_row := RoundedView{
                                     width: Fill height: Fit flow: Down spacing: 6 visible: false new_batch: true
@@ -2559,6 +2562,9 @@ pub struct OctoBuddyView {
     /// Ticks once a second, to keep elapsed times current.
     #[rust]
     clock: Timer,
+    /// The shown session's loops in a word each, as last drawn (`liveness_shown`).
+    #[rust]
+    liveness_seen: String,
     #[rust]
     page: Page,
     // What AI providers has enabled, as last read.
@@ -2898,8 +2904,8 @@ impl OctoBuddyView {
             let busy = self.session_busy(at);
             let project = &self.store.projects[at.0];
             let session = &project.sessions[at.1];
-            let lead = self.lead_status.get(&session.id).cloned().unwrap_or_else(|| "idle".into());
-            let lead = status_word(&lead).to_string();
+            // At work, waiting (on whom), silent or done (`liveness`).
+            let lead = liveness::short(&self.outer_state(session, now_secs()).0);
             let (_, model) = self.rt.outer_label(session, &project.path, &lead);
             let cost = session.lead_cost.map(|c| format!(" · ${c:.2}")).unwrap_or_default();
             let effort = session.outer_effort().map(|e| format!(" · {}", model::effort_word(e))).unwrap_or_default();
@@ -2910,7 +2916,9 @@ impl OctoBuddyView {
             let has_inner = !session.peers().is_empty();
             let working = session.peers().iter().filter(|p| p.is_active()).count();
             let open = session.peers().iter().filter(|p| p.status != "closed").count();
+            let silent = session.peers().iter().filter(|p| p.is_active() && self.peer_state(session, p, now_secs()).0.is_silent()).count();
             let inner = match (waiting, working) {
+                (0, _) if silent > 0 => i18n::pick(format!("{silent} silent"), format!("{silent} 个无动静")),
                 (0, 0) => i18n::pick(format!("{open} open"), format!("{open} 个")),
                 (0, n) => i18n::pick(format!("{n} working"), format!("{n} 个在做")),
                 (n, _) => i18n::pick(format!("{n} to approve"), format!("{n} 个待批")),
@@ -3221,9 +3229,17 @@ impl OctoBuddyView {
         };
         let meta = i18n::pick(format!("round {}{wave}{rounds} · {elapsed}{used}{subagents}", p.round), format!("第 {} 轮{wave}{rounds} · {elapsed}{used}{subagents}", p.round));
         self.view.label(cx, ids!(d_meta)).set_text(cx, &meta);
-        let activity = p.activity.as_deref().filter(|_| p.is_active()).unwrap_or("");
-        self.view.view(cx, ids!(d_activity_row)).set_visible(cx, !activity.is_empty());
-        self.view.label(cx, ids!(d_activity)).set_text(cx, activity);
+        // What it does, whom it waits for, or how long it has been silent (and what to do then).
+        let state = self.store.session(at).map(|s| self.peer_state(s, &p, now_secs()).0);
+        let said = state.as_ref().map(liveness::label).unwrap_or_default();
+        let (working, silent) = (matches!(state, Some(liveness::State::Working { .. })), state.as_ref().is_some_and(liveness::State::is_silent));
+        self.view.view(cx, ids!(d_activity_row)).set_visible(cx, !said.is_empty());
+        self.view.label(cx, ids!(d_activity)).set_visible(cx, working);
+        self.view.label(cx, ids!(d_activity)).set_text(cx, if working { said.as_str() } else { "" });
+        self.view.label(cx, ids!(d_waiting)).set_visible(cx, !working && !silent);
+        self.view.label(cx, ids!(d_waiting)).set_text(cx, if !working && !silent { said.as_str() } else { "" });
+        self.view.label(cx, ids!(d_silent)).set_visible(cx, silent);
+        self.view.label(cx, ids!(d_silent)).set_text(cx, &if silent { format!("{said}: {}", liveness::remedy(false)) } else { String::new() });
         self.sync_result(cx, at, &p);
         // What it runs, under its input: octos, and the model (Z.ai's mark for GLM).
         self.view.label(cx, ids!(inner_agent)).set_text(cx, p.agent());
@@ -3702,8 +3718,9 @@ impl OctoBuddyView {
             y = y.max(pos.y) + tall + 36.0;
             let outer = LiveId::from_str(&format!("s:{}", session.id));
             if !detached {
-                let lead = self.lead_status.get(&session.id).cloned().unwrap_or_else(|| "idle".into());
-                let (chip, engine) = self.rt.outer_label(session, &project.path, status_word(&lead));
+                // At work, waiting (on whom), silent or done (`liveness`).
+                let lead = liveness::short(&self.outer_state(session, now_secs()).0);
+                let (chip, engine) = self.rt.outer_label(session, &project.path, &lead);
                 let counts = if peers.is_empty() { i18n::t("Inner · none yet", "Inner · 暂无").to_string() } else { format!("Inner · {}", PeerCounts::of(session.peers()).short()) };
                 let lit = shown.as_deref() == Some(session.id.as_str());
                 out.push((flow::Card {
@@ -3733,7 +3750,9 @@ impl OctoBuddyView {
                     (false, false) => live_id!(Inner),
                 };
                 let activity = p.activity.as_deref().unwrap_or("").lines().next().unwrap_or("").chars().take(40).collect::<String>();
-                let status = if activity.is_empty() { format!("{} · {}", p.role(), status_word(&p.status)) } else { format!("{} · {} · {activity}", p.role(), status_word(&p.status)) };
+                let live = self.peer_state(session, p, now_secs()).0;
+                let live_word = liveness::short(&live);
+                let status = if activity.is_empty() || !matches!(live, liveness::State::Working { .. }) { format!("{} · {live_word}", p.role()) } else { format!("{} · {live_word} · {activity}", p.role()) };
                 let id = LiveId::from_str(&format!("p:{}", p.id));
                 let tag = if detached { i18n::t("peer agent · on its own", "peer agent · 未挂外环").to_string() } else { peer_tag.clone() };
                 out.push((flow::Card {
@@ -3830,7 +3849,9 @@ impl OctoBuddyView {
             // An inner loop's card takes the colour of its budget's use.
             if let Some(p) = card.key.strip_prefix("p:").filter(|_| card.link == flow::Link::Peer).and_then(|id| self.store.find_peer(id).and_then(|at| self.store.session(at)).and_then(|s| s.peers().iter().find(|p| p.id == id))) {
                 let (chosen, lit) = (matches!(card.template, t if t == live_id!(InnerSel) || t == live_id!(InnerSelLit)), card.active);
-                let tier = budget_tier(p);
+                // Silent too long: the warning's colour, as a budget half used.
+                let silent = self.store.find_peer(&p.id).and_then(|at| self.store.session(at)).is_some_and(|s| self.peer_state(s, p, now_secs()).0.is_silent());
+                let tier = budget_tier(p).max(u8::from(silent));
                 let bg = match (tier, lit, chosen) {
                     (3, _, _) => crate::theme::hex("danger_bg"),
                     (2, _, _) => crate::theme::hex("orange_bg"),
@@ -5032,7 +5053,13 @@ impl OctoBuddyView {
         let waiting = self.rt.lead_pending.get(&session.id).copied().unwrap_or(0) > 0 || self.rt.packing.contains(&session.id);
         if waiting && streaming.is_none() {
             let since = session.messages.iter().rev().find(|m| m.role() == model::Role::User).map(|m| m.at).unwrap_or_else(model::now_secs);
-            let status = waiting_status(self.lead_status.get(&session.id).map(String::as_str).unwrap_or(""), session.engine());
+            // Nothing from its agent for too long: said so, with what to do.
+            let outer = self.outer_state(session, now_secs()).0;
+            let status = if outer.is_silent() {
+                format!("{}: {}", liveness::label(&outer), liveness::remedy(true))
+            } else {
+                waiting_status(self.lead_status.get(&session.id).map(String::as_str).unwrap_or(""), session.engine())
+            };
             rows.push(chat::waiting_row(session, plain, &status, since));
         }
         let key = session.id.clone();
@@ -5214,7 +5241,11 @@ impl OctoBuddyView {
             // Selection is a template, not a visibility flag: set_visible on a
             // child of a list item did not take effect.
             let selected = shown.as_deref() == Some(p.id.as_str());
+            // Silent too long: the warning's dot, whatever its status says.
+            let live = self.peer_state(session, p, now_secs()).0;
             let template = match (p.status.as_str(), selected) {
+                (_, false) if live.is_silent() => id!(Halted),
+                (_, true) if live.is_silent() => id!(HaltedSel),
                 ("running" | "checking", false) => id!(Running),
                 ("running" | "checking", true) => id!(RunningSel),
                 ("done" | "idle" | "merged", false) => id!(Done),
@@ -5240,7 +5271,7 @@ impl OctoBuddyView {
                 (None, Some(used)) => format!(" · {}", steps(used)),
                 (None, None) => String::new(),
             };
-            let state = format!("{}{queued}{subagents}{rounds}{used}", status_word(&p.status));
+            let state = format!("{}{queued}{subagents}{rounds}{used}", liveness::short(&live));
             item.label(cx, ids!(state)).set_text(cx, &state);
             item.draw_all_unscoped(cx);
         }
@@ -5838,6 +5869,19 @@ impl Widget for OctoBuddyView {
         // An outer loop asked to stop that has not: ended.
         if self.clock.is_event(event).is_some() && !self.stopping.is_empty() {
             self.stop_overdue(cx);
+        }
+        // A loop fallen silent says so in its session (once); the shown
+        // session's tabs and cards drawn again when a loop's state changes.
+        if self.clock.is_event(event).is_some() {
+            let said = self.check_silence();
+            let shown = self.liveness_shown();
+            if said || shown != self.liveness_seen {
+                self.liveness_seen = shown;
+                if said {
+                    self.save();
+                }
+                self.relayout(cx);
+            }
         }
         if self.clock.is_event(event).is_some() && self.selected.is_some_and(|at| self.session_busy(at)) {
             self.sync(cx);

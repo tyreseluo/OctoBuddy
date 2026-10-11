@@ -163,6 +163,8 @@ pub struct Runtime {
     /// When each loop was last heard from: by peer id, and by
     /// `liveness::outer_key` for an outer loop (`liveness`).
     pub(crate) heard: HashMap<String, u64>,
+    /// Loops silent now whose session was told so (once per silence).
+    pub(crate) silent_said: HashSet<String>,
 }
 
 impl Runtime {

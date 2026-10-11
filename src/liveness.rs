@@ -7,8 +7,8 @@
 //! agent may be stuck, and the person can act on it (Interrupt & send, Stop).
 use crate::events::LoopEvent;
 use crate::i18n;
-use crate::model::{Peer, Session};
-use std::collections::HashMap;
+use crate::model::{now_secs, Peer, Session};
+use std::collections::{HashMap, HashSet};
 
 /// A turn unheard from this long is silent, unless `OCTOBUDDY_SILENT_SECS` says otherwise.
 pub const SILENT_SECS: u64 = 120;
@@ -147,6 +147,10 @@ impl State {
             State::Waiting { on, .. } => Some(*on),
             _ => None,
         }
+    }
+
+    pub fn is_silent(&self) -> bool {
+        matches!(self, State::Silent { .. })
     }
 }
 
@@ -321,6 +325,50 @@ pub fn label(s: &State) -> String {
     }
 }
 
+/// The same in a word or two, for a tab or a card.
+pub fn short(s: &State) -> String {
+    match s {
+        State::Working { .. } => i18n::t("working", "工作中").into(),
+        State::Waiting { why, .. } => match why {
+            Why::Review(_) => i18n::t("waits for review", "等外环审查").into(),
+            Why::Check => i18n::t("waits for its check", "等检查").into(),
+            Why::Wave(0) => i18n::t("waits for its wave", "等前一个 wave").into(),
+            Why::Wave(w) => i18n::pick(format!("waits for wave {w}"), format!("等 wave {w}")),
+            Why::Slot(_) => i18n::t("queued for a slot", "排队等空位").into(),
+            Why::Start => i18n::t("starting", "启动中").into(),
+            Why::Reports(n) => i18n::pick(format!("waits for {n} inner"), format!("等 {n} 个 inner")),
+            _ => i18n::t("waits for you", "等你").into(),
+        },
+        // By the minute: a tab is drawn again when this changes, not each second.
+        State::Silent { secs } if *secs < 60 => i18n::t("silent", "无动静").into(),
+        State::Silent { secs } => i18n::pick(format!("silent {}", span(*secs)), format!("{}无动静", span(*secs))),
+        State::Done { how } => how_word(*how).into(),
+    }
+}
+
+/// What the person can do about a silent loop, as its buttons say it.
+pub fn remedy(outer: bool) -> &'static str {
+    if outer {
+        i18n::t("Interrupt & send, or Stop and Go on", "可「打断并发送」，或「停止」后「继续」")
+    } else {
+        i18n::t("Interrupt & send, or End", "可「打断并发送」或「结束」")
+    }
+}
+
+/// The line a session gets when one of its loops falls silent (once per silence).
+pub fn silent_line(who: &str, secs: u64, outer: bool) -> String {
+    i18n::pick(format!("{who}: silent for {} — no sign from its agent. {}.", span(secs), remedy(outer)),
+        format!("{who}：已 {}没有动静——它的 agent 没有任何回应。{}。", span(secs), remedy(outer)))
+}
+
+/// The loops silent now that were not before (each says so once), and the
+/// set to keep: a loop heard from again may fall silent, and be said, anew.
+pub fn newly_silent(said: &HashSet<String>, silent: HashSet<String>) -> (Vec<String>, HashSet<String>) {
+    let mut new: Vec<String> = silent.difference(said).cloned().collect();
+    new.sort();
+    (new, silent)
+}
+
 /// The key an outer loop is heard from under (an inner loop's is its id).
 pub fn outer_key(session: &str) -> String {
     format!("lead:{session}")
@@ -467,6 +515,45 @@ impl crate::OctoBuddyView {
         out
     }
 
+    /// A loop fallen silent says so in its session, once per silence.
+    /// Returns whether any did (the conversation grew).
+    pub(crate) fn check_silence(&mut self) -> bool {
+        let now = now_secs();
+        let mut silent: HashMap<String, (crate::model::SessionRef, String, u64, bool)> = HashMap::new();
+        for (pi, project) in self.store.projects.iter().enumerate() {
+            for (si, s) in project.sessions.iter().enumerate() {
+                if let (State::Silent { secs }, _) = self.outer_state(s, now) {
+                    silent.insert(outer_key(&s.id), ((pi, si), i18n::t("The outer loop", "外环").to_string(), secs, true));
+                }
+                for p in s.peers().iter().filter(|p| p.is_active()) {
+                    if let (State::Silent { secs }, _) = self.peer_state(s, p, now) {
+                        silent.insert(p.id.clone(), ((pi, si), p.slug.clone(), secs, false));
+                    }
+                }
+            }
+        }
+        let (new, keep) = newly_silent(&self.rt.silent_said, silent.keys().cloned().collect());
+        self.rt.silent_said = keep;
+        for key in &new {
+            if let Some((at, who, secs, outer)) = silent.get(key) {
+                self.system(*at, &silent_line(who, *secs, *outer));
+            }
+        }
+        !new.is_empty()
+    }
+
+    /// The shown session's loops in a word or two each: when it changes,
+    /// the tabs and cards are drawn again (a label's seconds alone do not).
+    pub(crate) fn liveness_shown(&self) -> String {
+        let Some(s) = self.selected.and_then(|at| self.store.session(at)) else { return String::new() };
+        let now = now_secs();
+        let mut out = short(&self.outer_state(s, now).0);
+        for p in s.peers() {
+            out.push('|');
+            out.push_str(&short(&self.peer_state(s, p, now).0));
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -553,6 +640,14 @@ mod tests {
             assert_eq!(label(&state), zh);
         }
         set(Lang::En);
+        assert_eq!(short(&State::Silent { secs: 245 }), "silent 4 min");
+        assert_eq!(short(&State::Silent { secs: 15 }), "silent", "by the minute");
+        assert_eq!(short(&State::wait(Why::Question)), "waits for you");
+        assert_eq!(silent_line("calc", 120, false), "calc: silent for 2 min — no sign from its agent. Interrupt & send, or End.");
+        set(Lang::Zh);
+        assert_eq!(short(&State::Silent { secs: 245 }), "4 分钟无动静");
+        assert_eq!(silent_line("外环", 120, true), "外环：已 2 分钟没有动静——它的 agent 没有任何回应。可「打断并发送」，或「停止」后「继续」。");
+        set(Lang::En);
     }
 
     #[test]
@@ -584,6 +679,19 @@ mod tests {
         for (last, every, now, stale) in [(1000, 300, 1600, false), (1000, 300, 1601, true), (0, 300, 99_999, false), (1000, 30, 1061, true)] {
             assert_eq!(stale_watch(last, every, now), stale, "last {last}, every {every}, now {now}");
         }
+    }
+
+    #[test]
+    fn a_silence_is_said_once() {
+        let set_of = |keys: &[&str]| keys.iter().map(|k| k.to_string()).collect::<HashSet<String>>();
+        let (new, said) = newly_silent(&HashSet::new(), set_of(&["w1", "lead:s"]));
+        assert_eq!(new, ["lead:s", "w1"]);
+        let (new, said) = newly_silent(&said, set_of(&["w1", "lead:s"]));
+        assert!(new.is_empty(), "still silent: not said again");
+        let (new, said) = newly_silent(&said, set_of(&["lead:s"]));
+        assert!(new.is_empty() && !said.contains("w1"), "w1 was heard from again");
+        let (new, _) = newly_silent(&said, set_of(&["w1", "lead:s"]));
+        assert_eq!(new, ["w1"], "silent anew: said anew");
     }
 
     #[test]
