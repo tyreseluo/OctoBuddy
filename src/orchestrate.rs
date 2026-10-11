@@ -58,6 +58,12 @@ pub struct Runtime {
     /// Peer id → how many times OctoBuddy sent its failed check back to it
     /// (before its outer loop reviews it): see `SELF_FIX`.
     pub(crate) self_fix: HashMap<String, u32>,
+    /// Peers OctoBuddy sent back once because their report claims what its
+    /// own run contradicts (`claims`), until their outer loop reviews them.
+    pub(crate) claim_fix: HashSet<String>,
+    /// Accepts OctoBuddy refused that the outer loop was told of
+    /// (`peer:exchanges`): said again only to the person.
+    refused: HashSet<String>,
     /// The loops' live logs (what the read-only live view follows).
     pub(crate) live: crate::live::Live,
     /// Rounds whose rework went to the project's memory: (session, round).
@@ -324,7 +330,8 @@ const REPORT_RULES: &str = "RULES\n\
 report blocked instead of guessing.\n\
 - When the task is done, or you are blocked or need the lead's answer, end your reply with ONE report, the only thing \
 the lead sees (under 1,200 characters: OctoBuddy adds the files you changed, its run of your check and its commit, \
-so do not restate them):\n```octobuddy-report\nstatus: done | blocked | question\nverified: what you ran, and its result\n\
+so do not restate them):\n```octobuddy-report\nstatus: done | blocked | question\nverified: what you ran (commands in backticks) and its result: OctoBuddy \
+checks it against its own run\n\
 decide: what the lead must decide or answer (or none)\nnotes: what the lead cannot see in the files (a few lines at most)\n```\n\
 - Report once per task, never progress. A message from the person is between you and them: answer it without a report.";
 
@@ -1709,6 +1716,10 @@ It works for you now: message it, review its work, or close it.)\n"));
             }
             prompt.push_str(report);
             prompt.push('\n');
+            // What OctoBuddy's checks say against accepting it, before it is asked.
+            if let Some(why) = crate::claims::refuse(p) {
+                prompt.push_str(&format!("gate: {why}\n"));
+            }
         }
         if let Some(status) = self.status_block(at) {
             prompt.push_str(&format!("\n{status}\n"));
@@ -2381,7 +2392,7 @@ It works for you now: message it, review its work, or close it.)\n"));
                 self.check_budget(&peer);
             }
             LoopEvent::ReceiptsReconciled { .. } => {}
-            LoopEvent::PeerChecked { peer, verdict, passed, commit, gate: _ } => {
+            LoopEvent::PeerChecked { peer, verdict, passed, commit, gate } => {
                 self.rt.checking.remove(&peer);
                 self.rt.diffs.remove(&peer);
                 self.rt.worktrees.clear();
@@ -2399,6 +2410,8 @@ It works for you now: message it, review its work, or close it.)\n"));
                     let pending = self.rt.to_commit.entry(peer.clone()).or_default();
                     for f in files { if !pending.contains(&f) { pending.push(f); } }
                 }
+                // What this run found its report claims wrongly: sent back once (below).
+                let wrong = gate.as_ref().and_then(|g| g.claims.clone()).unwrap_or_default();
                 let slug = self.store.peer_mut(&peer).map(|p| {
                     if p.status == "checking" {
                         p.status = "idle".into();
@@ -2409,6 +2422,9 @@ It works for you now: message it, review its work, or close it.)\n"));
                     }
                     if !verdict.is_empty() {
                         p.verdict = Some(verdict.clone());
+                    }
+                    if let Some(g) = gate {
+                        p.gate = Some(crate::claims::merge(p.gate.take(), g));
                     }
                     if let Some(last) = p.log_mut().last_mut() {
                         last.reply = Some(format!("{}\n\n{verdict}", last.reply.clone().unwrap_or_default()));
@@ -2438,6 +2454,23 @@ It works for you now: message it, review its work, or close it.)\n"));
                     let text = format!("OctoBuddy ran your check and it failed (attempt {n} of {SELF_FIX} before your lead reviews your work). \
 Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end with your octobuddy-report block again.", check_hints(&verdict));
                     self.deliver(&peer, Delivery::new(From::Lead, text), Mode::Queue);
+                    return;
+                }
+                // Its report claims what OctoBuddy's run contradicts (its check
+                // passed, or there was none): back to it once, before its outer
+                // loop reviews it. A failed check went back above, claims and all;
+                // a question or a block goes on to the outer loop as it is.
+                let done = self.rt.unreported.get(&session_id).and_then(|v| v.iter().rev().find(|(id, _, _)| id == &peer))
+                    .is_some_and(|(_, report, forwarded)| !crate::handoff::blocks_lead(report, *forwarded));
+                if !wrong.is_empty() && passed != Some(false) && done && !self.rt.claim_fix.contains(&peer) && !self.rt.pending.contains(&peer)
+                    && self.store.peer_mut(&peer).is_some_and(|p| p.status != "closed") {
+                    self.rt.claim_fix.insert(peer.clone());
+                    if let Some(entry) = self.rt.unreported.get_mut(&session_id) {
+                        entry.retain(|(id, _, _)| id != &peer);
+                    }
+                    self.system(at, &i18n::pick(format!("{slug}'s report says things OctoBuddy's own run contradicts: OctoBuddy sends it back once before the outer loop reviews it."),
+                        format!("{slug} 的汇报里有 OctoBuddy 自己的运行结果对不上的说法：OctoBuddy 先退回它一次，再交外环审。")));
+                    self.deliver(&peer, Delivery::new(From::Lead, crate::claims::bounce(&wrong)), Mode::Queue);
                     return;
                 }
                 if passed == Some(true) {
@@ -2572,11 +2605,19 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             .then(|| format!("[commit] {} file(s) not committed ({}): {why}", pending.len(), pending.join(", ")));
         // A card names its files (a contract's are agent-spec's to check).
         let card = if check && spec.is_none() { crate::handoff::card_files(&p.brief) } else { Vec::new() };
-        let stray = crate::handoff::outside(&card, p.touched.as_deref().unwrap_or(&[]));
-        let stray = (!stray.is_empty()).then(|| format!("[files] it changed files outside its card's Files: {}", stray.join(", ")));
+        let strays = crate::handoff::outside(&card, p.touched.as_deref().unwrap_or(&[]));
+        let stray = (!strays.is_empty()).then(|| format!("[files] it changed files outside its card's Files: {}", strays.join(", ")));
+        // Its report waiting for the outer loop: held against what the checks find (`claims`).
+        let session = self.store.find_peer(peer).and_then(|at| self.store.session(at)).map(|s| s.id.clone()).unwrap_or_default();
+        let report = self.rt.unreported.get(&session).and_then(|v| v.iter().rev().find(|(id, _, _)| id == peer)).map(|(_, r, _)| r.clone());
         if spec.is_none() && tests.is_none() && commit.is_none() && loose.is_none() {
+            // Nothing to run or commit: what it changed outside its card still weighs on an accept.
+            if check {
+                if let Some(q) = self.store.peer_mut(peer) {
+                    q.gate = Some(crate::claims::merge(q.gate.take(), model::Gate { stray: Some(strays), ..Default::default() }));
+                }
+            }
             if let Some(line) = stray {
-                let session = self.store.find_peer(peer).and_then(|at| self.store.session(at)).map(|s| s.id.clone()).unwrap_or_default();
                 if let Some((_, report, _)) = self.rt.unreported.get_mut(&session).and_then(|v| v.iter_mut().find(|(id, _, _)| id == peer)) {
                     report.push_str(&format!("\n\n{line}"));
                 }
@@ -2595,6 +2636,9 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             });
         }
         let (inbox, peer_id, dir, touched) = (self.rt.inbox.clone(), peer.to_string(), p.dir.clone(), p.touched.clone().unwrap_or_default());
+        // Where its work began, and its last commit: what its claims and its check are of.
+        let (base, last) = (p.base.clone(), p.commits.as_ref().and_then(|c| c.last()).and_then(|c| c.split_whitespace().next()).unwrap_or("").to_string());
+        let strays = check.then_some(strays);
         std::thread::spawn(move || {
             let mut verdict = Vec::new();
             // An app's manifest the peer rewrote: its digest made right first.
@@ -2612,6 +2656,7 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             }
             verdict.extend(stray);
             let mut passed = None;
+            let mut ran = None;
             if let Some(cmd) = tests {
                 let _ = crate::plugins::octosense_app::assemble(&dir);
                 let outcome = match crate::plugins::octosense_app::ensure_check(&cmd) {
@@ -2620,6 +2665,7 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
                 };
                 passed = Some(outcome.passed);
                 verdict.push(crate::plugins::octosense_app::name_parts(&dir, &outcome.summary(&cmd)));
+                ran = Some((cmd, outcome.passed, outcome.status));
             }
             // No `Commit:` line: its files go in when its check passed.
             if let Some(message) = auto {
@@ -2634,7 +2680,16 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
                     verdict.insert(0, format!("[commit] {} file(s) not committed ({}): no `Commit:` line, and its check did not pass", files.len(), files.join(", ")));
                 }
             }
-            events::post(&inbox, LoopEvent::PeerChecked { peer: peer_id, verdict: verdict.join("\n"), passed, commit, gate: None });
+            // Its report against what this run found, and what that leaves for an accept.
+            let made = match &commit { Some(Ok(made)) => made.split_whitespace().next().map(String::from), _ => None };
+            let found = report.map(|report| {
+                let facts = crate::claims::facts(&dir, base.as_deref(), &report, made.as_deref(), ran.clone(), &touched);
+                let found = crate::claims::reconcile(&report, &facts);
+                verdict.extend(crate::claims::lines(&found, &facts));
+                found
+            });
+            let gate = crate::claims::gate(found.as_deref(), ran.as_ref(), strays.as_deref(), Some(made.as_deref().unwrap_or(&last)));
+            events::post(&inbox, LoopEvent::PeerChecked { peer: peer_id, verdict: verdict.join("\n"), passed, commit, gate: Some(gate) });
         });
         true
     }
@@ -3191,19 +3246,54 @@ changed. Use what you read and go on with the change; read other lines only if y
             }
             return;
         }
-        self.apply_reply(at, session, reply);
+        let refused = self.apply_reply(at, session, reply);
+        // A refused accept: the outer loop hears why once per report (the
+        // person every time), so it fixes, closes or overrides it.
+        let mut tell = Vec::new();
+        for (slug, why) in refused {
+            let seen = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == slug).map(|p| format!("{}:{}", p.id, p.log().len())));
+            if seen.is_some_and(|key| self.rt.refused.insert(key)) {
+                tell.push(format!("- {slug}: {why}"));
+            }
+        }
+        if !tell.is_empty() {
+            self.tell_lead(at, format!("NOT ACCEPTED: OctoBuddy did not record your accept of these slices; each stays unreviewed until you fix it, \
+close it, or accept it with an override:\n{}", tell.join("\n")));
+        }
     }
 
     /// What the outer loop decided (its blocks, or its tool calls): reviews,
-    /// closes, queue changes, messages, then a new round.
-    pub(crate) fn apply_reply(&mut self, at: SessionRef, session: &str, reply: plan::Reply) {
+    /// closes, queue changes, messages, then a new round. Says the accepts
+    /// OctoBuddy refused (`claims::refuse`): (slug, why).
+    pub(crate) fn apply_reply(&mut self, at: SessionRef, session: &str, reply: plan::Reply) -> Vec<(String, String)> {
         let mut calibration = Vec::new();
-        let accepted_any = reply.reviews.iter().any(|r| r.verdict.starts_with("accept"));
+        let mut refused = Vec::new();
+        let mut accepted_any = false;
         for review in reply.reviews {
             let target = self.store.session(at).and_then(|s| s.peers().iter().rev().find(|p| p.slug == review.slug).map(|p| p.id.clone()));
+            // OctoBuddy's checks say no (its check failed, its report's claims
+            // are contradicted, it strayed from its card): an accept without
+            // an override is not recorded; one with it says so to the person.
+            let weighed = target.as_ref().and_then(|id| self.store.peer_mut(id)).map(|p| (crate::claims::record(p, &review), crate::claims::reasons(p)));
+            let (recorded, overrode) = match weighed {
+                Some((Err(why), reasons)) => {
+                    self.system(at, &i18n::pick(format!("OctoBuddy did not record the outer loop's accept of {}: {}.", review.slug, reasons.join("; ")),
+                        format!("OctoBuddy 没有记下外环对 {} 的接受：{}。", review.slug, reasons.join("；"))));
+                    refused.push((review.slug.clone(), why));
+                    continue;
+                }
+                Some((Ok(text), reasons)) => (Some(text), (review.verdict == "accept" && review.over.is_some() && !reasons.is_empty()).then(|| reasons.join("; "))),
+                None => (None, None),
+            };
+            if let (Some(reasons), Some(over)) = (&overrode, &review.over) {
+                self.system(at, &i18n::pick(format!("The outer loop accepted {} over OctoBuddy's check ({reasons}): {over}", review.slug),
+                    format!("外环不顾 OctoBuddy 的检查接受了 {}（{reasons}）：{over}", review.slug)));
+            }
+            accepted_any |= review.verdict.starts_with("accept") && recorded.is_some();
             // Reviewed: its next failed check goes back to it again first.
             if let Some(id) = &target {
                 self.rt.self_fix.remove(id);
+                self.rt.claim_fix.remove(id);
             }
             if let Some(p) = target.and_then(|id| self.store.peer_mut(&id)) {
                 // How it went against its estimate: the project's memory, for the next one.
@@ -3220,7 +3310,7 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
                     workspace::file_hashes(&p.dir, p.touched.as_deref().unwrap_or(&[])).into_iter()
                         .map(|(path, hash)| model::FileHash { path, hash }).collect()
                 });
-                p.review = Some(if review.why.is_empty() { review.verdict } else { format!("{}: {}", review.verdict, review.why) });
+                p.review = recorded;
             }
         }
         for text in calibration {
@@ -3289,6 +3379,7 @@ checks: {}. Task: {}", p.slug, p.role(), p.model_pick.as_deref().map(|m| format!
                 self.start_round(at, reply.slices, reply.estimate, reply.shared);
             }
         }
+        refused
     }
 
     /// A contract the outer loop sent an inner loop after its first task:
@@ -3585,6 +3676,9 @@ mod tests {
         assert!(wave_may_start(&held, &peers), "a stale accept does not hold the next wave");
         peers[1].review = Some("fix: not yet".into());
         assert!(!wave_may_start(&held, &peers));
+        // Accepted over OctoBuddy's refusal, with a reason: accepted all the same.
+        peers[1].review = Some("accept (override: the failing test needs the network): ok".into());
+        assert!(wave_may_start(&held, &peers), "an override is an accept");
         let closed: Vec<Peer> = vec![peer("a", 1, "closed", None), held.clone()];
         assert!(!wave_may_start(&held, &closed), "a wave closed whole starts nothing after it");
     }

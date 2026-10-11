@@ -149,7 +149,10 @@ verified, partially verified or unverified, and the evidence, naming which peer 
 A [tests] line is OctoBuddy's own run of the slice's check; a [commit] line is the commit it made of the \
 peer's files (or why it made none). Then end with one block giving each peer you reviewed your call: accept \
 (verified, done: send it nothing more) or fix (not yet: send that peer exactly what to fix, and its next \
-report comes back to you). Keep reviewing and fixing until the person's request is met. Its commits stay \
+report comes back to you). OctoBuddy refuses an accept while the slice's check failed, its report claims what \
+OctoBuddy's own run contradicts (its [claims] lines) or it changed files outside its card's Files (a gate: line says \
+which): fix it, close it, or accept it with \"override\": a reason the person sees. \
+Keep reviewing and fixing until the person's request is met. Its commits stay \
 either way; to undo work, send a peer to revert it.
 ```octobuddy-review
 {\"branches\":[{\"slug\":\"slug\",\"verdict\":\"accept\",\"why\":\"tests pass, within boundaries\"}]}

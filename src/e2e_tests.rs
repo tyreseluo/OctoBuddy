@@ -15,6 +15,10 @@
 //! * Host side: the slice's check runs (`verify::run`) and its files are
 //!   committed with the message the peer named (`workspace::commit_files`),
 //!   exactly as `OctoBuddyView::on_peer_turn_ended` does.
+//! * The claim gate: an inner loop that lies (`[stub:lie]`: broken code, a
+//!   report that says its check passes and that it updated README.md) has
+//!   its report held against the host's run and commit (`claims`), is sent
+//!   back, and its accept is refused until the outer loop overrides it.
 //!
 //! What this does NOT cover (CI cannot construct the Makepad widget tree):
 //!
@@ -38,6 +42,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::chat::tests::peer as make_peer;
+use crate::claims::{self, Mark};
 use crate::events::{take, Inbox, LoopEvent};
 use crate::inner;
 use crate::model::Peer;
@@ -53,6 +58,10 @@ const PLAN_TWO_WAVES: &str = include_str!("stubs/plan_two_waves.md");
 /// The review block the outer loop "wrote" after wave 1 passed: accept the
 /// first slice so wave 2 can start.
 const REVIEW_WAVE_1: &str = include_str!("stubs/review_wave_1.md");
+
+/// The tests here set process-wide variables (`OCTOBUDDY_HOME`, the octos
+/// binary): one at a time.
+static E2E: Mutex<()> = Mutex::new(());
 
 /// Builds a fresh worktree-less git repo at `dir`, with one initial commit.
 fn init_repo(dir: &Path) {
@@ -167,6 +176,7 @@ fn peer_with(slug: &str, wave: u32, review: Option<&str>, status: &str) -> Peer 
 /// review accepts.
 #[test]
 fn dual_loop_plans_two_slices_runs_inner_then_checks_commits_and_accepts() {
+    let _one = E2E.lock().unwrap_or_else(|e| e.into_inner());
     let workspace_root = std::env::temp_dir().join(format!(
         "octobuddy-e2e-{}",
         std::process::id()
@@ -252,6 +262,85 @@ fn dual_loop_plans_two_slices_runs_inner_then_checks_commits_and_accepts() {
         "chore(docs-write): update 2 files (check passed)");
 
     // Cleanup.
+    drop(_env);
+    drop(serve);
+    let _ = std::fs::remove_dir_all(&workspace_root);
+}
+
+/// An inner loop that lies: the stub writes broken code, then reports that
+/// its check passes and that it updated README.md (untouched). The host's
+/// check fails and its files are committed; the report's claims are held
+/// against that run and commit and contradicted, sent back, and the accept
+/// is refused until the outer loop overrides it with a reason.
+#[test]
+fn a_report_the_facts_contradict_is_sent_back_and_its_accept_refused() {
+    let _one = E2E.lock().unwrap_or_else(|e| e.into_inner());
+    let workspace_root = std::env::temp_dir().join(format!("octobuddy-e2e-lie-{}", std::process::id()));
+    let project_dir = workspace_root.join("project");
+    let home_dir = workspace_root.join("home");
+    let data_dir = home_dir.join("octos").join("serve");
+    let _ = std::fs::remove_dir_all(&workspace_root);
+    std::fs::create_dir_all(&project_dir).unwrap();
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let stub = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/stubs/stub_octos.py");
+    let _env = Env::install(&home_dir, &stub);
+    init_repo(&project_dir);
+    let cwd = project_dir.to_string_lossy().into_owned();
+    let base = workspace::git(&cwd, &["rev-parse", "HEAD"]).unwrap();
+
+    // Its task, with the check OctoBuddy runs named the way its first message names it.
+    let check = "python3 -c 'import calc; assert calc.add(1, 2) == 3'";
+    let brief = format!("## Goal\nAdd `add(a, b)` to calc.py.\n\n## Files\n- calc.py\n\n[stub:lie]\n\
+- When you finish, OctoBuddy runs `{check}` here and gives the lead its result: make it pass.");
+    let inbox: Inbox = Arc::new(Mutex::new(Vec::new()));
+    let serve = inner::Serve::spawn(&inbox, &data_dir).expect("stub octos starts");
+    let peer = "w-feat-add";
+    serve.open_with(peer, &format!("local:octobuddy:{peer}"), &cwd, Some(&brief), serde_json::json!({}), false)
+        .expect("session opens and the first turn starts");
+    let Some(LoopEvent::PeerTurnEnded { text, .. }) = wait_for(&inbox, |e| matches!(e, LoopEvent::PeerTurnEnded { outcome, .. } if outcome == "completed"), Duration::from_secs(20)) else {
+        panic!("the inner loop's turn ends");
+    };
+    let (_, report) = plan::take_report(&text);
+    let report = report.expect("it reported");
+    assert!(report.contains(&format!("`{check}` passes")) && report.contains("updated README.md"), "{report}");
+
+    // The host: its check fails, its file is committed (it named a message).
+    let outcome = verify::run(check, &cwd, Duration::from_secs(20));
+    assert!(!outcome.passed, "the broken add fails its check: {}", outcome.tail);
+    let message = commit_message(&text).expect("it named a commit message");
+    let made = workspace::commit_files(&cwd, &["calc.py".into()], &message).expect("the host commits its files");
+    let sha = made.split_whitespace().next().unwrap().to_string();
+
+    // Its report against that run and that commit.
+    let ran = (check.to_string(), outcome.passed, outcome.status.clone());
+    let facts = claims::facts(&cwd, Some(&base), &report, Some(&sha), Some(ran.clone()), &["calc.py".to_string()]);
+    assert_eq!(facts.committed, [('M', "calc.py".to_string())]);
+    let found = claims::reconcile(&report, &facts);
+    let wrong: Vec<&str> = found.iter().filter(|c| c.mark == Mark::Contradicted).map(|c| c.said.as_str()).collect();
+    assert!(wrong.iter().any(|s| s.contains(check)), "its check's claim is contradicted: {found:?}");
+    assert!(wrong.iter().any(|s| s.contains("README.md")), "README.md never changed: {found:?}");
+    let lines = claims::lines(&found, &facts);
+    assert!(lines.iter().all(|l| l.starts_with("[claims]")) && lines[0].starts_with("[claims] ✗"), "{lines:?}");
+
+    // What goes back to it, and what its outer loop's accept meets.
+    let gate = claims::gate(Some(&found[..]), Some(&ran), Some(&[][..]), Some(&sha));
+    let back = claims::bounce(gate.claims.as_deref().unwrap());
+    assert!(back.contains("FAILED") && back.contains("README.md"), "{back}");
+    let mut slice = peer_with("feat-add", 1, None, "idle");
+    slice.commits = Some(vec![made.clone()]);
+    slice.gate = Some(gate);
+    let why = claims::refuse(&slice).expect("its accept is refused");
+    assert!(why.contains("failed") && why.contains("\"override\""), "{why}");
+
+    let wave_2 = peer_with("docs-write", 2, None, "queued");
+    let accept = plan::split_reply("```octobuddy-review\n{\"branches\":[{\"slug\":\"feat-add\",\"verdict\":\"accept\",\"why\":\"done\"}]}\n```");
+    assert!(claims::record(&slice, &accept.reviews[0]).is_err(), "an accept without an override is not recorded");
+    assert!(!wave_may_start(&wave_2, &[slice.clone(), wave_2.clone()]), "wave 2 waits");
+    let over = plan::split_reply("```octobuddy-review\n{\"branches\":[{\"slug\":\"feat-add\",\"verdict\":\"accept\",\"why\":\"done\",\"override\":\"the person asked for it as it is\"}]}\n```");
+    slice.review = Some(claims::record(&slice, &over.reviews[0]).expect("an override is recorded"));
+    assert_eq!(slice.review.as_deref(), Some("accept (override: the person asked for it as it is): done"));
+    assert!(wave_may_start(&wave_2, &[slice, wave_2.clone()]), "wave 2 starts once it is accepted over the check");
+
     drop(_env);
     drop(serve);
     let _ = std::fs::remove_dir_all(&workspace_root);
