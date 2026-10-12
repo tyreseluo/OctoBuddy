@@ -1,0 +1,1 @@
+{"schema":1,"description":"Evidence fixture: requests a capability the contract does not offer.","category":"utilities","screenshots":["screenshots/01-main.png"],"icon":"assets/icon.svg","platforms":["macos"],"publisher":{"name":"OctoBuddy Evidence","support":"evidence@example.com","privacy_policy_url":"https://example.com/privacy"},"age_rating":"all"}
