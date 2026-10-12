@@ -756,6 +756,40 @@ script_mod! {
         }
         meta := Label{width: Fill text: "" padding: Inset{left: 14} draw_text.color: th_muted draw_text.wrap: Words draw_text.text_style.font_size: 8}
     }
+    // One document in the lifecycle doc stream's list: a kind dot, the
+    // round, kind and title, then who, when and which version under it.
+    let LifeDocRow = View{
+        width: Fill height: Fit
+        padding: Inset{left: 4 right: 4}
+        row := RoundedView{
+            width: Fill height: Fit new_batch: true flow: Down spacing: 2
+            padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
+            draw_bg.color: #x00000000 draw_bg.border_radius: 6.0
+            cursor: MouseCursor.Hand grab_key_focus: false
+            head := View{
+                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                dot := RoundedView{width: 8 height: 8 new_batch: true draw_bg.color: th_faint draw_bg.border_radius: 4.0}
+                title := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: ink draw_text.text_style.font_size: 9}
+            }
+            meta := Label{width: Fill text: "" max_lines: 1 padding: Inset{left: 14} draw_text.color: muted draw_text.text_style.font_size: 8}
+        }
+    }
+    let LifeDocRowSel = LifeDocRow{
+        row +: {
+            draw_bg.color: th_accent_selected
+            head +: {title +: {draw_text.color: th_accent_ink}}
+        }
+    }
+    // The separator before each round's documents.
+    let LifeRoundRow = View{
+        width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+        padding: Inset{left: 6 right: 6 top: 10 bottom: 3}
+        round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_bold{font_size: 8.5}}
+    }
+    let LifeDocEmpty = View{
+        width: Fill height: 160 flow: Down spacing: 6 align: Align{x: 0.5 y: 0.5}
+        text := Label{text: "" padding: 0 draw_text.color: muted draw_text.text_style.font_size: 9.5}
+    }
     // What does what cannot be undone.
     let DangerButton = SegOff{
         draw_bg +: {color: th_danger color_hover: th_danger_strong color_down: th_danger_strong color_focus: th_danger}
@@ -1537,21 +1571,24 @@ script_mod! {
                                 }
                             }
                         }
-                        // The lifecycle view: the slice state machine and the
-                        // doc stream, side by side. The header shows the round
-                        // state machine summary.
+                        // The lifecycle view: the slice state machine or the
+                        // doc stream, one at a time (the two tabs). The header
+                        // shows the round state machine summary.
                         life_view := View{
                             width: Fill height: Fill flow: Down spacing: 8 visible: false
                             padding: Inset{left: 16 right: 16 top: 50 bottom: 14}
                             View{
                                 width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                 life_tab_sm := SegOff{text: "State machine" height: 22}
+                                life_tab_sm_on := SegOn{text: "State machine" height: 22 visible: false}
                                 life_tab_docs := SegOff{text: "Docs" height: 22}
+                                life_tab_docs_on := SegOn{text: "Docs" height: 22 visible: false}
+                                life_fit := SegOff{text: "Fit" height: 22 visible: false}
                                 Filler{}
                                 life_open_living := SegOff{text: "Open LIVING.md" height: 22}
                                 life_round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 9}}
                             }
-                            RoundedView{
+                            life_sm_panel := RoundedView{
                                 width: Fill height: Fill new_batch: true padding: 1
                                 draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                 life_sm := LifecycleCanvas{}
@@ -1560,23 +1597,36 @@ script_mod! {
                                 width: Fill height: Fill flow: Right new_batch: true padding: 1 visible: false
                                 draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                 RoundedView{
-                                    width: 280 height: Fill new_batch: true padding: 6
+                                    width: 300 height: Fill new_batch: true padding: 6
                                     draw_bg.color: th_panel draw_bg.border_radius: 4.0
-                                    ScrollYView{
+                                    life_docs_list := PortalList{
                                         width: Fill height: Fill
-                                        life_docs_list := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                        scroll_bar: ScrollBar{}
+                                        Doc := LifeDocRow{}
+                                        DocSel := LifeDocRowSel{}
+                                        Round := LifeRoundRow{}
+                                        Empty := LifeDocEmpty{}
                                     }
                                 }
                                 RoundedView{
-                                    width: Fill height: Fill new_batch: true padding: 10
+                                    width: Fill height: Fill flow: Down spacing: 6 new_batch: true padding: 10
                                     draw_bg.color: th_raised draw_bg.border_radius: 4.0
+                                    life_doc_meta := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8}
+                                    life_vers := View{
+                                        width: Fit height: Fit flow: Right spacing: 4 visible: false
+                                        life_v0 := SegOff{text: "v1" height: 18 padding: Inset{left: 7 right: 7}}
+                                        life_v1 := SegOff{text: "v2" height: 18 padding: Inset{left: 7 right: 7}}
+                                        life_v2 := SegOff{text: "v3" height: 18 padding: Inset{left: 7 right: 7}}
+                                        life_v3 := SegOff{text: "v4" height: 18 padding: Inset{left: 7 right: 7}}
+                                        life_v4 := SegOff{text: "v5" height: 18 padding: Inset{left: 7 right: 7}}
+                                        life_v5 := SegOff{text: "v6" height: 18 padding: Inset{left: 7 right: 7}}
+                                    }
                                     ScrollYView{
                                         width: Fill height: Fill
-                                        life_docs_body := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                                        life_docs_body := MsgMarkdown{}
                                     }
                                 }
                             }
-                            life_legend := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
                         }
                         // The views at the left (they change what the stage shows);
                         // at the right, the outer and inner loops, the app.
@@ -2727,6 +2777,10 @@ pub struct OctoBuddyView {
     life_docs: Vec<DocItem>,
     #[rust]
     life_doc_picked: Option<usize>,
+    /// The version numbers the doc reader's buttons show (v1, v2, …), in
+    /// button order (`render_life_docs`).
+    #[rust]
+    life_ver_map: Vec<u32>,
     /// Repo docs + acceptance sheets the background worker produced for a
     /// project, keyed by project path. Held as flat pairs so the script
     /// macro accepts the field.
@@ -6111,6 +6165,7 @@ impl Widget for OctoBuddyView {
         let spec_list_uid = self.view.portal_list(cx, ids!(flow_spec_list)).widget_uid();
         let plugin_list_uid = self.view.portal_list(cx, ids!(plugin_list)).widget_uid();
         let files_uid = self.view.portal_list(cx, ids!(files_list)).widget_uid();
+        let life_docs_uid = self.view.portal_list(cx, ids!(life_docs_list)).widget_uid();
 
         while let Some(step) = self.view.draw_walk(cx, scope, walk).step() {
             if let Some(mut list) = step.as_portal_list().borrow_mut() {
@@ -6135,6 +6190,8 @@ impl Widget for OctoBuddyView {
                 } else if uid == files_uid {
                     self.draw_files(cx, &mut list);
 
+                } else if uid == life_docs_uid {
+                    self.draw_life_docs(cx, &mut list);
                 } else {
                     self.draw_messages(cx, &mut list);
                 }
