@@ -1,7 +1,14 @@
 //! The lifecycle view's self-drawing canvas: the slice state machine for
 //! the session shown. Nodes are the states, edges the transitions the
 //! session crossed. A side panel lists the slices; a click picks one and
-//! highlights its path through the graph.
+//! highlights its path through the graph, numbered in the order it walked.
+//!
+//! The graph is laid out once in a fixed logical coordinate system and
+//! shown through a pan-and-zoom `GraphView`: it fits when first shown and
+//! whenever the canvas is resized, the person drags or scrolls to pan,
+//! Ctrl/Cmd + wheel to zoom (centred on the pointer), and a double click
+//! (or the Fit button) fits again. The slice list keeps its own strip on
+//! the right; the graph never draws under it.
 //!
 //! The model is what `lifecycle::build_slice_machine` derives from the
 //! store. The view does not write back.
@@ -22,9 +29,80 @@ fn open_in_default(path: &Path) {
     });
 }
 
-/// Where a node sits on the canvas. The layout is hand-picked: the happy
-/// path runs left to right, the SentBack loop curves back to Running, and
-/// the side exits (Failed, Stopped, OverBudget, Discarded) drop below.
+/// `secs` as a day and a time (UTC): `2026-10-12 09:30` (the acceptance
+/// sheet's own `when`, kept local so this file owns what it shows).
+fn when(secs: u64) -> String {
+    let z = (secs / 86_400) as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}", secs % 86_400 / 3600, secs % 3600 / 60)
+}
+
+/// A pan-and-zoom window from the graph's logical points to the canvas:
+/// `screen = pan + point * scale`, with `screen` measured from the canvas's
+/// top left. Pure math, unit-tested.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GraphView {
+    pub scale: f64,
+    pub pan: DVec2,
+}
+
+/// How far the person may zoom with the wheel. Fit is allowed below the
+/// floor: a narrow canvas must still show every node.
+pub(crate) const ZOOM_MIN: f64 = 0.5;
+pub(crate) const ZOOM_MAX: f64 = 2.0;
+/// The margin a fit keeps around the graph.
+pub(crate) const FIT_PAD: f64 = 20.0;
+/// The legend strip at the graph area's bottom.
+pub(crate) const LEGEND_H: f64 = 42.0;
+/// The gap between the graph area and the slice list.
+pub(crate) const LIST_GAP: f64 = 10.0;
+
+impl GraphView {
+    /// The view that fits `bounds` (graph points) inside `size` (canvas
+    /// points), centred, with `pad` to spare on every side. The scale's
+    /// only cap is the zoom ceiling: a narrow canvas zooms out as far as
+    /// it takes to show every node.
+    pub fn fit(bounds: Rect, size: DVec2, pad: f64) -> Self {
+        let w = bounds.size.x.max(1.0);
+        let h = bounds.size.y.max(1.0);
+        let fit = ((size.x - 2.0 * pad) / w).min((size.y - 2.0 * pad) / h);
+        let scale = fit.clamp(0.02, ZOOM_MAX);
+        let pan = dvec2((size.x - w * scale) * 0.5 - bounds.pos.x * scale, (size.y - h * scale) * 0.5 - bounds.pos.y * scale);
+        Self { scale, pan }
+    }
+
+    pub fn to_screen(self, p: DVec2) -> DVec2 {
+        self.pan + p * self.scale
+    }
+
+    /// Zoom by `factor`, keeping the graph point under `anchor` (canvas
+    /// points) exactly where it is. Clamped to the zoom range.
+    pub fn zoom_at(&self, anchor: DVec2, factor: f64) -> Self {
+        let scale = (self.scale * factor).clamp(ZOOM_MIN, ZOOM_MAX);
+        let pan = anchor - (anchor - self.pan) * (scale / self.scale);
+        Self { scale, pan }
+    }
+}
+
+/// The canvas's two areas: the graph on the left, the slice list on the
+/// right. The list keeps its width (narrower in a narrow canvas), so the
+/// graph never draws under it. Returns `(graph width, list width)`.
+pub(crate) fn split_canvas(width: f64) -> (f64, f64) {
+    let wide = if width < 560.0 { 180.0 } else { 240.0 };
+    let list = wide.min(width * 0.45);
+    (width - list - LIST_GAP, list)
+}
+
+/// Where a node sits in the graph's logical points. The layout is
+/// hand-picked: the happy path runs left to right, the SentBack loop
+/// curves back over the top to Running, and the side exits drop below.
 #[derive(Clone, Copy, Debug)]
 struct NodePos {
     state: SliceState,
@@ -34,6 +112,9 @@ struct NodePos {
 
 const NODE_W: f64 = 96.0;
 const NODE_H: f64 = 44.0;
+/// The main row's y, and the side exits' row below it.
+const ROW1_Y: f64 = 64.0;
+const ROW2_Y: f64 = 224.0;
 
 /// All the nodes, in the order the view draws them.
 fn nodes() -> Vec<NodePos> {
@@ -54,12 +135,19 @@ fn nodes() -> Vec<NodePos> {
     let mut out = Vec::new();
     let spacing = NODE_W + 38.0;
     for (i, s) in row1.iter().enumerate() {
-        out.push(NodePos { state: *s, x: i as f64 * spacing, y: 60.0 });
+        out.push(NodePos { state: *s, x: i as f64 * spacing, y: ROW1_Y });
     }
     for (i, s) in row2.iter().enumerate() {
-        out.push(NodePos { state: *s, x: i as f64 * spacing + NODE_W * 0.5, y: 220.0 });
+        out.push(NodePos { state: *s, x: i as f64 * spacing + NODE_W * 0.5, y: ROW2_Y });
     }
     out
+}
+
+/// Everything the graph draws, in logical points: the nodes, the sent-back
+/// arc above them, and the numbered badges over the picked path's nodes.
+pub(crate) fn graph_bounds() -> Rect {
+    let max_x = nodes().iter().map(|n| n.x + NODE_W).fold(0.0, f64::max);
+    Rect { pos: dvec2(0.0, -18.0), size: dvec2(max_x, ROW2_Y + NODE_H + 18.0) }
 }
 
 /// All the edges the view draws (the session's actual edges are added on
@@ -98,6 +186,15 @@ struct SliceHit {
     slug: String,
 }
 
+/// A text the canvas draws after its shapes: where, what, how big, in what
+/// colour.
+struct Text {
+    pos: DVec2,
+    text: String,
+    size: f32,
+    color: Vec4f,
+}
+
 #[derive(Script, Widget)]
 pub struct LifecycleCanvas {
     #[uid]
@@ -120,6 +217,21 @@ pub struct LifecycleCanvas {
     /// The slice the person picked, its slug.
     #[rust]
     picked: Option<String>,
+    /// The pan-and-zoom the graph is shown through.
+    #[rust]
+    view: GraphView,
+    /// A pan in progress: where the pointer was last.
+    #[rust]
+    drag: Option<DVec2>,
+    /// The slice list's scroll offset.
+    #[rust]
+    list_scroll: f64,
+    /// The canvas's size and its graph area's size when last drawn (a
+    /// change means the view should fit again).
+    #[rust]
+    seen: DVec2,
+    #[rust]
+    graph_size: DVec2,
     /// The rows' screen rects, kept for hit-testing.
     #[rust]
     hits: Vec<SliceHit>,
@@ -133,6 +245,14 @@ pub struct LifecycleCanvas {
     #[rust]
     rect: Rect,
 }
+
+impl Default for GraphView {
+    fn default() -> Self {
+        Self { scale: 1.0, pan: dvec2(0.0, 0.0) }
+    }
+}
+
+impl ScriptHook for LifecycleCanvas {}
 
 /// Map a transition kind back to the slice state it means, when there is one.
 /// Round kinds return `None`: the slice state machine only draws slice states.
@@ -153,42 +273,33 @@ fn transition_to_state(k: TransitionKind) -> Option<SliceState> {
     }
 }
 
-impl ScriptHook for LifecycleCanvas {}
-
 impl LifecycleCanvas {
-    #[allow(dead_code)]
-    fn node_at(&self, s: SliceState) -> Option<NodePos> {
-        nodes().into_iter().find(|n| n.state == s)
-    }
-
     /// The path the picked slice walked, in state order. Used to light up
     /// its nodes and edges.
     fn picked_path(&self) -> Option<Vec<SliceState>> {
         let slug = self.picked.as_deref()?;
         let path = self.slices.paths.iter().find(|p| p.slug == slug)?;
-        let kinds: Vec<TransitionKind> = path.transitions.iter().map(|t| t.to).collect();
-        let states: Vec<SliceState> = kinds.into_iter().filter_map(|k| match k {
-            TransitionKind::Waiting => Some(SliceState::Waiting),
-            TransitionKind::Running => Some(SliceState::Running),
-            TransitionKind::Reported => Some(SliceState::Reported),
-            TransitionKind::Checked => Some(SliceState::Checked),
-            TransitionKind::Accepted => Some(SliceState::Accepted),
-            TransitionKind::SentBack => Some(SliceState::SentBack),
-            TransitionKind::Landed => Some(SliceState::Landed),
-            TransitionKind::Discarded => Some(SliceState::Discarded),
-            TransitionKind::Failed => Some(SliceState::Failed),
-            TransitionKind::Stopped => Some(SliceState::Stopped),
-            TransitionKind::OverBudget => Some(SliceState::OverBudget),
-            // Round kinds never appear in a slice path, but the compiler
-            // needs to see them mapped.
-            _ => None,
-        }).collect();
+        let states: Vec<SliceState> = path.transitions.iter().map(|t| t.to).filter_map(transition_to_state).collect();
         Some(states)
     }
 
-    /// Position a node at `pos`, in canvas points.
-    fn node_rect(&self, pos: NodePos) -> Rect {
-        Rect { pos: dvec2(self.rect.pos.x + pos.x, self.rect.pos.y + pos.y), size: dvec2(NODE_W, NODE_H) }
+    /// The slices in list order (by slug): their slug, state and rework
+    /// count, owned so the drawing loop can borrow the canvas.
+    fn sorted_slices(&self) -> Vec<(String, SliceState, usize)> {
+        let mut sorted: Vec<(String, SliceState, usize)> = self.slices.paths.iter().map(|p| (p.slug.clone(), p.current, p.rework_count)).collect();
+        sorted.sort_by(|a, b| a.0.cmp(&b.0));
+        sorted
+    }
+
+    /// The list area's height that rows may fill (below the title).
+    fn list_view_h(&self) -> f64 {
+        (self.rect.size.y - 44.0).max(0.0)
+    }
+
+    /// Keep the list's scroll where the last row is still just in view.
+    fn clamp_list_scroll(&mut self) {
+        let rows_h = self.slices.paths.len() as f64 * 32.0;
+        self.list_scroll = self.list_scroll.clamp(0.0, (rows_h - self.list_view_h()).max(0.0));
     }
 
     fn color_for(&self, state: SliceState) -> u32 {
@@ -207,16 +318,117 @@ impl LifecycleCanvas {
         }
     }
 
-    #[allow(dead_code)]
-    fn label(&mut self, cx: &mut Cx2d, pos: DVec2, text: &str, size: f32, color: Vec4f) {
-        self.draw_text.text_style.font_size = size;
-        self.draw_text.color = color;
-        self.draw_text.draw_abs(cx, pos, text);
-    }
-
     fn text_w(&mut self, cx: &mut Cx2d, text: &str, size: f32) -> f64 {
         self.draw_text.text_style.font_size = size;
         self.draw_text.layout(cx, 0.0, 0.0, None, false, Align::default(), text).size_in_lpxs.width as f64
+    }
+
+    /// `text` cut with an ellipsis to fit `max_w` at `size`.
+    fn fit_text(&mut self, cx: &mut Cx2d, text: &str, size: f32, max_w: f64) -> String {
+        let full = self.text_w(cx, text, size);
+        if full <= max_w || text.is_empty() {
+            return text.to_string();
+        }
+        let per_char = full / text.chars().count() as f64;
+        let mut n = ((max_w / per_char) as usize).saturating_sub(2).max(1);
+        let mut cut: String = text.chars().take(n).collect();
+        cut.push('…');
+        while n > 1 && self.text_w(cx, &cut, size) > max_w {
+            n -= 1;
+            cut = text.chars().take(n).collect();
+            cut.push('…');
+        }
+        cut
+    }
+
+    /// One edge: a cubic bezier from `a` to `b` (canvas points) with an
+    /// arrowhead at `b`.
+    fn draw_edge(&mut self, a: DVec2, c1: DVec2, c2: DVec2, b: DVec2, color: Vec4f, width: f32) {
+        self.draw_vector.set_color(color.x, color.y, color.z, color.w);
+        self.draw_vector.move_to(a.x as f32, a.y as f32);
+        self.draw_vector.bezier_to(c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, b.x as f32, b.y as f32);
+        self.draw_vector.stroke(width);
+        // The arrowhead points the way the curve arrives.
+        let dir = (b - c2).normalize();
+        let n = dvec2(-dir.y, dir.x) * 3.6;
+        let back = b - dir * 7.0;
+        self.draw_vector.set_color(color.x, color.y, color.z, color.w);
+        self.draw_vector.move_to(b.x as f32, b.y as f32);
+        self.draw_vector.line_to((back.x + n.x) as f32, (back.y + n.y) as f32);
+        self.draw_vector.line_to((back.x - n.x) as f32, (back.y - n.y) as f32);
+        self.draw_vector.close();
+        self.draw_vector.fill();
+    }
+
+    /// The `×N` badge on an edge: a small rounded label at `at` (canvas
+    /// points) that carries its own background, so it never eats the nodes.
+    fn draw_badge(&mut self, cx: &mut Cx2d, texts: &mut Vec<Text>, at: DVec2, count: usize, scale: f64, color: Vec4f) {
+        let label = format!("×{count}");
+        let size = (7.5 * scale).max(3.0) as f32;
+        let w = self.text_w(cx, &label, size) + 8.0;
+        let h = size as f64 + 5.0;
+        self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
+        self.draw_vector.rounded_rect((at.x - w * 0.5) as f32, (at.y - h * 0.5) as f32, w as f32, h as f32, 4.0);
+        self.draw_vector.fill();
+        self.draw_vector.set_color(color.x, color.y, color.z, 1.0);
+        self.draw_vector.rounded_rect((at.x - w * 0.5) as f32, (at.y - h * 0.5) as f32, w as f32, h as f32, 4.0);
+        self.draw_vector.stroke(1.0);
+        texts.push(Text { pos: dvec2(at.x - w * 0.5 + 4.0, at.y - h * 0.5 + 2.5), text: label, size, color: crate::hex_color(crate::theme::hex("ink")) });
+    }
+
+    /// The point at `t` along the cubic bezier `a, c1, c2, b`.
+    fn bezier_at(a: DVec2, c1: DVec2, c2: DVec2, b: DVec2, t: f64) -> DVec2 {
+        let u = 1.0 - t;
+        a * (u * u * u) + c1 * (3.0 * u * u * t) + c2 * (3.0 * u * t * t) + b * (t * t * t)
+    }
+
+    /// The legend: one colour chip per group of states (plus the edge
+    /// badge), drawn in the strip under the graph, wrapping to as many
+    /// rows as the width takes.
+    fn draw_legend(&mut self, cx: &mut Cx2d, texts: &mut Vec<Text>, left: f64, right: f64, top: f64) {
+        let mut entries: Vec<(Option<u32>, String)> = vec![
+            (Some(crate::theme::hex("muted")), SliceState::Waiting.display().to_string()),
+            (Some(crate::theme::hex("accent")), [SliceState::Running, SliceState::Reported, SliceState::Checked].iter().map(|s| s.display()).collect::<Vec<_>>().join("·")),
+            (Some(crate::theme::hex("success")), [SliceState::Accepted, SliceState::Landed].iter().map(|s| s.display()).collect::<Vec<_>>().join("·")),
+            (Some(crate::theme::hex("warning")), [SliceState::SentBack, SliceState::OverBudget].iter().map(|s| s.display()).collect::<Vec<_>>().join("·")),
+            (Some(crate::theme::hex("danger")), SliceState::Failed.display().to_string()),
+            (Some(crate::theme::hex("orange")), SliceState::Stopped.display().to_string()),
+            (Some(crate::theme::hex("faint")), SliceState::Discarded.display().to_string()),
+            (None, i18n::t("edge crossings", "边经过次数").to_string()),
+        ];
+        let size = 8.0f32;
+        let mut x = left;
+        let mut y = top;
+        let line_h = 17.0;
+        for (hex, label) in entries.drain(..) {
+            let swatch_w = hex.map(|_| 16.0).unwrap_or(24.0);
+            let tw = self.text_w(cx, &label, size);
+            if x + swatch_w + tw + 6.0 > right && x > left {
+                x = left;
+                y += line_h;
+            }
+            match hex {
+                Some(h) => {
+                    self.draw_vector.set_color_hex(h, 1.0);
+                    self.draw_vector.rounded_rect(x as f32, (y + 3.0) as f32, 8.0, 8.0, 2.0);
+                    self.draw_vector.fill();
+                    texts.push(Text { pos: dvec2(x + 12.0, y), text: label, size, color: crate::hex_color(crate::theme::hex("muted_strong")) });
+                }
+                None => {
+                    // The ×N badge the edges wear.
+                    let w = self.text_w(cx, "×N", size) + 6.0;
+                    self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
+                    self.draw_vector.rounded_rect(x as f32, (y + 1.0) as f32, w as f32, 12.0, 4.0);
+                    self.draw_vector.fill();
+                    self.draw_vector.set_color_hex(crate::theme::hex("muted_strong"), 1.0);
+                    self.draw_vector.rounded_rect(x as f32, (y + 1.0) as f32, w as f32, 12.0, 4.0);
+                    self.draw_vector.stroke(1.0);
+                    texts.push(Text { pos: dvec2(x + 3.0, y + 2.5), text: "×N".to_string(), size, color: crate::hex_color(crate::theme::hex("muted_strong")) });
+                    texts.push(Text { pos: dvec2(x + w + 6.0, y), text: label, size, color: crate::hex_color(crate::theme::hex("muted_strong")) });
+                }
+            }
+            x += swatch_w + tw + 16.0;
+        }
     }
 }
 
@@ -230,15 +442,61 @@ impl Widget for LifecycleCanvas {
                 self.redraw(cx);
             }
         }
+        // The areas as last drawn: the list takes the right strip.
+        let (_, list_w) = split_canvas(self.rect.size.x);
+        let list_left = self.rect.pos.x + self.rect.size.x - list_w;
+        let in_list = |p: DVec2| p.x >= list_left;
         match event.hits(cx, self.area) {
-            crate::makepad_widgets::Hit::FingerDown(fe) if fe.is_primary_hit() => {
-                // A slice list row first.
-                let hit = self.hits.iter().find(|h| h.rect.contains(fe.abs)).cloned();
-                if let Some(h) = hit {
-                    self.picked = Some(h.slug.clone());
-                    cx.widget_action(uid, LifeAction::Picked(h.slug));
+            Hit::FingerDown(fe) if fe.is_primary_hit() => {
+                if in_list(fe.abs) {
+                    // A slice row first.
+                    if let Some(hit) = self.hits.iter().find(|h| h.rect.contains(fe.abs)).cloned() {
+                        self.picked = Some(hit.slug.clone());
+                        cx.widget_action(uid, LifeAction::Picked(hit.slug));
+                        self.redraw(cx);
+                    }
+                    self.drag = None;
+                } else {
+                    // A double click on the graph: fit it again.
+                    if fe.tap_count >= 2 {
+                        self.view = GraphView::fit(graph_bounds(), self.graph_size, FIT_PAD);
+                        self.redraw(cx);
+                    }
+                    self.drag = Some(fe.abs);
+                }
+            }
+            Hit::FingerMove(fe) => {
+                if let Some(last) = self.drag {
+                    self.view.pan += fe.abs - last;
+                    self.drag = Some(fe.abs);
                     self.redraw(cx);
                 }
+            }
+            Hit::FingerUp(_) => {
+                self.drag = None;
+            }
+            Hit::FingerScroll(fe) => {
+                if fe.modifiers.is_primary() || fe.modifiers.control {
+                    // Ctrl/Cmd + wheel (a trackpad pinch arrives the same
+                    // way): zoom centred on the pointer.
+                    let factor = if fe.scroll.y > 0.0 { 1.1 } else if fe.scroll.y < 0.0 { 1.0 / 1.1 } else { 1.0 };
+                    if factor != 1.0 {
+                        self.view = self.view.zoom_at(fe.abs - self.rect.pos, factor);
+                        self.redraw(cx);
+                    }
+                } else if in_list(fe.abs) {
+                    // The list scrolls alone.
+                    self.list_scroll += fe.scroll.y;
+                    self.clamp_list_scroll();
+                    self.redraw(cx);
+                } else {
+                    self.view.pan -= fe.scroll;
+                    self.redraw(cx);
+                }
+            }
+            Hit::FingerHoverOver(fe) => {
+                let hand = in_list(fe.abs) && self.hits.iter().any(|h| h.rect.contains(fe.abs));
+                cx.set_cursor(if hand { MouseCursor::Hand } else { MouseCursor::Default });
             }
             _ => {}
         }
@@ -253,9 +511,25 @@ impl Widget for LifecycleCanvas {
             Layout { clip_x: true, clip_y: true, ..Layout::default() },
         );
         self.hits.clear();
+        // The two areas, never overlapping: the graph on the left, the
+        // slice list on the right, the legend strip under the graph.
+        let (graph_w, list_w) = split_canvas(rect.size.x);
+        let graph_size = dvec2(graph_w, (rect.size.y - LEGEND_H).max(80.0));
+        self.graph_size = graph_size;
+        let list_pos = dvec2(rect.pos.x + rect.size.x - list_w, rect.pos.y);
+        // Fit when the canvas is new or was resized (the person's zoom is
+        // kept between redraws of the same size).
+        if (self.seen - rect.size).length() > 0.5 {
+            self.view = GraphView::fit(graph_bounds(), graph_size, FIT_PAD);
+            self.clamp_list_scroll();
+        }
+        self.seen = rect.size;
+        let v = self.view;
+        let sp = |p: DVec2| rect.pos + v.to_screen(p);
+        let fs = |pt: f64| (pt * v.scale).max(2.5) as f32;
+        let ink = crate::hex_color(crate::theme::hex("ink"));
+        let muted_strong = crate::hex_color(crate::theme::hex("muted_strong"));
 
-        let pos_map: Vec<NodePos> = nodes();
-        let pos_of = |s: SliceState| -> Option<NodePos> { pos_map.iter().copied().find(|n| n.state == s) };
         // Counts at each node: how many slices are currently there.
         let mut at: std::collections::BTreeMap<SliceState, usize> = std::collections::BTreeMap::new();
         for p in &self.slices.paths {
@@ -263,161 +537,186 @@ impl Widget for LifecycleCanvas {
         }
         // Edge counts from the machine's own aggregation.
         let edge_counts: std::collections::BTreeMap<(TransitionKind, TransitionKind), usize> = self.slices.edges.iter().map(|e| ((e.from, e.to), e.count)).collect();
-        // The picked slice's states: light up its nodes and edges.
+        // The picked slice's states: light up its nodes and edges, numbered
+        // in the order it walked them.
         let picked: Vec<SliceState> = self.picked_path().unwrap_or_default();
         let picked_edges: std::collections::HashSet<(SliceState, SliceState)> = picked.windows(2).map(|w| (w[0], w[1])).collect();
+        let mut numbers: std::collections::BTreeMap<SliceState, Vec<usize>> = std::collections::BTreeMap::new();
+        for (i, s) in picked.iter().enumerate() {
+            numbers.entry(*s).or_default().push(i + 1);
+        }
 
-        // Side panel: the slices, their state, transition count.
-        let panel_x = rect.pos.x + rect.size.x - 220.0;
+        let pos_map: Vec<NodePos> = nodes();
+        let pos_of = |s: SliceState| -> Option<NodePos> { pos_map.iter().copied().find(|n| n.state == s) };
+        let mut texts: Vec<Text> = Vec::new();
         self.draw_vector.begin();
-        // Panel background.
-        self.draw_vector.set_color_hex(crate::theme::hex("panel"), 1.0);
-        self.draw_vector.rect((panel_x - 8.0) as f32, (rect.pos.y + 16.0) as f32, 220.0, (rect.size.y - 32.0) as f32);
-        self.draw_vector.fill();
-        // Panel title.
-        let title = i18n::pick("Slices".to_string(), "切片".to_string());
-        let mut texts: Vec<(DVec2, String, f32, Vec4f)> = Vec::new();
-        texts.push((dvec2(panel_x + 4.0, rect.pos.y + 24.0), title, 9.0, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
 
         // Edges first (under the nodes).
-        let base = base_edges();
-        for (from, to) in &base {
+        let accent = crate::hex_color(crate::theme::hex("accent"));
+        let edge_color = crate::hex_color(crate::theme::hex("muted"));
+        for (from, to) in &base_edges() {
             let Some(from_s) = transition_to_state(*from) else { continue };
             let Some(to_s) = transition_to_state(*to) else { continue };
             let Some((a, b)) = pos_of(from_s).zip(pos_of(to_s)) else { continue };
             let lit = picked_edges.contains(&(from_s, to_s));
             let count = edge_counts.get(&(*from, *to)).copied().unwrap_or(0);
-            let color = if lit { crate::theme::hex("accent") } else { crate::theme::hex("muted") };
-            // An S-curve, looping back from Accepted to Reported for SentBack, etc.
-            let ax = self.rect.pos.x + a.x + NODE_W;
-            let ay = self.rect.pos.y + a.y + NODE_H * 0.5;
-            let bx = self.rect.pos.x + b.x;
-            let by = self.rect.pos.y + b.y + NODE_H * 0.5;
-            let is_back = b.x < a.x;
-            let mid = if is_back { (ax - 80.0, ay) } else { ((ax + bx) * 0.5, (ay + by) * 0.5) };
-            let pts: Vec<(f64, f64)> = (0..=14).map(|i| {
-                let t = i as f64 / 14.0;
-                let u = 1.0 - t;
-                let px = u * u * u * ax + 3.0 * u * u * t * mid.0 + 3.0 * u * t * t * mid.0 + t * t * t * bx;
-                let py = u * u * u * ay + 3.0 * u * u * t * mid.1 + 3.0 * u * t * t * mid.1 + t * t * t * by;
-                (px, py)
-            }).collect();
-            self.draw_vector.set_color_hex(color, if lit { 1.0 } else { 0.45 });
-            for w in pts.windows(2) {
-                self.draw_vector.move_to(w[0].0 as f32, w[0].1 as f32);
-                self.draw_vector.line_to(w[1].0 as f32, w[1].1 as f32);
-                self.draw_vector.stroke(if lit { 1.6 } else { 1.0 });
-            }
-            // Arrowhead at the destination.
-            let dir = (bx - pts[pts.len() - 2].0, by - pts[pts.len() - 2].1);
-            let _ = dir;
-            self.draw_vector.set_color_hex(color, if lit { 1.0 } else { 0.45 });
-            self.draw_vector.move_to(bx as f32, by as f32);
-            self.draw_vector.line_to((bx - 6.0) as f32, (by - 4.0) as f32);
-            self.draw_vector.line_to((bx - 6.0) as f32, (by + 4.0) as f32);
-            self.draw_vector.close();
-            self.draw_vector.fill();
-            // Count badge, when the edge carried any.
+            let color = if lit { accent } else { edge_color };
+            let (width, alpha) = if lit { (1.6, 1.0) } else { (1.0, 0.45) };
+            let mut c = color;
+            c.w *= alpha as f32;
+            // A chain edge leaves `a`'s right side for `b`'s left; a side
+            // exit leaves Running's bottom for the node's top.
+            let (p1, c1, c2, p2) = if b.y > a.y {
+                let p1 = sp(dvec2(a.x + NODE_W * 0.5, a.y + NODE_H));
+                let p2 = sp(dvec2(b.x + NODE_W * 0.5, b.y));
+                (p1, dvec2(p1.x, p1.y + 34.0 * v.scale), dvec2(p2.x, p2.y - 34.0 * v.scale), p2)
+            } else {
+                let p1 = sp(dvec2(a.x + NODE_W, a.y + NODE_H * 0.5));
+                let p2 = sp(dvec2(b.x, b.y + NODE_H * 0.5));
+                (p1, dvec2((p1.x + p2.x) * 0.5, p1.y), dvec2((p1.x + p2.x) * 0.5, p2.y), p2)
+            };
+            self.draw_edge(p1, c1, c2, p2, c, width * v.scale as f32);
             if count > 0 {
-                let label = format!("×{count}");
-                let mid_pt = ((ax + bx) * 0.5, (ay + by) * 0.5);
-                texts.push((dvec2(mid_pt.0 - 8.0, mid_pt.1 - 14.0), label, 8.0, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: if lit { 1.0 } else { 0.55 } }));
+                let mid = Self::bezier_at(p1, c1, c2, p2, 0.5);
+                self.draw_badge(cx, &mut texts, mid, count, v.scale, color);
             }
         }
-        // The SentBack loop: a curve above the row from Accepted back to Running.
-        if let (Some(a), Some(b)) = (pos_of(SliceState::Accepted), pos_of(SliceState::Running)) {
-            let color = crate::theme::hex("warning");
-            let ax = self.rect.pos.x + a.x + NODE_W * 0.5;
-            let ay = self.rect.pos.y + a.y;
-            let bx = self.rect.pos.x + b.x + NODE_W * 0.5;
-            let by = self.rect.pos.y + b.y;
-            let mid = (ax, ay - 60.0);
-            let pts: Vec<(f64, f64)> = (0..=18).map(|i| {
-                let t = i as f64 / 18.0;
-                let u = 1.0 - t;
-                let px = u * u * u * ax + 3.0 * u * u * t * mid.0 + 3.0 * u * t * t * mid.0 + t * t * t * bx;
-                let py = u * u * u * ay + 3.0 * u * u * t * mid.1 + 3.0 * u * t * t * mid.1 + t * t * t * by;
-                (px, py)
-            }).collect();
-            self.draw_vector.set_color_hex(color, 0.7);
-            for w in pts.windows(2) {
-                self.draw_vector.move_to(w[0].0 as f32, w[0].1 as f32);
-                self.draw_vector.line_to(w[1].0 as f32, w[1].1 as f32);
-                self.draw_vector.stroke(1.2);
+
+        // The SentBack loop: a curve over the top from Checked back to
+        // Running (a fix review without a gate leaves from Reported; the
+        // same loop carries it).
+        if let (Some(a), Some(b)) = (pos_of(SliceState::Checked), pos_of(SliceState::Running)) {
+            let warning = crate::theme::hex("warning");
+            let lit = picked.contains(&SliceState::SentBack);
+            let count = edge_counts.get(&(TransitionKind::Reported, TransitionKind::SentBack)).copied().unwrap_or(0)
+                + edge_counts.get(&(TransitionKind::Checked, TransitionKind::SentBack)).copied().unwrap_or(0);
+            let p1 = sp(dvec2(a.x + NODE_W * 0.5, a.y));
+            let p2 = sp(dvec2(b.x + NODE_W * 0.5, b.y));
+            let peak = ROW1_Y - 62.0;
+            let c1 = dvec2(p1.x - 24.0 * v.scale, sp(dvec2(0.0, peak)).y);
+            let c2 = dvec2(p2.x + 24.0 * v.scale, sp(dvec2(0.0, peak)).y);
+            let mut color = crate::hex_color(warning);
+            color.w = if lit { 1.0 } else { 0.7 };
+            self.draw_edge(p1, c1, c2, p2, color, 1.2 * v.scale as f32);
+            let top = Self::bezier_at(p1, c1, c2, p2, 0.5);
+            let label = SliceState::SentBack.display().to_string();
+            let size = fs(7.5);
+            let tw = self.text_w(cx, &label, size);
+            texts.push(Text { pos: dvec2(top.x - tw * 0.5, top.y - size as f64 - 2.0), text: label, size, color: crate::hex_color(warning) });
+            if count > 0 {
+                self.draw_badge(cx, &mut texts, dvec2(top.x, top.y + 3.0), count, v.scale, crate::hex_color(warning));
             }
-            // A small label.
-            texts.push((dvec2(mid.0 - 30.0, mid.1 - 8.0), i18n::t("Sent back", "退回重做").to_string(), 7.5, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: 0.7 }));
         }
 
         // Nodes on top.
         let on_picked = |s: SliceState| picked.contains(&s);
         for n in &pos_map {
-            let r = self.node_rect(*n);
+            let p = sp(dvec2(n.x, n.y));
+            let size = dvec2(NODE_W, NODE_H) * v.scale;
             let color = self.color_for(n.state);
             let count = at.get(&n.state).copied().unwrap_or(0);
             let lit = on_picked(n.state);
             // Background.
             self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
-            self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, r.size.x as f32, r.size.y as f32, 6.0);
+            self.draw_vector.rounded_rect(p.x as f32, p.y as f32, size.x as f32, size.y as f32, 6.0 * v.scale as f32);
             self.draw_vector.fill();
             // Border, lit when the picked slice visited here, or always on Running.
-            let border_alpha = if lit { 1.0 } else { if n.state == SliceState::Running && count > 0 { 1.0 } else { 0.4 } };
+            let border_alpha = if lit || n.state == SliceState::Running && count > 0 { 1.0 } else { 0.4 };
             self.draw_vector.set_color_hex(color, border_alpha);
-            self.draw_vector.rounded_rect(r.pos.x as f32, r.pos.y as f32, r.size.x as f32, r.size.y as f32, 6.0);
-            self.draw_vector.stroke(if lit { 1.6 } else { 1.0 });
-            // The state label.
-            let label = n.state.label();
-            let w = self.text_w(cx, label, 8.5);
-            let ink = if lit || n.state == SliceState::Running && count > 0 { crate::theme::hex("ink") } else { crate::theme::hex("muted_strong") };
-            texts.push((dvec2(r.pos.x + (NODE_W - w) * 0.5, r.pos.y + 8.0), label.to_string(), 8.5, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
-            // The count.
+            self.draw_vector.rounded_rect(p.x as f32, p.y as f32, size.x as f32, size.y as f32, 6.0 * v.scale as f32);
+            self.draw_vector.stroke((if lit { 1.6 } else { 1.0 }) * v.scale as f32);
+            // The state's name, and under it the count: two lines that
+            // cannot run into each other.
+            let label = n.state.display().to_string();
+            let lsize = fs(8.5);
+            let lw = self.text_w(cx, &label, lsize);
+            texts.push(Text { pos: dvec2(p.x + (size.x - lw) * 0.5, p.y + 6.0 * v.scale), text: label, size: lsize, color: ink });
             if count > 0 {
-                let count_label = format!("{count}");
-                let cw = self.text_w(cx, &count_label, 12.0);
-                texts.push((dvec2(r.pos.x + (NODE_W - cw) * 0.5, r.pos.y + 22.0), count_label, 12.0, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
+                let count_label = count.to_string();
+                let csize = fs(12.0);
+                let cw = self.text_w(cx, &count_label, csize);
+                texts.push(Text { pos: dvec2(p.x + (size.x - cw) * 0.5, p.y + 18.0 * v.scale), text: count_label, size: csize, color: ink });
+            }
+            // The picked path's order: numbered dots over the node's top.
+            if let Some(nums) = numbers.get(&n.state) {
+                let r = 7.0 * v.scale;
+                let mut cxp = p.x + size.x - r - 2.0;
+                for num in nums.iter().rev() {
+                    self.draw_vector.set_color_hex(crate::theme::hex("accent"), 1.0);
+                    self.draw_vector.circle(cxp as f32, (p.y - r * 0.4) as f32, r as f32);
+                    self.draw_vector.fill();
+                    let label = num.to_string();
+                    let ns = fs(7.0);
+                    let nw = self.text_w(cx, &label, ns);
+                    texts.push(Text { pos: dvec2(cxp - nw * 0.5, p.y - r * 0.4 - ns as f64 * 0.6), text: label, size: ns, color: crate::hex_color(crate::theme::hex("on_accent")) });
+                    cxp -= r * 2.0 + 2.0;
+                }
             }
             // An active dot when something runs there.
             if n.state == SliceState::Running && count > 0 {
-                let cx = r.pos.x + r.size.x * 0.5;
-                let cy = r.pos.y + r.size.y - 4.0;
+                let dot = dvec2(p.x + size.x * 0.5, p.y + size.y - 4.0 * v.scale);
                 self.draw_vector.set_color_hex(crate::theme::hex("accent"), (0.6 + 0.4 * self.phase) as f32);
-                self.draw_vector.circle(cx as f32, cy as f32, (2.0 + self.phase * 3.0) as f32);
+                self.draw_vector.circle(dot.x as f32, dot.y as f32, ((2.0 + self.phase * 3.0) * v.scale) as f32);
                 self.draw_vector.fill();
             }
-            let _ = ink;
         }
 
-        // The side panel: each slice, click to pick.
-        let mut row_y = rect.pos.y + 44.0;
-        let mut sorted: Vec<&crate::lifecycle::SlicePath> = self.slices.paths.iter().collect();
-        sorted.sort_by(|a, b| a.slug.cmp(&b.slug));
-        for p in &sorted {
-            let picked = self.picked.as_deref() == Some(p.slug.as_str());
-            let row_h = 28.0;
-            let row = Rect { pos: dvec2(panel_x, row_y), size: dvec2(204.0, row_h) };
-            self.hits.push(SliceHit { rect: row, slug: p.slug.clone() });
-            if picked {
+        // The slice list, in its own panel on the right: never under the
+        // graph, scrolled alone by the wheel over it.
+        let inner = Rect { pos: list_pos + dvec2(4.0, 4.0), size: dvec2(list_w - 8.0, rect.size.y - 8.0) };
+        self.draw_vector.set_color_hex(crate::theme::hex("panel"), 1.0);
+        self.draw_vector.rounded_rect(inner.pos.x as f32, inner.pos.y as f32, inner.size.x as f32, inner.size.y as f32, 6.0);
+        self.draw_vector.fill();
+        // The separator between the graph and the list.
+        self.draw_vector.set_color_hex(crate::theme::hex("line"), 1.0);
+        self.draw_vector.move_to((list_pos.x - LIST_GAP * 0.5) as f32, (rect.pos.y + 8.0) as f32);
+        self.draw_vector.line_to((list_pos.x - LIST_GAP * 0.5) as f32, (rect.pos.y + rect.size.y - 8.0) as f32);
+        self.draw_vector.stroke(1.0);
+        let title = i18n::pick(format!("Slices · {}", self.slices.paths.len()), format!("切片 · {}", self.slices.paths.len()));
+        texts.push(Text { pos: dvec2(inner.pos.x + 6.0, inner.pos.y + 6.0), text: title, size: 9.0, color: muted_strong });
+        self.clamp_list_scroll();
+        let row_h = 30.0;
+        let rows_top = inner.pos.y + 26.0;
+        let sorted = self.sorted_slices();
+        for (i, (slug, current, rework)) in sorted.iter().enumerate() {
+            let y = rows_top + i as f64 * (row_h + 2.0) - self.list_scroll;
+            if y + row_h < inner.pos.y || y > inner.pos.y + inner.size.y {
+                continue;
+            }
+            let picked_row = self.picked.as_deref() == Some(slug.as_str());
+            let row = Rect { pos: dvec2(inner.pos.x + 4.0, y), size: dvec2(inner.size.x - 8.0, row_h) };
+            self.hits.push(SliceHit { rect: row, slug: slug.clone() });
+            if picked_row {
                 self.draw_vector.set_color_hex(crate::theme::hex("accent_soft"), 1.0);
-                self.draw_vector.rect(row.pos.x as f32, row.pos.y as f32, row.size.x as f32, row.size.y as f32);
+                self.draw_vector.rounded_rect(row.pos.x as f32, row.pos.y as f32, row.size.x as f32, row.size.y as f32, 5.0);
                 self.draw_vector.fill();
             }
-            let line = format!("{} · {}", p.slug, p.current.label());
-            texts.push((dvec2(row.pos.x + 6.0, row.pos.y + 6.0), line, 8.0, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: 1.0 }));
-            if p.rework_count > 0 {
-                texts.push((dvec2(row.pos.x + 6.0, row.pos.y + 16.0), format!("×{} rework", p.rework_count), 7.0, Vec4f { x: 0.0, y: 0.0, z: 0.0, w: 0.65 }));
+            // A dot in the state's colour, the slug beside it, the state
+            // (and any rework) under it.
+            self.draw_vector.set_color_hex(self.color_for(*current), 1.0);
+            self.draw_vector.circle((row.pos.x + 8.0) as f32, (row.pos.y + 8.0) as f32, 3.5);
+            self.draw_vector.fill();
+            let slug = self.fit_text(cx, slug, 9.0, row.size.x - 20.0);
+            texts.push(Text { pos: dvec2(row.pos.x + 15.0, row.pos.y + 2.0), text: slug, size: 9.0, color: ink });
+            let mut line2 = current.display().to_string();
+            if *rework > 0 {
+                line2.push_str(&format!(" · ×{} {}", rework, i18n::t("rework", "返工")));
             }
-            row_y += row_h + 2.0;
-            if row_y > rect.pos.y + rect.size.y - 8.0 { break; }
+            let line2 = self.fit_text(cx, &line2, 8.0, row.size.x - 18.0);
+            texts.push(Text { pos: dvec2(row.pos.x + 15.0, row.pos.y + 16.0), text: line2, size: 8.0, color: muted_strong });
         }
+
+        // The legend, in the strip under the graph.
+        self.draw_legend(cx, &mut texts, rect.pos.x + 6.0, rect.pos.x + graph_w - 6.0, rect.pos.y + graph_size.y + 8.0);
         self.draw_vector.end(cx);
 
         // Texts in their own call, after the shapes.
         self.draw_text.new_draw_call(cx);
         self.draw_text.draw_depth = self.draw_vector.draw_depth + self.draw_vector.cur_zbias;
-        for (pos, text, size, color) in texts {
-            self.draw_text.text_style.font_size = size;
-            self.draw_text.color = color;
-            self.draw_text.draw_abs(cx, pos, &text);
+        for t in texts {
+            self.draw_text.text_style.font_size = t.size;
+            self.draw_text.color = t.color;
+            self.draw_text.draw_abs(cx, t.pos, &t.text);
         }
 
         if self.slices.paths.iter().any(|p| p.current == SliceState::Running) {
@@ -432,13 +731,19 @@ impl LifecycleCanvasRef {
     pub fn set_slices(&self, cx: &mut Cx, slices: SliceMachine) {
         if let Some(mut c) = self.borrow_mut() {
             c.slices = slices;
+            // New data: fit the graph again (the person's zoom was for the
+            // old one).
+            c.seen = dvec2(0.0, 0.0);
             c.redraw(cx);
         }
     }
 
-    #[allow(dead_code)]
-    pub fn picked(&self) -> Option<String> {
-        self.borrow().and_then(|c| c.picked.clone())
+    /// Fit the graph into the canvas again.
+    pub fn fit(&self, cx: &mut Cx) {
+        if let Some(mut c) = self.borrow_mut() {
+            c.view = GraphView::fit(graph_bounds(), c.graph_size, FIT_PAD);
+            c.redraw(cx);
+        }
     }
 
     pub fn actions(&self, actions: &Actions) -> Vec<LifeAction> {
@@ -446,6 +751,13 @@ impl LifecycleCanvasRef {
         actions.iter().filter_map(|a| a.as_widget_action()).filter(|a| a.widget_uid == uid)
             .map(|a| a.cast::<LifeAction>()).filter(|a| !matches!(a, LifeAction::None)).collect()
     }
+}
+
+/// One row of the doc stream's list: a round separator or a document.
+#[derive(Clone, Copy, Debug)]
+enum LifeRow {
+    Round(Option<u64>),
+    Doc(usize),
 }
 
 impl OctoBuddyView {
@@ -472,18 +784,26 @@ impl OctoBuddyView {
         // The state machine canvas gets the slice machine.
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
         canvas.set_slices(cx, machine.clone());
-        // Sub-tabs: which one is shown.
+        // The two sub-tabs, one at a time: the one in use marked (an SegOn
+        // beside its SegOff, like the view switcher's pairs).
         let show_sm = self.life_tab == crate::LifeTab::StateMachine;
-        self.view.view(cx, ids!(life_sm)).set_visible(cx, show_sm);
-        self.view.view(cx, ids!(life_open_living)).set_visible(cx, true);
-        if show_sm {
-            self.set_life_docs_visible(cx, false);
-            self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
-            self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
-        } else {
-            self.set_life_docs_visible(cx, true);
-            self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
-            self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
+        self.view.view(cx, ids!(life_sm_panel)).set_visible(cx, show_sm);
+        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, !show_sm);
+        for (off, on, here) in [
+            (ids!(life_tab_sm), ids!(life_tab_sm_on), show_sm),
+            (ids!(life_tab_docs), ids!(life_tab_docs_on), !show_sm),
+        ] {
+            self.view.button(cx, off).set_visible(cx, !here);
+            self.view.button(cx, on).set_visible(cx, here);
+        }
+        self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
+        self.view.button(cx, ids!(life_tab_sm_on)).set_text(cx, i18n::t("State machine", "状态机"));
+        self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
+        self.view.button(cx, ids!(life_tab_docs_on)).set_text(cx, i18n::t("Docs", "文档流"));
+        self.view.button(cx, ids!(life_fit)).set_visible(cx, show_sm);
+        self.view.button(cx, ids!(life_fit)).set_text(cx, i18n::t("Fit", "适应"));
+        self.view.button(cx, ids!(life_open_living)).set_text(cx, i18n::t("Open LIVING.md", "打开 LIVING.md"));
+        if !show_sm {
             self.render_life_docs(cx);
         }
         // Kick off (or skip) the background worker for this project. The
@@ -491,17 +811,12 @@ impl OctoBuddyView {
         // same commit list — but the cache in `life_docs_cache` means the
         // UI re-render only happens when the result differs).
         self.maybe_refresh_life_docs(at);
-        // A summary of where each round is, for the legend.
-        let mut bits: Vec<String> = Vec::new();
-        for r in &rounds.rounds {
-            bits.push(i18n::pick(format!("round {} - {}", r.round, r.current.label()), format!("第 {} 轮 - {}", r.round, r.current.label())));
-        }
-        let summary = if bits.is_empty() { i18n::t("No rounds yet.", "还没有轮次。").to_string() } else { bits.join(" - ") };
+        // A summary of where each round is: 「第 1 轮 · 全部接受」.
+        let bits: Vec<String> = rounds.rounds.iter().map(|r| {
+            i18n::pick(format!("Round {} · {}", r.round, r.current.display()), format!("第 {} 轮 · {}", r.round, r.current.display()))
+        }).collect();
+        let summary = if bits.is_empty() { i18n::t("No rounds yet.", "还没有轮次。").to_string() } else { bits.join(" · ") };
         self.view.label(cx, ids!(life_round)).set_text(cx, &summary);
-        self.view.label(cx, ids!(life_legend)).set_text(cx, i18n::t(
-            "Green: success - red: failed - orange: stopped - yellow: over budget - light: discarded. Back-curve: sent back. Click a slice to highlight its path. Counts: how many of each edge the session crossed.",
-            "Green: success - red: failed - orange: stopped - yellow: over budget - light: discarded. Back-curve: sent back. Click a slice to highlight its path. Counts: how many of each edge the session crossed."
-        ));
         let _ = now_secs();
     }
 
@@ -554,64 +869,197 @@ impl OctoBuddyView {
         refresh_life_docs(project, project_name, sessions, receipts, inbox);
     }
 
-    /// Toggle the docs panel by id (its DSL handle).
-    fn set_life_docs_visible(&mut self, cx: &mut Cx, on: bool) {
-        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, on);
+    /// The doc stream's list rows: a round separator, then its docs in
+    /// time order (the docs without a round come first, under their own
+    /// separator).
+    fn life_rows(&self) -> Vec<LifeRow> {
+        let mut rows: Vec<LifeRow> = Vec::new();
+        let mut last: Option<Option<u64>> = None;
+        for (i, d) in self.life_docs.iter().enumerate() {
+            if last != Some(d.round) {
+                rows.push(LifeRow::Round(d.round));
+                last = Some(d.round);
+            }
+            rows.push(LifeRow::Doc(i));
+        }
+        rows
     }
 
-    /// Render the doc stream as two labels: the list on the left, the picked
-    /// item's body on the right.
-    fn render_life_docs(&mut self, cx: &mut Cx) {
-        let mut lines: Vec<String> = Vec::new();
-        for (i, d) in self.life_docs.iter().enumerate() {
-            let marker = if Some(i) == self.life_doc_picked { ">" } else { " " };
-            let ver = d.version.map(|v| format!(" v{v}")).unwrap_or_default();
-            let round = d.round.map(|r| format!("R{r} ")).unwrap_or_default();
-            lines.push(format!("{marker} [{}{ver}] {} - {}", round, d.kind.label(), d.title));
+    /// The theme colour a doc kind's dot wears.
+    fn kind_color(k: crate::lifecycle::DocKind) -> u32 {
+        use crate::lifecycle::DocKind;
+        match k {
+            DocKind::Request => crate::theme::hex("accent"),
+            DocKind::Plan => crate::theme::hex("purple"),
+            DocKind::Spec => crate::theme::hex("orange"),
+            DocKind::Report => crate::theme::hex("muted_strong"),
+            DocKind::Gate => crate::theme::hex("warning"),
+            DocKind::Review => crate::theme::hex("success"),
+            DocKind::RepoDoc => crate::theme::hex("muted"),
+            DocKind::Acceptance => crate::theme::hex("orange"),
+            DocKind::Receipt => crate::theme::hex("success"),
         }
-        let list_text = if lines.is_empty() { i18n::t("Nothing yet.", "还没有。").to_string() } else { lines.join("\n") };
-        self.view.label(cx, ids!(life_docs_list)).set_text(cx, &list_text);
-        // The picked item's body. For repo docs, fetch the file content
-        // with `git show` (a small read; not the UI-blocking kind).
-        let body = self.life_doc_picked.and_then(|i| self.life_docs.get(i)).map(|d| {
-            let mut text = format!("[{}] {}\nby {}\n", d.kind.label(), d.title, d.author);
-            if let Some(path) = &d.path { text.push_str(&format!("path: {path}\n")); }
-            if let Some(commit) = &d.commit { text.push_str(&format!("commit: {commit}\n")); }
-            if let Some(peer) = &d.peer { text.push_str(&format!("peer: {peer}\n")); }
-            if let Some(round) = d.round { text.push_str(&format!("round: {round}\n")); }
-            text.push_str("---\n");
-            if let Some(body) = &d.body {
-                text.push_str(body);
-            } else if d.kind == crate::lifecycle::DocKind::RepoDoc {
-                if let (Some(commit), Some(path)) = (&d.commit, &d.path) {
-                    // The selected session's project.
-                    if let Some(at) = self.selected {
-                        let project = self.store.projects[at.0].path.clone();
-                        match crate::lifecycle::git_show_file(&project, commit, path) {
-                            Ok(content) => text.push_str(&content),
-                            Err(e) => text.push_str(&format!("(git show failed: {e})")),
+    }
+
+    /// Fill the doc stream's list (a PortalList): a round separator, then
+    /// its docs — one clickable row each, the picked one marked.
+    pub(crate) fn draw_life_docs(&mut self, cx: &mut Cx2d, list: &mut PortalList) {
+        let rows = self.life_rows();
+        if rows.is_empty() {
+            // A PortalList keeps offering indices until an item draws
+            // nothing: only the first shows the "nothing here" row.
+            list.set_item_range(cx, 0, 1);
+            while let Some(index) = list.next_visible_item(cx) {
+                if index == 0 {
+                    let item = list.item(cx, index, id!(Empty));
+                    item.label(cx, ids!(text)).set_text(cx, i18n::t("Nothing yet.", "还没有。"));
+                    item.draw_all_unscoped(cx);
+                }
+            }
+            return;
+        }
+        list.set_item_range(cx, 0, rows.len());
+        while let Some(index) = list.next_visible_item(cx) {
+            let Some(row) = rows.get(index) else { continue };
+            match *row {
+                LifeRow::Round(round) => {
+                    let item = list.item(cx, index, id!(Round));
+                    let text = match round {
+                        Some(r) => i18n::pick(format!("Round {r}"), format!("第 {r} 轮")),
+                        None => i18n::t("Project", "项目").to_string(),
+                    };
+                    item.label(cx, ids!(round)).set_text(cx, &text);
+                    item.draw_all_unscoped(cx);
+                }
+                LifeRow::Doc(i) => {
+                    let Some(d) = self.life_docs.get(i) else { continue };
+                    let picked = self.life_doc_picked == Some(i);
+                    let item = list.item(cx, index, if picked { id!(DocSel) } else { id!(Doc) });
+                    let round = d.round.map(|r| i18n::pick(format!("R{r} · "), format!("第{r}轮 · "))).unwrap_or_default();
+                    item.label(cx, ids!(title)).set_text(cx, &format!("{round}{} · {}", d.kind.display(), d.title));
+                    let mut meta = d.author.clone();
+                    if d.at > 0 {
+                        meta.push_str(&format!(" · {}", when(d.at)));
+                    }
+                    if let Some(v) = d.version {
+                        meta.push_str(&format!(" · v{v}"));
+                    }
+                    item.label(cx, ids!(meta)).set_text(cx, &meta);
+                    let c = crate::hex_color(Self::kind_color(d.kind));
+                    let mut dot = item.widget(cx, ids!(dot));
+                    script_apply_eval!(cx, dot, { draw_bg +: {color: #(c)} });
+                    item.draw_all_unscoped(cx);
+                }
+            }
+        }
+    }
+
+    /// The doc stream's reader: the picked item's meta line, its versions
+    /// (a repo doc that came back changed), and its body as Markdown.
+    fn render_life_docs(&mut self, cx: &mut Cx) {
+        let picked = self.life_doc_picked.and_then(|i| self.life_docs.get(i));
+        let Some(d) = picked else {
+            self.view.label(cx, ids!(life_doc_meta)).set_text(cx, i18n::t("Pick a doc on the left to read it here.", "左侧选一条文档来读。"));
+            self.view.widget(cx, ids!(life_docs_body)).set_text(cx, "");
+            self.view.view(cx, ids!(life_vers)).set_visible(cx, false);
+            self.life_ver_map.clear();
+            return;
+        };
+        // The meta line: kind, who, when, where, which version.
+        let mut meta = format!("{} · {}", d.kind.display(), d.author);
+        if d.at > 0 {
+            meta.push_str(&format!(" · {}", when(d.at)));
+        }
+        if let Some(path) = &d.path {
+            meta.push_str(&format!(" · {path}"));
+        }
+        if let Some(v) = d.version {
+            meta.push_str(&format!(" · v{v}"));
+        }
+        self.view.label(cx, ids!(life_doc_meta)).set_text(cx, &meta);
+        // A repo doc that came back changed: a button per version of the
+        // same path, the one shown marked.
+        let mut versions: Vec<(u32, usize)> = Vec::new();
+        if let Some(path) = &d.path {
+            for (i, other) in self.life_docs.iter().enumerate() {
+                if other.path.as_deref() == Some(path.as_str()) {
+                    if let Some(v) = other.version {
+                        if !versions.iter().any(|(w, _)| *w == v) {
+                            versions.push((v, i));
                         }
                     }
                 }
-            } else if d.path.is_some() {
-                text.push_str(i18n::t("(use Open LIVING.md or pick a request/plan/report to read here)", "（使用「打开 LIVING.md」或选一条需求/计划/报告查看）"));
             }
-            text
-        }).unwrap_or_else(|| i18n::t("Pick a doc on the left to read it here.", "左侧选一条文档来读。").to_string());
-        self.view.label(cx, ids!(life_docs_body)).set_text(cx, &body);
+            versions.sort_by_key(|(v, _)| *v);
+        }
+        let buttons = [ids!(life_v0), ids!(life_v1), ids!(life_v2), ids!(life_v3), ids!(life_v4), ids!(life_v5)];
+        self.life_ver_map.clear();
+        let many = versions.len() > 1;
+        self.view.view(cx, ids!(life_vers)).set_visible(cx, many);
+        for (k, id) in buttons.iter().enumerate() {
+            let button = self.view.button(cx, *id);
+            match versions.get(k).filter(|_| many) {
+                Some((v, _)) => {
+                    self.life_ver_map.push(*v);
+                    button.set_visible(cx, true);
+                    button.set_text(cx, &format!("v{v}"));
+                    let active = d.version == Some(*v);
+                    let color = crate::hex_color(if active { crate::theme::hex("accent_soft") } else { crate::theme::hex("sidebar") });
+                    let text = crate::hex_color(if active { crate::theme::hex("accent_ink") } else { crate::theme::hex("muted_strong") });
+                    let mut w = self.view.widget(cx, *id);
+                    script_apply_eval!(cx, w, {
+                        draw_bg +: {color: #(color)}
+                        draw_text +: {color: #(text)}
+                    });
+                }
+                None => button.set_visible(cx, false),
+            }
+        }
+        // The body: what is on hand, or the file's content (a repo doc at
+        // a commit, or one on disk).
+        let mut body = String::new();
+        if let Some(text) = &d.body {
+            body = text.clone();
+        } else if d.kind == crate::lifecycle::DocKind::RepoDoc {
+            if let (Some(commit), Some(path), Some(at)) = (&d.commit, &d.path, self.selected) {
+                let project = self.store.projects[at.0].path.clone();
+                match crate::lifecycle::git_show_file(&project, commit, path) {
+                    Ok(content) => body = content,
+                    Err(e) => body = format!("(git show failed: {e})"),
+                }
+            }
+        } else if let Some(path) = &d.path {
+            match std::fs::read_to_string(path) {
+                Ok(content) => body = content,
+                Err(e) => body = format!("({e})"),
+            }
+        }
+        if body.is_empty() {
+            body = i18n::t("(nothing to show)", "（没有内容）").to_string();
+        }
+        self.view.widget(cx, ids!(life_docs_body)).set_text(cx, &body);
     }
 
-    /// What the lifecycle view does on clicks (slice picked, docs tab).
+    /// What the lifecycle view does on clicks (tabs, the fit button, slice
+    /// picks, doc rows, version switches).
     pub(crate) fn handle_life_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         if self.stage != Stage::Life { return; }
-        if self.view.button(cx, ids!(life_tab_sm)).clicked(actions) {
-            self.life_tab = crate::LifeTab::StateMachine;
-            self.relayout(cx);
+        if self.view.button(cx, ids!(life_tab_sm)).clicked(actions) || self.view.button(cx, ids!(life_tab_sm_on)).clicked(actions) {
+            if self.life_tab != crate::LifeTab::StateMachine {
+                self.life_tab = crate::LifeTab::StateMachine;
+                self.relayout(cx);
+            }
             return;
         }
-        if self.view.button(cx, ids!(life_tab_docs)).clicked(actions) {
-            self.life_tab = crate::LifeTab::Docs;
-            self.relayout(cx);
+        if self.view.button(cx, ids!(life_tab_docs)).clicked(actions) || self.view.button(cx, ids!(life_tab_docs_on)).clicked(actions) {
+            if self.life_tab != crate::LifeTab::Docs {
+                self.life_tab = crate::LifeTab::Docs;
+                self.relayout(cx);
+            }
+            return;
+        }
+        if self.view.button(cx, ids!(life_fit)).clicked(actions) {
+            self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas().fit(cx);
             return;
         }
         if self.view.button(cx, ids!(life_open_living)).clicked(actions) {
@@ -620,6 +1068,36 @@ impl OctoBuddyView {
                 let path = crate::lifecycle::living_path(&project);
                 open_in_default(&path);
             }
+            return;
+        }
+        // A version button: switch to that version of the same path.
+        for (k, id) in [ids!(life_v0), ids!(life_v1), ids!(life_v2), ids!(life_v3), ids!(life_v4), ids!(life_v5)].iter().enumerate() {
+            if self.view.button(cx, *id).clicked(actions) {
+                let Some(want) = self.life_ver_map.get(k).copied() else { continue };
+                let path = self.life_doc_picked.and_then(|i| self.life_docs.get(i)).and_then(|d| d.path.clone());
+                if let Some(index) = path.and_then(|path| self.life_docs.iter().position(|d| d.path.as_deref() == Some(path.as_str()) && d.version == Some(want))) {
+                    self.life_doc_picked = Some(index);
+                    self.render_life_docs(cx);
+                    cx.redraw_all();
+                }
+                return;
+            }
+        }
+        // A doc row: pick it and show it.
+        let list = self.view.portal_list(cx, ids!(life_docs_list));
+        let rows = self.life_rows();
+        let mut picked = None;
+        for (index, item) in list.items_with_actions(actions) {
+            if crate::tapped(&item.view(cx, ids!(row)), actions) {
+                if let Some(LifeRow::Doc(i)) = rows.get(index) {
+                    picked = Some(*i);
+                }
+            }
+        }
+        if let Some(i) = picked {
+            self.life_doc_picked = Some(i);
+            self.render_life_docs(cx);
+            cx.redraw_all();
             return;
         }
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
@@ -723,4 +1201,68 @@ pub struct PeerCommits {
     pub slug: String,
     pub round: u64,
     pub commits: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fit puts every corner of the graph's bounds inside the viewport
+    /// (with the pad to spare), whatever the viewport's shape.
+    #[test]
+    fn fit_shows_every_node() {
+        let bounds = graph_bounds();
+        for size in [dvec2(360.0, 260.0), dvec2(600.0, 400.0), dvec2(1200.0, 700.0), dvec2(120.0, 90.0)] {
+            let v = GraphView::fit(bounds, size, FIT_PAD);
+            for corner in [
+                dvec2(bounds.pos.x, bounds.pos.y),
+                dvec2(bounds.pos.x + bounds.size.x, bounds.pos.y),
+                dvec2(bounds.pos.x, bounds.pos.y + bounds.size.y),
+                dvec2(bounds.pos.x + bounds.size.x, bounds.pos.y + bounds.size.y),
+            ] {
+                let p = v.to_screen(corner);
+                assert!((-0.5..=size.x + 0.5).contains(&p.x), "{size:?}: {corner:?} -> {p:?}");
+                assert!((-0.5..=size.y + 0.5).contains(&p.y), "{size:?}: {corner:?} -> {p:?}");
+            }
+            // Every node, not just the bounds' corners.
+            for n in nodes() {
+                let p = v.to_screen(dvec2(n.x, n.y));
+                let q = v.to_screen(dvec2(n.x + NODE_W, n.y + NODE_H));
+                assert!((-0.5..=size.x + 0.5).contains(&q.x) && (-0.5..=size.y + 0.5).contains(&q.y) && p.x >= -0.5 && p.y >= -0.5, "{size:?}: {} out", n.state.display());
+            }
+        }
+    }
+
+    /// Zooming keeps the graph point under the pointer exactly where it
+    /// was, and stays inside the zoom range.
+    #[test]
+    fn zoom_keeps_the_point_under_the_pointer() {
+        let v = GraphView::fit(graph_bounds(), dvec2(600.0, 400.0), FIT_PAD);
+        let anchor = dvec2(123.0, 77.0);
+        let under = (anchor - v.pan) / v.scale;
+        for factor in [1.1, 1.25, 0.8, 0.5, 3.0] {
+            let z = v.zoom_at(anchor, factor);
+            let p = z.to_screen(under);
+            assert!((p.x - anchor.x).abs() < 1e-9 && (p.y - anchor.y).abs() < 1e-9, "factor {factor}: {p:?}");
+            assert!(z.scale >= ZOOM_MIN && z.scale <= ZOOM_MAX);
+        }
+        // The clamp holds at both ends.
+        assert_eq!(v.zoom_at(anchor, 100.0).scale, ZOOM_MAX);
+        assert_eq!(v.zoom_at(anchor, 0.001).scale, ZOOM_MIN);
+    }
+
+    /// The graph area and the slice list never overlap, at any width (the
+    /// list yields its width when the canvas gets narrow).
+    #[test]
+    fn graph_and_list_never_overlap() {
+        for w in [120.0, 200.0, 360.0, 559.0, 560.0, 600.0, 900.0, 1400.0] {
+            let (graph, list) = split_canvas(w);
+            assert!(graph + list + LIST_GAP <= w + 1e-9, "w {w}: {graph} + {list}");
+            assert!((0.0..=240.0).contains(&list), "w {w}: list {list}");
+            assert!(graph >= 0.0, "w {w}: graph {graph}");
+        }
+        // The two widths the narrow/wide switch actually produces.
+        assert_eq!(split_canvas(900.0).1, 240.0);
+        assert_eq!(split_canvas(400.0).1, 180.0);
+    }
 }
