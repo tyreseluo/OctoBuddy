@@ -24,7 +24,7 @@
 | 发布读回 | **真实**：本机真实的本地 App Hub，不是 stub | `cargo test --locked reads_back_a_published_app_from_the_local_hub -- --ignored --nocapture` | [docs/evidence/receipts/live-readback-2026-10-11.txt](docs/evidence/receipts/live-readback-2026-10-11.txt) | 小账本 0.1.3、提交 `5f58490`：catalog、摘要、内容、提交四项 ✓；它的工作副本有一处未提交的 manifest 改动，读回判为「不是已发布的内容」 |
 | 编入 OctoSense | **真实**：OctoSense 的 desktop CI 各步骤在 PR head 本地跑 | 见 OctoSense#344 正文「在 PR head 复现」 | PR #344 正文 | `native_apps.py --check`、tools 单元测试 155 个、`setup.py --check --cargo`（一份 App Hub）、`cargo check --locked -p octosense`（含 mobile-apps 等三行）、shell 库测试 104 个全过；debug 构建以 `MAKEPAD_WM_TEST_APP=octobuddy` 启动，日志 `launched octobuddy as client 1 (in-process, octobuddy)` |
 | hagency 房间 | **合成**：127.0.0.1 上的一个小型假 Matrix 服务器，记录 PUT 并在 `/messages` 里返回一个陌生人和一个协调人的 accept；没有用真实 Palpo 服务器 | `cargo test --locked hagency -- --nocapture` | [docs/evidence/hagency/fake-matrix-2026-10-12.txt](docs/evidence/hagency/fake-matrix-2026-10-12.txt) | 重复的键只发一次 PUT，令牌在 Authorization 头里、HTML 版本已转义；「重启」（状态从磁盘读回）后同一键不再发；陌生人的 `accept round 2` 不算数，协调人的 `accept round 1` 把 Kind::Acceptance 回执以 `by=@coordinator:hs` 确认并落进账本；确认结果和只回一次的拒绝都回了帖；自己的消息和非消息事件被跳过，已读标记前移 |
-| 其余机制 | 单元测试 | `cargo test --locked` | 下表 | 212 passed，0 failed，20 ignored（ignored 的是需要真实 agent、真实 App Hub 或真实 GitHub 的 live 测试） |
+| 其余机制 | 单元测试 | `cargo test --locked` | 下表 | 213 passed，0 failed，20 ignored（ignored 的是需要真实 agent、真实 App Hub 或真实 GitHub 的 live 测试） |
 
 单元测试按机制：
 
