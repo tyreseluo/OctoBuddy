@@ -234,6 +234,21 @@ const SELF_FIX: u32 = 2;
 
 /// What a check's known errors mean, for the inner loop that fixes them.
 fn check_hints(output: &str) -> String {
+    // The check's own fixes win: App Hub's gate prints `fix [code]: …` under
+    // each finding it knows (docs/evidence/diagnostics/before-after-2026-10-12.md),
+    // so the inner loop gets the code and the tool's own one-line fix.
+    let mut fixes: Vec<&str> = Vec::new();
+    for line in output.lines().map(str::trim) {
+        if let Some(fix) = line.strip_prefix("fix [") {
+            if !fixes.contains(&fix) {
+                fixes.push(fix);
+            }
+        }
+    }
+    if !fixes.is_empty() {
+        return format!("\n\nWhat the check says to do:\n- [{}]", fixes.join("]\n- ["));
+    }
+    // An older tool prints no fixes: match the texts we know.
     let mut out = Vec::new();
     if output.contains("not found in tree") {
         out.push("`widget 'x' not found in tree`: `ui.x` finds a widget anywhere in the tree once it exists, so `x` is not \
@@ -3686,6 +3701,21 @@ mod tests {
         let hints = check_hints("[E] splash:1:313:8 - widget 'month_label' not found in tree\nthe app logged script errors (above)");
         assert!(hints.contains("every `ui.` reference"), "{hints}");
         assert_eq!(check_hints("it starts and draws with no script errors"), "");
+    }
+
+    #[test]
+    fn a_check_that_names_its_fixes_wins_over_text_matching() {
+        // App Hub's coded report: the codes and the tool's own fixes come through.
+        let gate = "dev.example.app 1.0.0 — REFUSED\n  [refused] digest: the bundle hashes to e785…, the manifest claims 4b46…\n    fix [hub-digest-mismatch]: run `hub stamp <bundle>` after every edit (tools/octo check stamps first), then check again\n  [refused] listing: no listing.json: a store needs a description, a category, screenshots, a publisher and the platforms it runs on\n    fix [hub-listing-missing]: add listing.json with description, category, screenshots, publisher and platforms\nhub: the bundle was refused";
+        let hints = check_hints(gate);
+        assert!(hints.contains("[hub-digest-mismatch]: run `hub stamp"), "{hints}");
+        assert!(hints.contains("[hub-listing-missing]: add listing.json"), "{hints}");
+        assert!(!hints.contains("What these mean"), "the coded fixes replace the text guesses: {hints}");
+        let twice = format!("{gate}\n    fix [hub-digest-mismatch]: run `hub stamp <bundle>` after every edit (tools/octo check stamps first), then check again");
+        assert_eq!(check_hints(&twice).matches("hub-digest-mismatch").count(), 1, "a repeated fix is listed once");
+        // Without fix lines (an older hub), the known texts still match.
+        let old = check_hints("[refused] listing: no listing.json: a store needs a description, a category, screenshots, a publisher and the platforms it runs on\nthe App Hub gate FAILED");
+        assert!(old.contains("What these mean"), "{old}");
     }
 
     #[test]
