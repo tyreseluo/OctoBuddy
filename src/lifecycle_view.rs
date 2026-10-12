@@ -455,7 +455,16 @@ impl OctoBuddyView {
         let session = self.store.session(at).unwrap();
         let machine = crate::lifecycle::build_slice_machine(session);
         let rounds = crate::lifecycle::build_round_machine(session);
-        let stream = crate::lifecycle::build_doc_stream(&[session], &Default::default());
+        // The doc stream starts with what the store gives us (per-session),
+        // then folds in any repo docs and acceptance sheets the background
+        // worker has produced for this project.
+        let mut stream = crate::lifecycle::build_doc_stream(&[session], &Default::default());
+        let project = self.store.projects[at.0].path.clone();
+        let (repo_docs, acceptance) = self.lookup_life_cache(&project);
+        let cached_repo: std::collections::BTreeMap<String, Vec<crate::lifecycle::RepoDocVersion>> = repo_docs.into_iter().collect();
+        let cached_acc = acceptance;
+        crate::lifecycle::extend_with_repo_docs(&mut stream, &cached_repo);
+        crate::lifecycle::extend_with_acceptance(&mut stream, &project, &cached_acc);
         self.life_docs = stream.items.clone();
         if self.life_doc_picked.is_some_and(|i| i >= self.life_docs.len()) {
             self.life_doc_picked = None;
@@ -476,22 +485,12 @@ impl OctoBuddyView {
             self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
             self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
             self.render_life_docs(cx);
-            // Opening the docs stream: regenerate LIVING.md (sync, but only when content changed).
-            let sessions: Vec<&_> = self.store.projects.iter().flat_map(|p| p.sessions.iter()).collect();
-            let stream = crate::lifecycle::build_doc_stream(&sessions, &Default::default());
-            let content = crate::lifecycle::build_living(&self.store.projects[at.0].name, &machine, &rounds, &stream);
-            let project = self.store.projects[at.0].path.clone();
-            let outcome = crate::lifecycle::write_living_md(&project, &content);
-            match outcome {
-                crate::lifecycle::LivingWrite::Wrote(path) => {
-                    self.system(at, &i18n::pick(format!("LIVING.md updated: {}", path.display()), format!("已更新 LIVING.md: {}", path.display())));
-                }
-                crate::lifecycle::LivingWrite::Skipped(why) => {
-                    self.system(at, &i18n::pick(format!("Could not write LIVING.md: {why}"), format!("无法写 LIVING.md：{why}")));
-                }
-                crate::lifecycle::LivingWrite::Unchanged => {}
-            }
         }
+        // Kick off (or skip) the background worker for this project. The
+        // worker is cheap when nothing changed (it still calls git for the
+        // same commit list — but the cache in `life_docs_cache` means the
+        // UI re-render only happens when the result differs).
+        self.maybe_refresh_life_docs(at);
         // A summary of where each round is, for the legend.
         let mut bits: Vec<String> = Vec::new();
         for r in &rounds.rounds {
@@ -504,6 +503,45 @@ impl OctoBuddyView {
             "Green: success - red: failed - orange: stopped - yellow: over budget - light: discarded. Back-curve: sent back. Click a slice to highlight its path. Counts: how many of each edge the session crossed."
         ));
         let _ = now_secs();
+    }
+
+    /// Find the cached repo docs + acceptance for a project. The cache is
+    /// filled by `LoopEvent::LifeDocs` from the background worker.
+    fn lookup_life_cache(&self, project: &str) -> (Vec<(String, Vec<crate::lifecycle::RepoDocVersion>)>, Vec<crate::lifecycle::AcceptanceItem>) {
+        let repo_docs = self.life_docs_cache.iter().find(|(p, _)| p == project).map(|(_, v)| v.clone()).unwrap_or_default();
+        let acceptance = self.life_acceptance_cache.iter().find(|(p, _)| p == project).map(|(_, v)| v.clone()).unwrap_or_default();
+        (repo_docs, acceptance)
+    }
+
+    /// Spawn the background worker for this project's sessions. A bump in
+    /// the lifecycle token (anything that changed for this project) means
+    /// the worker should run again.
+    fn maybe_refresh_life_docs(&mut self, at: crate::model::SessionRef) {
+        let project = self.store.projects[at.0].path.clone();
+        let project_name = self.store.projects[at.0].name.clone();
+        let token: u64 = self.store.projects[at.0].sessions.iter()
+            .flat_map(|s| s.peers().iter())
+            .filter(|p| p.commits.is_some())
+            .map(|p| (p.id.as_str(), p.commits.as_ref().map(|c| c.len()).unwrap_or(0)))
+            .map(|(id, n)| (id, n))
+            .fold(0u64, |acc, (id, n)| acc.wrapping_add(id.len() as u64).wrapping_add(n as u64));
+        if token == self.life_token && self.life_docs_cache.iter().any(|(p, _)| p == &project) {
+            return;
+        }
+        self.life_token = token;
+        let sessions: Vec<SessionCommits> = self.store.projects[at.0].sessions.iter().map(|s| {
+            let peers = s.peers().iter().map(|p| PeerCommits {
+                slug: p.slug.clone(),
+                round: p.round,
+                commits: p.commits.clone().unwrap_or_default(),
+            }).collect();
+            SessionCommits { session: s.clone(), peers }
+        }).collect();
+        // No real receipts API here yet — pass an empty list; once the
+        // receipts module is wired through, callers can populate it.
+        let receipts: Vec<crate::lifecycle::ReceiptStatus> = Vec::new();
+        let inbox = self.rt.inbox.clone();
+        refresh_life_docs(project, project_name, sessions, receipts, inbox);
     }
 
     /// Toggle the docs panel by id (its DSL handle).
@@ -523,23 +561,33 @@ impl OctoBuddyView {
         }
         let list_text = if lines.is_empty() { i18n::t("Nothing yet.", "还没有。").to_string() } else { lines.join("\n") };
         self.view.label(cx, ids!(life_docs_list)).set_text(cx, &list_text);
-        let body = self.life_doc_picked.and_then(|i| self.life_docs.get(i))
-            .map(|d| {
-                let head = format!("[{}] {}\nby {}\n", d.kind.label(), d.title, d.author);
-                let mut text = head;
-                if let Some(path) = &d.path { text.push_str(&format!("path: {path}\n")); }
-                if let Some(commit) = &d.commit { text.push_str(&format!("commit: {commit}\n")); }
-                if let Some(peer) = &d.peer { text.push_str(&format!("peer: {peer}\n")); }
-                if let Some(round) = d.round { text.push_str(&format!("round: {round}\n")); }
-                text.push_str("---\n");
-                if let Some(body) = &d.body {
-                    text.push_str(body);
-                } else if d.path.is_some() {
-                    text.push_str(i18n::t("(use Open LIVING.md or pick a request/plan/report to read here)", "（使用「打开 LIVING.md」或选一条需求/计划/报告查看）"));
+        // The picked item's body. For repo docs, fetch the file content
+        // with `git show` (a small read; not the UI-blocking kind).
+        let body = self.life_doc_picked.and_then(|i| self.life_docs.get(i)).map(|d| {
+            let mut text = format!("[{}] {}\nby {}\n", d.kind.label(), d.title, d.author);
+            if let Some(path) = &d.path { text.push_str(&format!("path: {path}\n")); }
+            if let Some(commit) = &d.commit { text.push_str(&format!("commit: {commit}\n")); }
+            if let Some(peer) = &d.peer { text.push_str(&format!("peer: {peer}\n")); }
+            if let Some(round) = d.round { text.push_str(&format!("round: {round}\n")); }
+            text.push_str("---\n");
+            if let Some(body) = &d.body {
+                text.push_str(body);
+            } else if d.kind == crate::lifecycle::DocKind::RepoDoc {
+                if let (Some(commit), Some(path)) = (&d.commit, &d.path) {
+                    // The selected session's project.
+                    if let Some(at) = self.selected {
+                        let project = self.store.projects[at.0].path.clone();
+                        match crate::lifecycle::git_show_file(&project, commit, path) {
+                            Ok(content) => text.push_str(&content),
+                            Err(e) => text.push_str(&format!("(git show failed: {e})")),
+                        }
+                    }
                 }
-                text
-            })
-            .unwrap_or_else(|| i18n::t("Pick a doc on the left to read it here.", "左侧选一条文档来读。").to_string());
+            } else if d.path.is_some() {
+                text.push_str(i18n::t("(use Open LIVING.md or pick a request/plan/report to read here)", "（使用「打开 LIVING.md」或选一条需求/计划/报告查看）"));
+            }
+            text
+        }).unwrap_or_else(|| i18n::t("Pick a doc on the left to read it here.", "左侧选一条文档来读。").to_string());
         self.view.label(cx, ids!(life_docs_body)).set_text(cx, &body);
     }
 
@@ -592,6 +640,7 @@ impl OctoBuddyView {
 /// (new commits, new files) gets folded into the cached map.
 pub fn refresh_life_docs(
     project: String,
+    project_name: String,
     sessions: Vec<SessionCommits>,
     receipts: Vec<crate::lifecycle::ReceiptStatus>,
     inbox: crate::events::Inbox,
@@ -626,7 +675,27 @@ pub fn refresh_life_docs(
         let owned: Vec<crate::model::Session> = sessions.iter().map(|s| s.session.clone()).collect();
         let session_refs: Vec<&_> = owned.iter().collect();
         let acceptance = crate::lifecycle::acceptance_items(&project, &session_refs, &receipts, now);
+        // Build LIVING.md off the UI thread too: the worker already has
+        // everything it needs. The project's sessions all fold into one
+        // document, so we combine their slice/round machines and doc
+        // streams first.
+        let machines: Vec<crate::lifecycle::SliceMachine> = owned.iter().map(|s| crate::lifecycle::build_slice_machine(s)).collect();
+        let round_machines: Vec<crate::lifecycle::RoundMachine> = owned.iter().map(|s| crate::lifecycle::build_round_machine(s)).collect();
+        let mut combined_stream = crate::lifecycle::DocStream::default();
+        for s in &owned {
+            let mut st = crate::lifecycle::build_doc_stream(&[s], &Default::default());
+            crate::lifecycle::extend_with_repo_docs(&mut st, &repo_docs);
+            crate::lifecycle::extend_with_acceptance(&mut st, &project, &acceptance);
+            combined_stream.items.extend(st.items);
+        }
+        let mut combined_machine = crate::lifecycle::SliceMachine::default();
+        for m in machines { combined_machine.paths.extend(m.paths); combined_machine.edges.extend(m.edges); }
+        let mut combined_rounds = crate::lifecycle::RoundMachine::default();
+        for m in round_machines { combined_rounds.rounds.extend(m.rounds); combined_rounds.edges.extend(m.edges); }
+        let content = crate::lifecycle::build_living(&project_name, &combined_machine, &combined_rounds, &combined_stream, &repo_docs, &acceptance);
+        let outcome = crate::lifecycle::write_living_md(&project, &content);
         crate::events::post(&inbox, crate::events::LoopEvent::LifeDocs { project: project.clone(), repo_docs, acceptance });
+        crate::events::post(&inbox, crate::events::LoopEvent::LivingWrite { project, outcome });
     });
 }
 

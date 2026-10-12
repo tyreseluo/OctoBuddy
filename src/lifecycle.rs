@@ -887,7 +887,14 @@ fn project_path_for(_s: &Session) -> &'static str { "." }
 /// Build LIVING.md: a markdown story of the project so far. Returns the
 /// full document text; the caller decides whether to write it (compare
 /// with the existing file before overwriting).
-pub fn build_living(project_name: &str, slices: &SliceMachine, rounds: &RoundMachine, docs: &DocStream) -> String {
+pub fn build_living(
+    project_name: &str,
+    slices: &SliceMachine,
+    rounds: &RoundMachine,
+    docs: &DocStream,
+    repo_docs: &BTreeMap<String, Vec<RepoDocVersion>>,
+    acceptance: &[AcceptanceItem],
+) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {} · LIVING\n\n", project_name));
     out.push_str("_Auto-written from the conversations and the commits. Re-generated when a slice is accepted, an acceptance sheet is confirmed, or the doc stream opens._\n\n");
@@ -950,6 +957,28 @@ pub fn build_living(project_name: &str, slices: &SliceMachine, rounds: &RoundMac
             } else if r.current == RoundState::AllAccepted {
                 out.push_str(&format!("- Round {} is accepted but the sheet is not yet written\n", r.round));
             }
+        }
+        out.push('\n');
+    }
+
+    if !repo_docs.is_empty() {
+        out.push_str("## Repo documents\n\n");
+        for (path, versions) in repo_docs {
+            let last = versions.last().map(|v| v.version).unwrap_or(0);
+            out.push_str(&format!("- `{}` (v{})\n", path, last));
+            for v in versions {
+                let status = match v.status { 'A' => "new", 'M' => "modified", 'D' => "deleted", _ => "touched" };
+                out.push_str(&format!("  - v{} {} by `{}` ({})\n", v.version, status, v.slug, &v.commit[..7.min(v.commit.len())]));
+            }
+        }
+        out.push('\n');
+    }
+
+    if !acceptance.is_empty() {
+        out.push_str("## Acceptance sheets\n\n");
+        for a in acceptance {
+            let status = match a.status { Some(true) => "confirmed", Some(false) => "prepared", None => "no receipt" };
+            out.push_str(&format!("- Round {} ({})\n", a.round, status));
         }
         out.push('\n');
     }
@@ -1400,8 +1429,8 @@ mod tests {
         let stream = build_doc_stream(&sessions, &BTreeMap::new());
         let sm = build_slice_machine(sessions[0]);
         let rm = build_round_machine(sessions[0]);
-        let md1 = build_living("demo", &sm, &rm, &stream);
-        let md2 = build_living("demo", &sm, &rm, &stream);
+        let md1 = build_living("demo", &sm, &rm, &stream, &Default::default(), &[]);
+        let md2 = build_living("demo", &sm, &rm, &stream, &Default::default(), &[]);
         assert_eq!(md1, md2, "re-building with the same data gives the same string");
         assert!(md1.contains("Round 1"));
         assert!(md1.contains("calc"));

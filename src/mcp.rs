@@ -357,7 +357,7 @@ impl OctoBuddyView {
                     }))
                     .collect();
                 let living = crate::lifecycle::living_path(&project_path);
-                let living_md = crate::lifecycle::build_living(&project_name, &slices, &rounds, &stream);
+                let living_md = crate::lifecycle::build_living(&project_name, &slices, &rounds, &stream, &Default::default(), &[]);
                 // Drop the body for the listing: keep it small. The agent can
                 // read LIVING.md if it wants the full story.
                 let _ = &mut entries;
