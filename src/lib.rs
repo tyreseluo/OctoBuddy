@@ -48,6 +48,7 @@ pub mod system;
 pub mod timeline;
 mod time_view;
 pub mod lifecycle;
+mod lifecycle_view;
 pub mod estimate;
 mod plan_panel;
 mod claude_proxy;
@@ -83,6 +84,7 @@ mod liveness;
 mod e2e_tests;
 use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
+use lifecycle_view::LifecycleCanvasWidgetRefExt;
 use model::{now_secs, Peer, SessionRef, Store};
 use orchestrate::Runtime;
 use plugins::card_loop::Loops as CardLoops;
@@ -1048,9 +1050,17 @@ script_mod! {
         Path{d: "M3 7h9M3 12h14M3 17h6" fill: false stroke: th_muted_strong stroke_width: 1.8 stroke_linecap: "round"}
         Path{d: "M20 4v16" fill: false stroke: th_danger stroke_width: 1.6 stroke_linecap: "round"}
     }
+    let LifeIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+        // A small node graph: a row of circles joined by curves, with a side exit.
+        Circle{cx: 4 cy: 12 r: 1.8 fill: true}
+        Circle{cx: 12 cy: 12 r: 1.8 fill: true}
+        Circle{cx: 20 cy: 12 r: 1.8 fill: true}
+        Path{d: "M5.5 12 L 10.5 12 M 13.5 12 L 18.5 12 M 20 13.5 Q 20 18 14 18 L 10 18 M 9 18 L 4 18 L 4 13.5" fill: false stroke: th_muted_strong stroke_width: 1.2 stroke_linecap: "round"}
+    }
     let FloatFlow = FloatSquare{icon := FlowIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatChat = FloatSquare{icon := ChatIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatTime = FloatSquare{icon := TimeIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
+    let FloatLife = FloatSquare{icon := LifeIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let TermIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
         Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM7 10l3 2-3 2M12 15h5" fill: false stroke: th_ink stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
     }
@@ -1164,6 +1174,13 @@ script_mod! {
         draw_text +: {text_style: theme.font_regular{font_size: 8}}
     }
     let TimelineCanvas = mod.widgets.TimelineCanvas
+    mod.widgets.LifecycleCanvasBase = #(lifecycle_view::LifecycleCanvas::register_widget(vm))
+    mod.widgets.LifecycleCanvas = set_type_default() do mod.widgets.LifecycleCanvasBase{
+        width: Fill height: Fill
+        draw_bg +: {color: th_raised}
+        draw_text +: {text_style: theme.font_regular{font_size: 8}}
+    }
+    let LifecycleCanvas = mod.widgets.LifecycleCanvas
 
     mod.widgets.OctoBuddyViewBase = #(OctoBuddyView::register_widget(vm))
     mod.widgets.OctoBuddyView = set_type_default() do mod.widgets.OctoBuddyViewBase{
@@ -1504,6 +1521,26 @@ script_mod! {
                                 }
                             }
                         }
+                        // The lifecycle view: the slice state machine and the
+                        // doc stream, side by side. The header shows the round
+                        // state machine summary.
+                        life_view := View{
+                            width: Fill height: Fill flow: Down spacing: 8 visible: false
+                            padding: Inset{left: 16 right: 16 top: 50 bottom: 14}
+                            View{
+                                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                                life_tab_sm := SegOff{text: "State machine" height: 22}
+                                life_tab_docs := SegOff{text: "Docs" height: 22}
+                                Filler{}
+                                life_round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 9}}
+                            }
+                            RoundedView{
+                                width: Fill height: Fill new_batch: true padding: 1
+                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                life_sm := LifecycleCanvas{}
+                            }
+                            life_legend := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
+                        }
                         // The views at the left (they change what the stage shows);
                         // at the right, the outer and inner loops, the app.
                         SolidView{
@@ -1521,6 +1558,8 @@ script_mod! {
                                 view_flow_on := FloatFlow{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 view_time := FloatTime{}
                                 view_time_on := FloatTime{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
+                                view_life := FloatLife{}
+                                view_life_on := FloatLife{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 // The native TUI plugin: the outer loop's own CLI.
                                 view_tui := FloatTui{visible: false}
                                 view_tui_on := FloatTui{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
@@ -2486,6 +2525,8 @@ enum Stage {
     Chat,
     Flow,
     Time,
+    /// The lifecycle view: state machine + doc stream.
+    Life,
     /// The outer loop's own terminal UI (the native TUI plugin).
     Tui,
 }
@@ -3097,7 +3138,7 @@ impl OctoBuddyView {
     fn fit_pills(&mut self, cx: &mut Cx) {
         let width = self.view.view(cx, ids!(chat)).area().rect(cx).size.x;
         let compact = width > 0.0 && width < 860.0;
-        let views = [live_id!(view_chat), live_id!(view_chat_on), live_id!(view_flow), live_id!(view_flow_on), live_id!(view_time), live_id!(view_time_on), live_id!(view_tui), live_id!(view_tui_on)];
+        let views = [live_id!(view_chat), live_id!(view_chat_on), live_id!(view_flow), live_id!(view_flow_on), live_id!(view_time), live_id!(view_time_on), live_id!(view_life), live_id!(view_life_on), live_id!(view_tui), live_id!(view_tui_on)];
         for id in views {
             self.view.label(cx, &[id, live_id!(name)]).set_visible(cx, !compact);
         }
@@ -3812,16 +3853,23 @@ impl OctoBuddyView {
         let shown = at.is_some() && self.page == Page::Chat && !plain;
         let flow = self.stage == Stage::Flow && shown;
         let time = self.stage == Stage::Time && shown;
+        let life = self.stage == Stage::Life && shown;
         // The terminal stands in for the conversation, in a plain chat too.
         let tui = self.stage == Stage::Tui && at.is_some() && self.page == Page::Chat && self.tui.is_some();
-        self.view.view(cx, ids!(chat_pane)).set_visible(cx, !flow && !time && !tui);
-        self.view.view(cx, ids!(composer_area)).set_visible(cx, !flow && !time && !tui);
+        self.view.view(cx, ids!(chat_pane)).set_visible(cx, !flow && !time && !tui && !life);
+        self.view.view(cx, ids!(composer_area)).set_visible(cx, !flow && !time && !tui && !life);
         self.view.view(cx, ids!(flow_view)).set_visible(cx, flow);
         self.view.view(cx, ids!(time_view)).set_visible(cx, time);
-        self.view.view(cx, ids!(worktree_bar)).set_visible(cx, !flow && !time && !tui && self.view.view(cx, ids!(worktree_bar)).visible());
+        self.view.view(cx, ids!(life_view)).set_visible(cx, life);
+        self.view.view(cx, ids!(worktree_bar)).set_visible(cx, !flow && !time && !tui && !life && self.view.view(cx, ids!(worktree_bar)).visible());
         // The view switcher: the one in use, marked.
         let current = if plain { Stage::Chat } else { self.stage };
-        for (stage, off, on) in [(Stage::Chat, ids!(view_chat), ids!(view_chat_on)), (Stage::Flow, ids!(view_flow), ids!(view_flow_on)), (Stage::Time, ids!(view_time), ids!(view_time_on))] {
+        for (stage, off, on) in [
+            (Stage::Chat, ids!(view_chat), ids!(view_chat_on)),
+            (Stage::Flow, ids!(view_flow), ids!(view_flow_on)),
+            (Stage::Time, ids!(view_time), ids!(view_time_on)),
+            (Stage::Life, ids!(view_life), ids!(view_life_on)),
+        ] {
             self.view.view(cx, off).set_visible(cx, !plain && current != stage);
             self.view.view(cx, on).set_visible(cx, !plain && current == stage);
         }
@@ -3829,6 +3877,8 @@ impl OctoBuddyView {
         for (id, name, sub) in [
             (ids!(view_time), i18n::t("Timeline", "时间轴"), ""),
             (ids!(view_time_on), i18n::t("Timeline", "时间轴"), ""),
+            (ids!(view_life), i18n::t("Lifecycle", "生命周期"), ""),
+            (ids!(view_life_on), i18n::t("Lifecycle", "生命周期"), ""),
             (ids!(view_flow_on), i18n::t("Flow", "流程图"), ""),
             (ids!(view_chat_on), i18n::t("Chat", "对话"), ""),
         ] {
@@ -4782,6 +4832,10 @@ impl OctoBuddyView {
         }
         if tapped(&self.view.view(cx, ids!(view_time)), actions) {
             self.stage = Stage::Time;
+            self.relayout(cx);
+        }
+        if tapped(&self.view.view(cx, ids!(view_life)), actions) {
+            self.stage = Stage::Life;
             self.relayout(cx);
         }
         self.handle_time_actions(cx, actions);
