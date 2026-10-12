@@ -254,6 +254,18 @@ fn rig(timeout: Duration, max_cost: f64) -> Rig {
     if saved_providers.is_none() {
         std::env::set_var("OCTOBUDDY_PROVIDERS", real_data.join("providers"));
     }
+    let read = providers::read();
+    // Read before OCTOBUDDY_HOME moves, and put the providers variable back
+    // when they cannot be read: a panic here must not strand the process's
+    // environment for the other tests.
+    if read.error.is_some() || read.rows.is_empty() {
+        match &saved_providers {
+            Some(v) => std::env::set_var("OCTOBUDDY_PROVIDERS", v),
+            None => std::env::remove_var("OCTOBUDDY_PROVIDERS"),
+        }
+        assert!(read.error.is_none(), "the AI providers could not be read: {:?}", read.error);
+        panic!("no AI providers are configured (Settings › AI Providers)");
+    }
     std::env::set_var("OCTOBUDDY_HOME", &home);
     // The agents OctoBuddy already keeps (pi's pinned npm install): theirs,
     // not downloaded again into the scratch.
@@ -264,9 +276,6 @@ fn rig(timeout: Duration, max_cost: f64) -> Rig {
             let _ = std::os::unix::fs::symlink(&agents, home.join("agents"));
         }
     }
-    let read = providers::read();
-    assert!(read.error.is_none(), "the AI providers could not be read: {:?}", read.error);
-    assert!(!read.rows.is_empty(), "no AI providers are configured (Settings › AI Providers)");
     Rig {
         root,
         primary: read.primary().map(|r| r.label.clone()),
@@ -511,7 +520,7 @@ fn one_run(rig: &mut Rig, combo: &Combo, task: &Task, rep: u32) -> Run {
         }
     };
     run.label = label.clone();
-    let peer = format!("bench-{}-{}-r{rep}", task.slug, combo.agent);
+    let peer = format!("bench-{}-{}-{}-r{rep}", task.slug, combo.agent, combo.model.chars().map(|c| if c.is_alphanumeric() || matches!(c, '-' | '.' | '_') { c } else { '-' }).collect::<String>());
     let project = rig.root.join(&peer);
     let base = init_repo(&project, task);
     let cwd = project.to_string_lossy().into_owned();
@@ -698,7 +707,7 @@ fn markdown(meta: &Meta, runs: &[Run]) -> String {
         let mut seen = std::collections::BTreeSet::new();
         for r in skipped {
             if seen.insert((r.agent.clone(), r.model.clone())) {
-                out.push_str(&format!("| {}:{} | {} |\n", r.agent, r.model, r.note.as_deref().unwrap_or("?")));
+                out.push_str(&format!("| {}:{} | {} |\n", r.agent, r.model, cell(r.note.as_deref().unwrap_or("?"), 200)));
             }
         }
         out.push('\n');
@@ -730,8 +739,8 @@ fn markdown(meta: &Meta, runs: &[Run]) -> String {
                 None => "—".into(),
             };
             let marks = format!("{}/{}/{}", r.holds, r.contradicted, r.unverifiable);
-            let refused = r.accept_refused.as_ref().map(|w| w.chars().take(80).collect::<String>()).unwrap_or_else(|| "—".into());
-            let commit = r.commit.as_deref().unwrap_or("—");
+            let refused = r.accept_refused.as_deref().map(|w| cell(w, 80)).unwrap_or_else(|| "—".into());
+            let commit = r.commit.as_deref().map(|c| cell(c, 120)).unwrap_or_else(|| "—".into());
             let cost = r.cost.map(|c| format!("${c:.3}")).unwrap_or_else(|| "—".into());
             let note = r.note.as_deref().map(|n| cell(n, 100)).unwrap_or_else(|| "—".into());
             out.push_str(&format!("| {} · {} | {} | {} | {} | {} | {} | {} | {:.0}s | {} | {} |\n",
@@ -874,7 +883,13 @@ mod tests {
 
     #[test]
     fn the_fixtures_parse_into_tasks() {
+        // The fixtures are all of them, whatever OCTOBUDDY_BENCH_TASKS says.
+        let saved = std::env::var_os("OCTOBUDDY_BENCH_TASKS");
+        std::env::remove_var("OCTOBUDDY_BENCH_TASKS");
         let tasks = tasks();
+        if let Some(v) = saved {
+            std::env::set_var("OCTOBUDDY_BENCH_TASKS", v);
+        }
         assert!(tasks.len() >= 3, "{tasks:?}");
         let clamp = tasks.iter().find(|t| t.slug == "bounds-clamp").unwrap();
         assert!(clamp.brief.contains("## Done when") && clamp.brief.contains("ValueError"));
