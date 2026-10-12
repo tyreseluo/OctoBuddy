@@ -3920,6 +3920,18 @@ impl OctoBuddyView {
             i18n::t("no scan yet", "尚未扫描").to_string()
         };
         self.view.label(cx, ids!(disk_meta)).set_text(cx, &meta);
+        // The canvas holds the tree it was last given: a scan passes once,
+        // when it arrives (handing it over every pass would re-clone the
+        // tree and reset the directory the person drilled into). The crumbs
+        // go with it — the canvas starts the new tree at its root.
+        if !self.disk_canvas_fed {
+            let scan = self.disk_scan.as_ref().map(|b| (**b).clone());
+            if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
+                canvas.set_scan(cx, scan);
+            }
+            self.disk_crumbs.clear();
+            self.disk_canvas_fed = true;
+        }
         // The picked tile: its path from the scan root, its size, its
         // category, and — when the picker flagged it — why it could be
         // reclaimed (the root itself when nothing is picked).
@@ -3940,18 +3952,6 @@ impl OctoBuddyView {
         self.view.button(cx, ids!(disk_ask)).set_visible(cx, can_ask);
         self.view.label(cx, ids!(disk_worth)).set_text(cx, &self.disk_worth);
         self.view.label(cx, ids!(disk_growth)).set_text(cx, &self.disk_growth_text);
-        // The canvas holds the tree it was last given: a scan passes once,
-        // when it arrives (handing it over every pass would re-clone the
-        // tree and reset the directory the person drilled into). The crumbs
-        // go with it — the canvas starts the new tree at its root.
-        if !self.disk_canvas_fed {
-            let scan = self.disk_scan.as_ref().map(|b| (**b).clone());
-            if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
-                canvas.set_scan(cx, scan);
-            }
-            self.disk_crumbs.clear();
-            self.disk_canvas_fed = true;
-        }
         // A scan starts when the panel is open with nothing to show, nothing
         // in flight and no failure to report: a failed scan is retried by
         // the rescan button, never on its own.
