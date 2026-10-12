@@ -61,14 +61,15 @@ fn defined_names(source: &str) -> Vec<String> {
     let mut at = 0;
     while let Some(hit) = source[at..].find(":=").map(|i| i + at) {
         let tail = source[..hit].trim_end();
-        let name: String = tail.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        let len = tail.chars().rev().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').count();
+        let name = &tail[tail.len() - len..];
         if !name.is_empty()
-            && !name.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && !name.starts_with(|c: char| c.is_ascii_digit())
             // The character before the name must not continue one (an id
             // never grows onto `.` or another letter's tail).
-            && tail[..tail.len() - name.len()].chars().next().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
+            && tail[..tail.len() - len].chars().next_back().is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
         {
-            names.push(name.chars().rev().collect());
+            names.push(name.to_string());
         }
         at = hit + 2;
     }
