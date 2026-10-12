@@ -449,10 +449,13 @@ impl Widget for LifecycleCanvas {
         match event.hits(cx, self.area) {
             Hit::FingerDown(fe) if fe.is_primary_hit() => {
                 if in_list(fe.abs) {
-                    // A slice row first.
+                    // A slice row: one click highlights its path through
+                    // the graph; a double click also opens its documents.
                     if let Some(hit) = self.hits.iter().find(|h| h.rect.contains(fe.abs)).cloned() {
                         self.picked = Some(hit.slug.clone());
-                        cx.widget_action(uid, LifeAction::Picked(hit.slug));
+                        if fe.tap_count >= 2 {
+                            cx.widget_action(uid, LifeAction::Picked(hit.slug));
+                        }
                         self.redraw(cx);
                     }
                     self.drag = None;
@@ -478,8 +481,8 @@ impl Widget for LifecycleCanvas {
             Hit::FingerScroll(fe) => {
                 if fe.modifiers.is_primary() || fe.modifiers.control {
                     // Ctrl/Cmd + wheel (a trackpad pinch arrives the same
-                    // way): zoom centred on the pointer.
-                    let factor = if fe.scroll.y > 0.0 { 1.1 } else if fe.scroll.y < 0.0 { 1.0 / 1.1 } else { 1.0 };
+                    // way): zoom centred on the pointer, as far as it turned.
+                    let factor = (fe.scroll.y * 0.005).exp();
                     if factor != 1.0 {
                         self.view = self.view.zoom_at(fe.abs - self.rect.pos, factor);
                         self.redraw(cx);
