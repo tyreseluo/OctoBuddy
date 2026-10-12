@@ -54,6 +54,41 @@ impl SliceState {
     pub fn is_terminal(self) -> bool {
         matches!(self, SliceState::Landed | SliceState::Discarded | SliceState::Failed | SliceState::Stopped | SliceState::OverBudget)
     }
+
+    /// The name to show a person, in the interface's language: spaced
+    /// English ("Sent back"), never the enum's CamelCase.
+    pub fn display(self) -> &'static str {
+        slice_display(self, crate::i18n::zh())
+    }
+}
+
+/// `SliceState::display` with the language passed in, so tests need not
+/// touch the thread's global one.
+pub(crate) fn slice_display(s: SliceState, zh: bool) -> &'static str {
+    match (s, zh) {
+        (SliceState::Waiting, false) => "Waiting",
+        (SliceState::Waiting, true) => "等前一波",
+        (SliceState::Running, false) => "Running",
+        (SliceState::Running, true) => "进行中",
+        (SliceState::Reported, false) => "Reported",
+        (SliceState::Reported, true) => "已报告",
+        (SliceState::Checked, false) => "Checked",
+        (SliceState::Checked, true) => "已检查",
+        (SliceState::Accepted, false) => "Accepted",
+        (SliceState::Accepted, true) => "已接受",
+        (SliceState::SentBack, false) => "Sent back",
+        (SliceState::SentBack, true) => "打回修改",
+        (SliceState::Landed, false) => "Landed",
+        (SliceState::Landed, true) => "已合入",
+        (SliceState::Discarded, false) => "Discarded",
+        (SliceState::Discarded, true) => "已丢弃",
+        (SliceState::Failed, false) => "Failed",
+        (SliceState::Failed, true) => "失败",
+        (SliceState::Stopped, false) => "Stopped",
+        (SliceState::Stopped, true) => "已停止",
+        (SliceState::OverBudget, false) => "Over budget",
+        (SliceState::OverBudget, true) => "超预算",
+    }
 }
 
 /// Where the round is.
@@ -83,6 +118,32 @@ impl RoundState {
 
     pub fn is_terminal(self) -> bool {
         matches!(self, RoundState::Confirmed | RoundState::Published)
+    }
+
+    /// The name to show a person, in the interface's language ("All
+    /// accepted", "全部接受"), never the enum's CamelCase.
+    pub fn display(self) -> &'static str {
+        round_display(self, crate::i18n::zh())
+    }
+}
+
+/// `RoundState::display` with the language passed in, for tests.
+pub(crate) fn round_display(r: RoundState, zh: bool) -> &'static str {
+    match (r, zh) {
+        (RoundState::Request, false) => "Request",
+        (RoundState::Request, true) => "需求",
+        (RoundState::Planned, false) => "Planned",
+        (RoundState::Planned, true) => "已规划",
+        (RoundState::WavesRunning, false) => "Waves running",
+        (RoundState::WavesRunning, true) => "各波进行中",
+        (RoundState::AllAccepted, false) => "All accepted",
+        (RoundState::AllAccepted, true) => "全部接受",
+        (RoundState::AcceptanceSheet, false) => "Acceptance sheet",
+        (RoundState::AcceptanceSheet, true) => "验收单",
+        (RoundState::Confirmed, false) => "Confirmed",
+        (RoundState::Confirmed, true) => "已确认",
+        (RoundState::Published, false) => "Published",
+        (RoundState::Published, true) => "已发布",
     }
 }
 
@@ -259,6 +320,36 @@ impl DocKind {
             DocKind::Acceptance => "Acceptance",
             DocKind::Receipt => "Receipt",
         }
+    }
+
+    /// The name to show a person, in the interface's language ("Repo doc",
+    /// "仓库文档").
+    pub fn display(self) -> &'static str {
+        doc_display(self, crate::i18n::zh())
+    }
+}
+
+/// `DocKind::display` with the language passed in, for tests.
+pub(crate) fn doc_display(k: DocKind, zh: bool) -> &'static str {
+    match (k, zh) {
+        (DocKind::Request, false) => "Request",
+        (DocKind::Request, true) => "需求",
+        (DocKind::Plan, false) => "Plan",
+        (DocKind::Plan, true) => "计划",
+        (DocKind::Spec, false) => "Spec",
+        (DocKind::Spec, true) => "任务书",
+        (DocKind::Report, false) => "Report",
+        (DocKind::Report, true) => "报告",
+        (DocKind::Gate, false) => "Gate",
+        (DocKind::Gate, true) => "检查",
+        (DocKind::Review, false) => "Review",
+        (DocKind::Review, true) => "评审",
+        (DocKind::RepoDoc, false) => "Repo doc",
+        (DocKind::RepoDoc, true) => "仓库文档",
+        (DocKind::Acceptance, false) => "Acceptance",
+        (DocKind::Acceptance, true) => "验收单",
+        (DocKind::Receipt, false) => "Receipt",
+        (DocKind::Receipt, true) => "凭证",
     }
 }
 
@@ -1226,6 +1317,55 @@ mod tests {
 
     fn exchange(from: &str, input: &str, reply: Option<&str>, outcome: Option<&str>, at: u64, took: Option<u64>) -> Exchange {
         Exchange { from: from.into(), input: input.into(), reply: reply.map(String::from), outcome: outcome.map(String::from), at, steps: None, took, cost_total: None, began: None }
+    }
+
+    #[test]
+    fn display_names_are_localized_and_spaced() {
+        // Slice states: Chinese words, spaced English.
+        assert_eq!(slice_display(SliceState::Waiting, false), "Waiting");
+        assert_eq!(slice_display(SliceState::Waiting, true), "等前一波");
+        assert_eq!(slice_display(SliceState::Running, true), "进行中");
+        assert_eq!(slice_display(SliceState::Reported, true), "已报告");
+        assert_eq!(slice_display(SliceState::Checked, true), "已检查");
+        assert_eq!(slice_display(SliceState::Accepted, true), "已接受");
+        assert_eq!(slice_display(SliceState::Landed, true), "已合入");
+        assert_eq!(slice_display(SliceState::SentBack, false), "Sent back");
+        assert_eq!(slice_display(SliceState::SentBack, true), "打回修改");
+        assert_eq!(slice_display(SliceState::Discarded, true), "已丢弃");
+        assert_eq!(slice_display(SliceState::Failed, true), "失败");
+        assert_eq!(slice_display(SliceState::Stopped, true), "已停止");
+        assert_eq!(slice_display(SliceState::OverBudget, false), "Over budget");
+        assert_eq!(slice_display(SliceState::OverBudget, true), "超预算");
+        // Round states.
+        assert_eq!(round_display(RoundState::Request, true), "需求");
+        assert_eq!(round_display(RoundState::Planned, true), "已规划");
+        assert_eq!(round_display(RoundState::WavesRunning, false), "Waves running");
+        assert_eq!(round_display(RoundState::WavesRunning, true), "各波进行中");
+        assert_eq!(round_display(RoundState::AllAccepted, false), "All accepted");
+        assert_eq!(round_display(RoundState::AllAccepted, true), "全部接受");
+        assert_eq!(round_display(RoundState::AcceptanceSheet, true), "验收单");
+        assert_eq!(round_display(RoundState::Confirmed, true), "已确认");
+        assert_eq!(round_display(RoundState::Published, true), "已发布");
+        // Doc kinds.
+        assert_eq!(doc_display(DocKind::Spec, true), "任务书");
+        assert_eq!(doc_display(DocKind::RepoDoc, false), "Repo doc");
+        assert_eq!(doc_display(DocKind::RepoDoc, true), "仓库文档");
+        // English never shows the enum's CamelCase name.
+        assert_ne!(slice_display(SliceState::SentBack, false), "SentBack");
+        assert_ne!(slice_display(SliceState::OverBudget, false), "OverBudget");
+        assert_ne!(round_display(RoundState::WavesRunning, false), "WavesRunning");
+        assert_ne!(round_display(RoundState::AllAccepted, false), "AllAccepted");
+        assert_ne!(round_display(RoundState::AcceptanceSheet, false), "AcceptanceSheet");
+        assert_ne!(doc_display(DocKind::RepoDoc, false), "RepoDoc");
+        // Every name is a real word in both languages (no empty slot left).
+        for zh in [false, true] {
+            for s in [SliceState::Waiting, SliceState::Running, SliceState::Reported, SliceState::Checked, SliceState::Accepted, SliceState::SentBack, SliceState::Landed, SliceState::Discarded, SliceState::Failed, SliceState::Stopped, SliceState::OverBudget] {
+                assert!(!slice_display(s, zh).is_empty());
+            }
+            for r in [RoundState::Request, RoundState::Planned, RoundState::WavesRunning, RoundState::AllAccepted, RoundState::AcceptanceSheet, RoundState::Confirmed, RoundState::Published] {
+                assert!(!round_display(r, zh).is_empty());
+            }
+        }
     }
 
     #[test]
