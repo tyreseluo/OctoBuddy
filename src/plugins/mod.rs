@@ -41,6 +41,8 @@ pub mod app_factory;
 pub mod app_preview;
 pub mod app_publish;
 pub mod card_loop;
+pub(crate) mod disk_map;
+pub(crate) mod disk_view;
 pub(crate) mod native_tui;
 pub mod new_app;
 pub mod review_watch;
@@ -65,6 +67,10 @@ pub const APP_DATA: &str = "app-data";
 pub const CARD_LOOP: &str = "card-loop";
 /// Apps asked for from outside (`octobuddy.request`), built once the person says.
 pub const APP_FACTORY: &str = "app-factory";
+/// A treemap of the project directory, snapshots over time, and three
+/// read-only agent tools (`octobuddy_disk_map`, `octobuddy_disk_growth`,
+/// `octobuddy_disk_reclaim`). Built on `disktree-core` (tobi/disktree).
+pub const DISK_MAP: &str = "disk-map";
 
 /// The plugins that only mean something inside OctoSense: the app factory
 /// (apps asked for by OctoSense's assistant) and the production loop (the
@@ -172,13 +178,27 @@ pub fn builtins() -> Vec<Plugin> {
             tools: Vec::new(), buttons: Vec::new(), external: None, broken: None,
         },
         Plugin {
-            id: CARD_LOOP.into(), name: tr("Production loop", "生产回路"), version,
+            id: CARD_LOOP.into(), name: tr("Production loop", "生产回路"), version: version.clone(),
             description: tr("Keeps watch over the version published to the local App Hub: runs it headless every few minutes on live data, records its health in .octobuddy/card-loop/health.jsonl, and says in the session when it breaks (it does not start, script errors, its key widgets gone, a failure shown) and when it is well again.",
                 "守护发布到本地 App Hub 的那个版本：每隔几分钟用实时数据 headless 运行一次，健康记录写在 .octobuddy/card-loop/health.jsonl；坏了（起不来、脚本报错、关键控件不见、显示失败提示）和恢复时都会在会话里说。"),
             // It watches what was published, with or without the publish slot on now.
             when_to_use: String::new(), applies_to: app, requires: vec![OCTOSENSE_APP.into()],
             tools: Vec::new(),
             buttons: vec![Button { id: "loop".into(), name: tr("Live", "巡检"), sub: tr("watch", "守护") }],
+            external: None, broken: None,
+        },
+        Plugin {
+            id: DISK_MAP.into(), name: tr("Disk map", "磁盘地图"), version,
+            description: tr("A treemap of the project directory (and OctoBuddy's worktree of it), snapshots over time, and three read-only agent tools (`octobuddy_disk_map`, `octobuddy_disk_growth`, `octobuddy_disk_reclaim`) so the outer and inner loops can ask what is taking up space, what changed since the last scan, and what could be reclaimed. Built on disktree-core (tobi/disktree); the panel can be opened from the Disk button over the conversation. The agent tools never delete anything — they point at what could be reclaimed, so the decision stays a person's.",
+                "项目目录（以及 OctoBuddy 给它开的 worktree）的 treemap、按时间的快照、再加三个只读的 agent 工具（octobuddy_disk_map / octobuddy_disk_growth / octobuddy_disk_reclaim），外环和内环都可以问「哪里占地方、这轮多出来多少、哪些可以清」。基于 disktree-core（tobi/disktree），打开磁盘面板点对话上方的「磁盘」按钮即可。agent 工具绝不删除任何东西——只指出可回收的空间，决定由人来做。"),
+            when_to_use: "When the project or its worktree seems to be using more disk than expected, or an agent needs to know what is taking space and what changed between rounds.".into(),
+            applies_to: Vec::new(), requires: Vec::new(),
+            tools: vec![
+                tool("octobuddy_disk_map", "Where the bytes are at <path> (default: the project root): the biggest children with their sizes, share, category and reclaim reason. Read-only."),
+                tool("octobuddy_disk_growth", "How the disk changed since the last snapshot: total delta, the biggest growths and shrinks, when that snapshot was taken and its commit."),
+                tool("octobuddy_disk_reclaim", "Worth-a-look candidates from the latest scan: paths, sizes, reasons, and the command that usually clears each. OctoBuddy does not delete anything — the person decides."),
+            ],
+            buttons: vec![Button { id: "disk".into(), name: tr("Disk", "磁盘"), sub: tr("map", "占比") }],
             external: None, broken: None,
         },
     ].into_iter().filter(|p| here(&p.id)).collect()

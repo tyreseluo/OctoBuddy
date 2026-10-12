@@ -47,6 +47,9 @@ pub enum LoopEvent {
     LeadToolEnd { session: String, id: String, ok: bool },
     /// A tool call made by one of the lead's subagents, inside its Agent call `parent`.
     LeadSubTool { session: String, parent: String, name: String, detail: String },
+    /// A disk scan finished (the disk map plugin's worker thread).
+    /// `result`: the new scan, or why not.
+    DiskScanned { project: String, kind: String, result: Result<crate::plugins::disk_map::Scan, String> },
     /// The model the lead's process runs.
     LeadInfo { session: String, model: String },
     /// One assistant message of the lead is complete (its text may be empty).

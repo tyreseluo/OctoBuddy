@@ -2019,6 +2019,7 @@ It works for you now: message it, review its work, or close it.)\n"));
                 let answer = self.mcp_call(&session, &name, &args);
                 let _ = reply.send(answer);
             }
+            LoopEvent::DiskScanned { project, kind, result } => self.disk_scan_done(&project, &kind, result),
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
             LoopEvent::ProvidersDone { job, result } => self.providers_done(job, result),
             LoopEvent::HubDone { project, step, result } => self.hub_done(&project, step, result),

@@ -38,10 +38,16 @@ octosense-app-peers = { git = "https://github.com/OctoSense-org/OctoSense.git", 
 octosense-app-policy = { git = "https://github.com/OctoSense-org/OctoSense-App-Hub", rev = "386359153ed6377b5f047bd9ed2767a6a2ac2bc7", features = ["splash"] }
 # The octos server's JSON-RPC frames: deep and version-dependent, read by field.
 serde_json = "1"
+# The disk map plugin's snapshot rows: parsed back from JSON lines.
+serde = { version = "1", features = ["derive"] }
 # The agents' programs OctoBuddy keeps: checked against their publishers'
 # digests (npm's sha512 integrity, GitHub's sha256).
 sha2 = "0.10"
 base64 = "0.22"
+# A scan + treemap + reclaim library: the disk map plugin uses its walk,
+# classify, layout and worth_a_look directly, so the panel and the agent
+# tools share one model of what is taking up the disk. MIT, pinned by rev.
+disktree-core = { git = "https://github.com/tobi/disktree", rev = "6c8d4ce6211bf135ff4e42890faebff1040e1846" }
 
 
 # Packaged as Robrix is (`cargo packager --release`): robius-packaging-commands

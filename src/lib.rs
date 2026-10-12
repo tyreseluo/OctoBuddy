@@ -1068,6 +1068,12 @@ script_mod! {
         Path{d: "M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4" fill: false stroke: th_muted_strong stroke_width: 1.7 stroke_linecap: "round" stroke_linejoin: "round"}
     }
     let FloatPlugin = FloatSquare{icon := PluginIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
+    // The disk map plugin's button over the conversation.
+    let DiskIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+        Path{d: "M3 7h7v10H3zM14 7h7v4h-7zM14 13h7v4h-7z" fill: true}
+        Path{d: "M3 7h7v10H3zM14 7h7v10h-7" fill: false stroke: th_purple stroke_width: 1.6 stroke_linejoin: "round"}
+    }
+    let FloatDisk = FloatSquare{icon := DiskIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
 
     // The flow canvas's cards: an outer loop, an inner loop (lit: the one
     // shown, or at work).
@@ -1163,6 +1169,13 @@ script_mod! {
         draw_text +: {text_style: theme.font_regular{font_size: 8}}
     }
     let TimelineCanvas = mod.widgets.TimelineCanvas
+    mod.widgets.DiskCanvasBase = #(plugins::disk_view::DiskCanvas::register_widget(vm))
+    mod.widgets.DiskCanvas = set_type_default() do mod.widgets.DiskCanvasBase{
+        width: Fill height: Fill
+        draw_bg +: {color: th_raised}
+        draw_text +: {text_style: theme.font_regular{font_size: 8}}
+    }
+    let DiskCanvas = mod.widgets.DiskCanvas
 
     mod.widgets.OctoBuddyViewBase = #(OctoBuddyView::register_widget(vm))
     mod.widgets.OctoBuddyView = set_type_default() do mod.widgets.OctoBuddyViewBase{
@@ -1536,6 +1549,8 @@ script_mod! {
                                 preview_btn := FloatApp{visible: false}
                                 preview_btn_on := FloatApp{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
                                 publish_btn := FloatPublish{visible: false}
+                                disk_btn := FloatDisk{visible: false}
+                                disk_btn_on := FloatDisk{visible: false draw_bg.color: th_success_bg draw_bg.border_color: th_success_line draw_bg.border_size: 1.0}
                                 plug_btn0 := FloatPlugin{visible: false}
                                 plug_btn1 := FloatPlugin{visible: false}
                                 plug_btn2 := FloatPlugin{visible: false}
@@ -1858,6 +1873,11 @@ script_mod! {
                             hub_status := Label{width: Fill text: "" margin: Inset{top: 6} draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
                         }
                     }
+
+                    // The disk map panel: the project's tree, the snapshot history,
+                    // and a button to ask the outer loop about the picked tile.
+                    disk_divider := View{width: Fit height: Fill visible: false disk_handle := ResizeHandle{}}
+                    disk_panel := View{width: 420 height: Fill flow: Right visible: false}
 
                     inner_divider := View{width: Fit height: Fill visible: false inner_handle := ResizeHandle{}}
                     inner_panel := SolidView{
@@ -2755,6 +2775,36 @@ pub struct OctoBuddyView {
     // The app project's app, in the preview panel.
     #[rust]
     show_preview: bool,
+    // The disk map panel: the project's tree, snapshots, and a path to ask about.
+    #[rust]
+    show_disk: bool,
+    #[rust]
+    disk_root_kind: u8,
+    #[rust]
+    disk_crumbs: Vec<u32>,
+    #[rust]
+    disk_project_path: Option<String>,
+    #[rust]
+    disk_total: u64,
+    #[rust]
+    disk_files: u64,
+    #[rust]
+    disk_scanned_at: Option<u64>,
+    #[rust]
+    disk_snapshot_count: u32,
+    #[rust]
+    disk_worth: String,
+    #[rust]
+    disk_growth_text: String,
+    #[rust]
+    disk_last_auto_at: u64,
+    #[rust]
+    disk_scanning: bool,
+    /// Boxed: the Widget derive's parser doesn't like `plugins::disk_map::Scan`
+    /// (a generic with a foreign crate), so the state holds a boxed pointer
+    /// instead and the widget reads via `as_ref`.
+    #[rust]
+    disk_scan: Option<Box<plugins::disk_map::Scan>>,
     #[rust]
     preview: Option<plugins::app_preview::Running>,
     // The project it runs, and its files' stamp then.
@@ -3050,6 +3100,19 @@ impl OctoBuddyView {
         self.view.view(cx, ids!(preview_panel)).set_visible(cx, show_preview);
         self.sync_workbench(cx, show_preview.then_some(project_path.as_str()));
         self.view.view(cx, ids!(preview_divider)).set_visible(cx, show_preview);
+        // The disk map panel: a project to scan, on, and the panel not hidden by another.
+        let has_project = selected.is_some() && !project_path.is_empty();
+        let has_disk = has_project && crate::plugins::enabled(crate::plugins::DISK_MAP);
+        self.view.view(cx, ids!(disk_btn)).set_visible(cx, has_disk && !self.show_disk);
+        self.view.view(cx, ids!(disk_btn_on)).set_visible(cx, has_disk && self.show_disk);
+        for id in [ids!(disk_btn), ids!(disk_btn_on)] {
+            self.view.label(cx, &[id[0], live_id!(name)]).set_text(cx, i18n::t("Disk", "磁盘"));
+            self.view.label(cx, &[id[0], live_id!(sub)]).set_text(cx, i18n::t("map", "占比"));
+        }
+        let show_disk = self.show_disk && has_disk && chat;
+        self.view.view(cx, ids!(disk_panel)).set_visible(cx, show_disk);
+        self.view.view(cx, ids!(disk_divider)).set_visible(cx, show_disk);
+        self.sync_disk(cx, has_project.then(|| project_path.clone()));
         let plain = selected.is_some_and(|at| self.store.is_plain(at));
         // At work on an engine that can be steered: how to steer it.
         let steerable = selected.and_then(|at| self.store.session(at)).is_some_and(|s| self.steerable(&s.id).is_ok());
@@ -3633,6 +3696,147 @@ impl OctoBuddyView {
     }
 
     /// Runs the shown app project's app in the preview panel when it is open
+    /// The disk map panel: its title, the root toggle, the rescan button,
+    /// and the scan started (off the UI thread) when the panel opens or
+    /// the root changes. Stops the work when the panel closes or the
+    /// plugin is switched off.
+    fn sync_disk(&mut self, cx: &mut Cx, project: Option<String>) {
+        self.view.label(cx, ids!(disk_title)).set_text(cx, i18n::t("Disk map", "磁盘地图"));
+        let worktrees = project.as_deref().map(plugins::disk_map::worktrees_root).unwrap_or_default();
+        let worktrees_exists = worktrees.exists();
+        let id = project.as_deref().unwrap_or("");
+        let project_id = std::path::Path::new(id).file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let has_worktrees = worktrees_exists && !project_id.is_empty();
+        self.view.button(cx, ids!(disk_root_worktrees)).set_visible(cx, has_worktrees);
+        self.view.button(cx, ids!(disk_root_worktrees_on)).set_visible(cx, has_worktrees);
+        // The toggle reflects the active root; one of two button variants is on.
+        let want_project = plugins::disk_map::Root::from_u8(self.disk_root_kind) == plugins::disk_map::Root::Project;
+        self.view.button(cx, ids!(disk_root_project)).set_visible(cx, has_worktrees && want_project);
+        self.view.button(cx, ids!(disk_root_project_on)).set_visible(cx, has_worktrees && !want_project);
+        self.view.button(cx, ids!(disk_root_worktrees)).set_visible(cx, has_worktrees && want_project);
+        self.view.button(cx, ids!(disk_root_worktrees_on)).set_visible(cx, has_worktrees && !want_project);
+        let meta = match (&self.disk_scan, self.disk_scanned_at) {
+            (Some(_), Some(at)) => {
+                let ago = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).saturating_sub(at);
+                let status_en = if self.disk_scanning { "rescanning…".to_string() } else { format!("{} snapshots", self.disk_snapshot_count) };
+                let status_zh = if self.disk_scanning { "重扫中…".to_string() } else { format!("{} 张快照", self.disk_snapshot_count) };
+                i18n::pick(
+                    format!("{} · {} files · scanned {}s ago · {}", plugins::disk_map::human_bytes(self.disk_total), self.disk_files, ago, status_en),
+                    format!("{} · {} 个文件 · {}秒前扫描 · {}", plugins::disk_map::human_bytes(self.disk_total), self.disk_files, ago, status_zh),
+                )
+            }
+            _ => i18n::t("no scan yet", "尚未扫描").to_string(),
+        };
+        self.view.label(cx, ids!(disk_meta)).set_text(cx, &meta);
+        let mut crumb_text = String::new();
+        if let Some(scan) = &self.disk_scan {
+            let mut node = &scan.tree;
+            crumb_text.push_str(node.name.as_ref());
+            for c in &self.disk_crumbs {
+                if let Some(next) = node.children.get(*c as usize) {
+                    crumb_text.push_str(&format!(" / {}", next.name));
+                    node = next;
+                }
+            }
+        }
+        self.view.label(cx, ids!(disk_crumbs)).set_text(cx, &crumb_text);
+        let can_back = !self.disk_crumbs.is_empty();
+        self.view.button(cx, ids!(disk_back)).set_visible(cx, can_back);
+        let can_ask = self.disk_scan.is_some() && !self.disk_crumbs.is_empty();
+        self.view.button(cx, ids!(disk_ask)).set_visible(cx, can_ask);
+        self.view.label(cx, ids!(disk_worth)).set_text(cx, &self.disk_worth);
+        self.view.label(cx, ids!(disk_growth)).set_text(cx, &self.disk_growth_text);
+        // Hand the latest scan to the canvas.
+        if let Some(scan) = &self.disk_scan {
+            if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
+                canvas.set_scan(cx, Some((**scan).clone()));
+            }
+        }
+        // Start a scan if the panel is open and we have nothing fresh.
+        if self.show_disk && self.disk_scan.is_none() && !self.disk_scanning {
+            if let Some(project) = project {
+                self.disk_scanning = true;
+                self.start_disk_scan(project, plugins::disk_map::Root::from_u8(self.disk_root_kind));
+            }
+        }
+    }
+
+    /// Begin a scan in a worker thread; the answer comes back as a [`DiskScanDone`]
+    /// LoopEvent (added below), so the UI is never blocked.
+    fn start_disk_scan(&mut self, project: String, kind: plugins::disk_map::Root) {
+        let project_id = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let root = plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, kind);
+        if !root.exists() {
+            self.disk_scanning = false;
+            return;
+        }
+        let inbox = self.rt.inbox.clone();
+        let lang = crate::i18n::lang();
+        std::thread::spawn(move || {
+            crate::i18n::set(lang);
+            let io_result = plugins::disk_map::scan_blocking(root.clone(), plugins::disk_map::default_options());
+            plugins::disk_map::remember_scan(&root, &io_result);
+            let result = io_result.map_err(|e| e.to_string());
+            crate::events::post(&inbox, crate::events::LoopEvent::DiskScanned { project, kind: kind.as_str().to_string(), result });
+        });
+    }
+
+    /// The "Ask the outer loop" button: put a short, ready-to-send message
+    /// in the composer about the picked tile (without sending it). The
+    /// person can edit and send when they want.
+    fn disk_ask_outer(&mut self, cx: &mut Cx) {
+        let Some(scan_box) = self.disk_scan.clone() else { return };
+        let scan: &plugins::disk_map::Scan = &scan_box;
+        let crumbs: Vec<usize> = self.disk_crumbs.iter().map(|c| *c as usize).collect();
+        let prompt = plugins::disk_map::ask_outer_about(scan, &crumbs);
+        if prompt.is_empty() {
+            return;
+        }
+        let composer = self.view.text_input(cx, ids!(composer));
+        composer.set_text(cx, &prompt);
+        self.relayout(cx);
+    }
+
+    /// A disk scan finished: store the result, populate the worth-a-look
+    /// text and the growth text, then redraw.
+    fn disk_scan_done(&mut self, project: &str, kind: &str, result: Result<plugins::disk_map::Scan, String>) {
+        self.disk_scanning = false;
+        let Ok(scan) = result else { return };
+        let kind_root = plugins::disk_map::Root::from_u8(self.disk_root_kind);
+        if Some(project) != self.disk_project_path.as_deref() || kind != kind_root.as_str() {
+            return;
+        }
+        self.disk_scan = Some(Box::new(scan.clone()));
+        self.disk_total = scan.total_bytes();
+        self.disk_files = scan.total_files();
+        self.disk_scanned_at = Some(scan.taken_at);
+        let now_secs = scan.taken_at;
+        let candidates = plugins::disk_map::worth_a_look(&scan, now_secs as i64, 8);
+        self.disk_worth = plugins::disk_map::render_reclaim(&scan, &candidates, 8);
+        let project_path = std::path::Path::new(project);
+        let snapshots = plugins::disk_map::read_snapshots(project_path);
+        let label = kind_root.as_str();
+        let last: Option<&plugins::disk_map::Snapshot> = snapshots.iter().rev().find(|s| s.root == label);
+        self.disk_snapshot_count = snapshots.iter().filter(|s| s.root == label).count() as u32;
+        // Auto-snapshot: at most once every 5 minutes (the panel scan also
+        // records one when it runs, so a busy project is still bounded).
+        let gap_ok = last.is_none_or(|s| now_secs.saturating_sub(s.at) >= 300);
+        if gap_ok {
+            let head = workspace::git(project, &["rev-parse", "--short", "HEAD"]).ok();
+            let snap = plugins::disk_map::make_snapshot(&scan, kind_root, head, None);
+            let _ = plugins::disk_map::append_snapshot(project_path, &snap);
+            self.disk_snapshot_count = self.disk_snapshot_count.saturating_add(1);
+        }
+        let last2 = plugins::disk_map::read_snapshots(project_path).into_iter().rev().find(|s| s.root == label);
+        self.disk_growth_text = match last2 {
+            Some(snap) => plugins::disk_map::render_growth(&scan, &snap, 5),
+            None => i18n::t("No snapshot yet — open the panel and rescan, or wait for an inner loop to commit.", "还没有快照——打开面板重新扫描，或者等 inner loop 提交一次。").to_string(),
+        };
+        self.disk_last_auto_at = now_secs;
+        // Wake the UI so the new scan shows; the next draw picks it up.
+        makepad_widgets::makepad_platform::thread::SignalToUI::set_ui_signal();
+    }
+
     /// and its files changed since it last started; stops it when the panel
     /// closes or the project is not an app.
     fn sync_preview(&mut self, cx: &mut Cx) {
@@ -4833,6 +5037,75 @@ impl OctoBuddyView {
         if self.view.button(cx, ids!(close_preview)).clicked(actions) {
             self.show_preview = false;
             self.relayout(cx);
+        }
+        if tapped(&self.view.view(cx, ids!(disk_btn)), actions) || tapped(&self.view.view(cx, ids!(disk_btn_on)), actions) {
+            self.show_disk = !self.show_disk;
+            self.show_inner &= !self.show_disk;
+            self.show_preview &= !self.show_disk;
+            if self.show_disk && self.disk_project_path.is_none() {
+                if let Some(at) = self.selected {
+                    self.disk_project_path = Some(self.store.projects[at.0].path.clone());
+                }
+            }
+            self.relayout(cx);
+        }
+        if self.view.button(cx, ids!(close_disk)).clicked(actions) {
+            self.show_disk = false;
+            self.relayout(cx);
+        }
+        if self.view.button(cx, ids!(disk_rescan)).clicked(actions) {
+            if let Some(project) = self.disk_project_path.clone() {
+                let kind = plugins::disk_map::Root::from_u8(self.disk_root_kind);
+                self.disk_scan = None;
+                self.disk_scanning = true;
+                self.start_disk_scan(project, kind);
+                self.relayout(cx);
+            }
+        }
+        if self.view.button(cx, ids!(disk_root_project)).clicked(actions) {
+            self.disk_root_kind = plugins::disk_map::Root::Project.to_u8();
+            self.disk_scan = None;
+            self.disk_scanning = true;
+            if let Some(project) = self.disk_project_path.clone() {
+                self.start_disk_scan(project, plugins::disk_map::Root::Project);
+            }
+            self.relayout(cx);
+        }
+        if self.view.button(cx, ids!(disk_root_worktrees)).clicked(actions) {
+            self.disk_root_kind = plugins::disk_map::Root::Worktrees.to_u8();
+            self.disk_scan = None;
+            self.disk_scanning = true;
+            if let Some(project) = self.disk_project_path.clone() {
+                self.start_disk_scan(project, plugins::disk_map::Root::Worktrees);
+            }
+            self.relayout(cx);
+        }
+        if self.view.button(cx, ids!(disk_back)).clicked(actions) {
+            if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
+                canvas.back(cx);
+            }
+            if !self.disk_crumbs.is_empty() {
+                self.disk_crumbs.pop();
+            }
+            self.relayout(cx);
+        }
+        if self.view.button(cx, ids!(disk_ask)).clicked(actions) {
+            self.disk_ask_outer(cx);
+        }
+        // The treemap tells us which tile is picked or drilled into.
+        for action in actions {
+            if let Some(item) = action.as_widget_action() {
+                if item.widget_uid == self.view.widget(cx, ids!(disk_canvas)).widget_uid() {
+                    if let Some(action) = item.action.downcast_ref::<plugins::disk_view::DiskAction>() {
+                        match action {
+                            plugins::disk_view::DiskAction::Picked { crumbs } | plugins::disk_view::DiskAction::Drilled { crumbs } => {
+                                self.disk_crumbs = crumbs.iter().map(|c| *c as u32).collect();
+                                self.relayout(cx);
+                            }
+                        }
+                    }
+                }
+            }
         }
         if self.view.button(cx, ids!(reload_preview)).clicked(actions) {
             self.preview_of = None;
