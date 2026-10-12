@@ -419,6 +419,22 @@ fn sheets_of(session: &str) -> Vec<Receipt> {
     receipts::all().into_iter().filter(|r| r.kind == Kind::Acceptance && parse_key(&r.inputs).is_some_and(|(s, _)| s == session)).collect()
 }
 
+/// What confirming a waiting sheet came to.
+pub(crate) enum ConfirmResult {
+    /// Its HEAD and its facts were still as it has them (the commit, short).
+    Confirmed(String),
+    /// The project moved: that sheet is stale, a new one was made.
+    Remade,
+}
+
+/// A waiting sheet's receipt confirmed (`by`: the person at the button, a
+/// coordinator's Matrix id from the hagency room): settled by its checks.
+pub(crate) fn confirmed(mut r: Receipt, by: &str, commit: &str, now: &Snapshot) -> Receipt {
+    r.by = by.into();
+    receipts::settle(&mut r, vec![Check::new("commit", Some(true), commit.to_string()), Check::new("content", Some(true), receipts::short(&now.content).to_string())], None);
+    r
+}
+
 impl OctoBuddyView {
     /// The facts of `round` in the session at `at`, for its sheet; its
     /// timeline's rework when `rework` (words, not facts: not digested).
@@ -501,6 +517,7 @@ impl OctoBuddyView {
         self.system(at, &i18n::pick(
             format!("Acceptance sheet for round {round}: {} slice(s); their reports' claims ✓ {} held, ✗ {} contradicted, ? {} not checked by OctoBuddy; {} accepted over OctoBuddy's findings; {rest}", c.slices, c.held, c.contradicted, c.unchecked, c.overrides),
             format!("第 {round} 轮的验收单：{} 个切片；汇报里的说法 ✓ {} 条成立、✗ {} 条与事实不符、? {} 条 OctoBuddy 没有核实；{} 个是外环不顾 OctoBuddy 的检查接受的；{rest}", c.slices, c.held, c.contradicted, c.unchecked, c.overrides)));
+        crate::hagency::tell(&project, &format!("sheet:{}:r{round}:{}", input.session, receipts::short(&sheet.digest)), &crate::hagency::sheet_message(round, &sheet.counts, &sheet.open));
     }
 
     /// The Confirm acceptance button: shown while the session's latest sheet waits.
@@ -521,22 +538,48 @@ impl OctoBuddyView {
     /// stale and a new one is made for the round as it is now.
     pub(crate) fn confirm_acceptance(&mut self, cx: &mut Cx) {
         let Some(at) = self.selected else { return };
-        let Some(id) = self.store.session(at).map(|s| s.id.clone()) else { return };
-        let Some(mut r) = self.sheet_of(&id).filter(|r| r.status == Status::Prepared) else { return };
-        let Some((_, round)) = parse_key(&r.inputs) else { return };
+        if self.confirm_sheet(at, "person").is_some() {
+            self.save();
+            self.sync(cx);
+        }
+    }
+
+    /// The waiting sheet of `at`'s session confirmed (`by`: "person" at the
+    /// button, a coordinator's Matrix id from the hagency room) when its
+    /// HEAD and its facts are still as it has them; else it is stale and a
+    /// new one is made for the round as it is now. Its round and what
+    /// happened, when a sheet waited.
+    fn confirm_sheet(&mut self, at: SessionRef, by: &str) -> Option<(u64, ConfirmResult)> {
+        let id = self.store.session(at)?.id.clone();
+        let mut r = self.sheet_of(&id).filter(|r| r.status == Status::Prepared)?;
+        let (_, round) = parse_key(&r.inputs)?;
         let head = self.sheet_head(at);
-        let Some(input) = self.sheet_input(at, round, head.clone(), false) else { return };
+        let input = self.sheet_input(at, round, head.clone(), false)?;
         let now = Snapshot { head: head.clone(), content: digest_of(&input), version: None };
         let file = path(&self.store.projects[at.0].path, &id, round);
         match decide(&r.snap, &now) {
             Decision::Confirm => {
                 let commit = head.as_deref().map(|h| receipts::short(h).to_string()).unwrap_or_else(|| "—".into());
-                r.by = "person".into();
-                receipts::settle(&mut r, vec![Check::new("commit", Some(true), commit.clone()), Check::new("content", Some(true), receipts::short(&now.content).to_string())], None);
-                self.system(at, &i18n::pick(format!("You accepted round {round} (sheet {}, {}): the project is still at {commit} and the round's facts are as the sheet has them.", receipts::short(&r.snap.content), file.display()),
-                    format!("你验收了第 {round} 轮（验收单 {}，{}）：项目仍在 {commit}，这一轮的事实与验收单一致。", receipts::short(&r.snap.content), file.display())));
-                self.rt.notes.entry(id.clone()).or_default().push(format!("the person accepted round {round} on its acceptance sheet ({})", file.display()));
+                r = confirmed(r, by, &commit, &now);
+                let said = if by == "person" {
+                    i18n::pick(format!("You accepted round {round} (sheet {}, {}): the project is still at {commit} and the round's facts are as the sheet has them.", receipts::short(&r.snap.content), file.display()),
+                        format!("你验收了第 {round} 轮（验收单 {}，{}）：项目仍在 {commit}，这一轮的事实与验收单一致。", receipts::short(&r.snap.content), file.display()))
+                } else {
+                    i18n::pick(format!("{by} accepted round {round} from the hagency room (sheet {}, {}): the project is still at {commit} and the round's facts are as the sheet has them.", receipts::short(&r.snap.content), file.display()),
+                        format!("{by} 在 hagency 房间验收了第 {round} 轮（验收单 {}，{}）：项目仍在 {commit}，这一轮的事实与验收单一致。", receipts::short(&r.snap.content), file.display()))
+                };
+                self.system(at, &said);
+                let note = if by == "person" {
+                    format!("the person accepted round {round} on its acceptance sheet ({})", file.display())
+                } else {
+                    format!("{by} accepted round {round} from the hagency room ({})", file.display())
+                };
+                self.rt.notes.entry(id.clone()).or_default().push(note);
+                if by == "person" {
+                    crate::hagency::tell(&self.store.projects[at.0].path, &format!("accepted:{id}:r{round}"), &crate::hagency::accepted_message(round, by, &commit));
+                }
                 self.sheets.insert(id, Some(r));
+                Some((round, ConfirmResult::Confirmed(commit)))
             }
             Decision::Remake(moved) => {
                 let _ = receipts::still(&r, &now);
@@ -544,10 +587,36 @@ impl OctoBuddyView {
                     format!("第 {round} 轮的验收单做好之后项目变了（{}）：它已过期，下面是新的一份。", moved.join("；"))));
                 self.sheets.remove(&id);
                 self.make_sheet(at, round);
+                Some((round, ConfirmResult::Remade))
             }
         }
+    }
+
+    /// A coordinator accepted round `round` in the project's hagency room:
+    /// the same confirm as the button, with the receipt's `by` their Matrix
+    /// id. What the room hears back.
+    pub(crate) fn accept_from_room(&mut self, project: &str, round: u64, by: &str) -> String {
+        let Some(pi) = self.store.projects.iter().position(|p| p.path == project) else {
+            return i18n::pick("This project is not open here.".into(), "这个项目没有在这里打开。".into());
+        };
+        let at = (0..self.store.projects[pi].sessions.len()).rev().map(|si| (pi, si)).find(|at| {
+            self.store.session(*at).is_some_and(|s| !s.is_detached() && !s.is_archived()
+                && self.sheet_of(&s.id).filter(|r| r.status == Status::Prepared).and_then(|r| parse_key(&r.inputs).map(|(_, n)| n)) == Some(round))
+        });
+        let Some(at) = at else {
+            return i18n::pick(format!("Round {round} has no acceptance sheet waiting (it may be accepted already, or its round has not settled yet)."),
+                format!("第 {round} 轮没有在等待确认的验收单（可能已经验收过，或这一轮还没有到齐）。"));
+        };
+        let result = self.confirm_sheet(at, by);
         self.save();
-        self.sync(cx);
+        match result {
+            Some((_, ConfirmResult::Confirmed(commit))) => crate::hagency::accepted_message(round, by, &commit),
+            Some((_, ConfirmResult::Remade)) => i18n::pick(
+                format!("The project changed since round {round}'s sheet, so it was out of date: a new sheet was made — read it, then accept round {round} again."),
+                format!("第 {round} 轮的验收单做好之后项目变了，它已过期：已出新的一份——看过后再回复「验收 第 {round} 轮」。")),
+            None => i18n::pick(format!("Round {round} has no acceptance sheet waiting (it may be accepted already, or its round has not settled yet)."),
+                format!("第 {round} 轮没有在等待确认的验收单（可能已经验收过，或这一轮还没有到齐）。")),
+        }
     }
 
     /// A session's sheet for OctoSense (`octobuddy.status`): none, or its

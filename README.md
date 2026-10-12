@@ -106,6 +106,28 @@ The agents propose and do the work; what counts as done is decided by what OctoB
   It shows on the inner tabs and cards, in the flow and for the outer loop. A silent loop turns the warning colour, and its session hears it once, with what to do (Interrupt & send, End or Stop). `octobuddy.status` gives each loop's state, whom it waits on, why and how long since it was heard, with `as_of`; a Live page watch that has not run for twice its pace is `stale`, not healthy.
 - **Verified in CI** (`cargo test --locked`, no network, no API keys): `a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` drives a stub inner loop that breaks the code yet reports "all tests pass" and a file it never touched: OctoBuddy's check fails, its commit is read back, both claims come out ✗, the report goes back with why, an accept without override is refused, one with an override passes, and the next wave waits until then. The receipts, the snapshots, the fences and the failure kinds have unit tests of their own (`receipts.rs`, `app_publish.rs`, `app_hub.rs`, `card_loop.rs`, `app_factory.rs`, `untrusted.rs`, `failure.rs`), as do the acceptance sheet (`acceptance.rs`; the e2e test also builds one from its overridden slice) and the loops' states (`liveness.rs`). The publish read-back also runs against this machine's local App Hub (`reads_back_a_published_app_from_the_local_hub`, ignored by default): on 2026-10-11, 小账本 (pocket-ledger) 0.1.3 at commit `5f58490` read back confirmed on all four checks (catalog, digest, content, commit), and its working copy, which holds an uncommitted manifest change, was told apart as not what is published ([its output](docs/evidence/receipts/live-readback-2026-10-11.txt)). What ran for real and what was a stub, the failures and refusals, and what is not verified yet are in [VERIFICATION.md](VERIFICATION.md).
 
+## Reporting to a hagency room
+
+A team that runs its agents in a [hagency](https://github.com/hagency-org/hagency-rs) project room (a Matrix room on a Palpo homeserver; people work there in Rinx) can have OctoBuddy report its moments there, and the room's coordinator can accept a round without leaving Rinx.
+
+- **Link a project** in `<data>/hagency.json` (not a secret):
+
+  ```json
+  { "projects": { "/path/to/project": {
+      "homeserver": "https://matrix.example.org",
+      "room": "!project:example.org",
+      "as": "@octobuddy:example.org",
+      "coordinators": ["@you:example.org"] } } }
+  ```
+
+  `as` is the Matrix user OctoBuddy posts as; `coordinators` is the allow-list whose replies count as the person's decisions.
+- **The access token is a secret**: `OCTOBUDDY_MATRIX_TOKEN` (for a demo), or — the way OctoBuddy keeps provider keys — the macOS keychain item `security add-generic-password -s octos -a "OCTOBUDDY_MATRIX_TOKEN::octobuddy" -w`. It is never logged and never on a child process's command line: curl gets it on its standard input (`src/hagency.rs`).
+- **What is posted**, each at most once ever (its dedupe key kept in `<data>/hagency-state.json`, so a restart never reposts): a round's acceptance sheet made (its slices, their claims ✓/✗/?, the overrides, what still needs you, and how to accept), a round accepted and by whom, a loop gone silent, a Live incident opened or closed, an App Hub review request, and a publish or submission receipt confirmed or mismatched. Posts are `m.text` with an HTML form for Rinx. Never code, keys or transcripts.
+- **Accepting from Rinx**: reply `accept round N` (or `验收 第 N 轮` / `确认验收 第 N 轮`) in the room. OctoBuddy reads the room every 15 seconds (`OCTOBUDDY_HAGENCY_EVERY`, at least 5). A coordinator's reply confirms the round exactly as the Confirm acceptance button does — it re-reads HEAD and the round's facts, and when the project moved a new sheet replaces the stale one — and the outcome is posted back. A command from anyone not on the allow-list is answered once with who can accept. Room text is never fed to an agent.
+- **Failures** (no token, offline, rate limited, an answer OctoBuddy could not read) are classified, said once in the session, retried with backoff, and stand in `octobuddy.status`'s per-project `hagency` field (room, last posted, last error).
+
+Verified so far against a tiny fake Matrix server on 127.0.0.1 (`src/hagency.rs`'s integration test): the posts, the dedupe, the coordinator's accept confirming the receipt with their Matrix id, and the confirmation posted back. A real Palpo homeserver has not been run with it yet; see [VERIFICATION.md](VERIFICATION.md).
+
 ## Building an OctoSense app
 
 One plugin, **OctoSense apps**, holds everything about an app project (a folder with `bundle/manifest.json`).
@@ -405,6 +427,8 @@ Run on its own, the divider beside the sidebar draws as a dark bar; inside OctoS
 | `OCTOBUDDY_TOOL_SILENT_SECS` | How long one step of a loop's own (a command, a build) counts as work, unheard, in seconds (default 900, at least 30) |
 | `OCTOBUDDY_REVIEW_EVERY` | How often a submission's App Hub issue is read for review, in seconds (default 300, at least 30) |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | Appends each Codex bridge call that failed (its status, request and answer; never the key) |
+| `OCTOBUDDY_MATRIX_TOKEN` | The access token OctoBuddy posts to a linked hagency (Matrix) room with (else the keychain item `OCTOBUDDY_MATRIX_TOKEN::octobuddy`) |
+| `OCTOBUDDY_HAGENCY_EVERY` | How often a linked hagency room is read for the coordinator's replies, in seconds (default 15, at least 5) |
 
 ## Not done yet
 

@@ -109,6 +109,28 @@ agent 提议、干活；算不算完成，由 OctoBuddy 自己运行、自己读
   这些显示在 inner 的标签和卡片上、流程图里和外环处。无动静的环变成警示色，会话里提醒一次，并写明可以怎么做（打断并发送、结束或停止）。`octobuddy.status` 给出每个环的状态、在等谁、原因、距上次有消息多久，以及 `as_of`；Live 页上超过两倍巡检间隔没有运行的应用标为 `stale`，不再当作健康。
 - **CI 里已验证**（`cargo test --locked`，不联网、没有 API key）：`a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` 用一个 stub 内环：它把代码改坏了，却汇报「所有测试通过」，还声称改了一个它根本没碰的文件。OctoBuddy 的检查失败，提交读回核对，两条声明都判 ✗，汇报带着原因退回，不带 override 的 accept 被拒，带 override 的通过，下一个 wave 在此之前一直等待。回执、快照、隔离块和失败分类各有单元测试（`receipts.rs`、`app_publish.rs`、`app_hub.rs`、`card_loop.rs`、`app_factory.rs`、`untrusted.rs`、`failure.rs`），验收单（`acceptance.rs`；e2e 测试也用被覆盖验收的切片生成了一张）和各环的状态（`liveness.rs`）也是。发布读回也能对本机真实的本地 App Hub 跑（`reads_back_a_published_app_from_the_local_hub`，默认忽略）：2026-10-11 对小账本（pocket-ledger）0.1.3、提交 `5f58490` 读回，四项核对（catalog、摘要、内容、提交）全部通过；它的工作副本里有一处未提交的 manifest 改动，被正确识别为「不是已发布的内容」（[输出](docs/evidence/receipts/live-readback-2026-10-11.txt)）。验证记录（含真实与合成运行的区分、失败矩阵、尚未验证的部分）见 [VERIFICATION.zh-CN.md](VERIFICATION.zh-CN.md)。
 
+## 向 hagency 房间汇报
+
+在 [hagency](https://github.com/hagency-org/hagency-rs) 项目房间（Palpo Matrix 服务器上的 Matrix 房间，大家在 Rinx 里协作）里跑 agent 的团队，可以让 OctoBuddy 把关键时刻汇报到房间里，协调人（coordinator）不用离开 Rinx 就能验收一轮。
+
+- **关联项目**：在 `<data>/hagency.json` 里配置（不是机密）：
+
+  ```json
+  { "projects": { "/path/to/project": {
+      "homeserver": "https://matrix.example.org",
+      "room": "!project:example.org",
+      "as": "@octobuddy:example.org",
+      "coordinators": ["@you:example.org"] } } }
+  ```
+
+  `as` 是 OctoBuddy 发言用的 Matrix 用户；`coordinators` 是白名单，只有他们的回复算本人的决定。
+- **访问令牌是机密**：`OCTOBUDDY_MATRIX_TOKEN`（演示用），或者像 OctoBuddy 保存 provider key 那样放进 macOS 钥匙串：`security add-generic-password -s octos -a "OCTOBUDDY_MATRIX_TOKEN::octobuddy" -w`。它永远不会写进日志，也永远不会出现在子进程的命令行里：curl 从标准输入读取它（`src/hagency.rs`）。
+- **汇报什么**，每件最多一次（去重键保存在 `<data>/hagency-state.json`，重启不会重发）：一轮验收单完成（切片、说法 ✓/✗/?、强行通过项、仍需你确认的事、如何验收）、一轮被验收及验收人、环无动静、Live 事故开始或结束、App Hub 审核请求、发布或提交回执确认或不符。消息是 `m.text`，带 HTML 版本供 Rinx 显示。绝不发送代码、密钥或对话记录。
+- **在 Rinx 里验收**：在房间回复 `accept round N`（或 `验收 第 N 轮` / `确认验收 第 N 轮`）。OctoBuddy 每 15 秒读一次房间（`OCTOBUDDY_HAGENCY_EVERY`，至少 5）。白名单协调人的回复与「确认验收」按钮等效——重读 HEAD 和这一轮的事实，项目变了就作废旧单、出新的一份——并把结果回帖到房间。不在白名单里的人发命令，只回复一次说明谁可以验收。房间里的文字永远不会喂给 agent。
+- **失败**（没有令牌、断网、限流、读不懂的回复）会按类归类，在会话里只说一次，退避重试，并留在 `octobuddy.status` 每个项目的 `hagency` 字段里（房间、最近一次汇报、最近的错误）。
+
+目前的验证是在 127.0.0.1 上的一个小型假 Matrix 服务器（`src/hagency.rs` 的集成测试）：发送、去重、协调人的 accept 以其 Matrix id 确认回执、以及确认结果回帖。还没有用真实的 Palpo 服务器跑过；见 [VERIFICATION.zh-CN.md](VERIFICATION.zh-CN.md)。
+
 ## 做 OctoSense 应用
 
 一个应用项目（带 `bundle/manifest.json` 的文件夹）的全部功能，都在 **OctoSense 应用**这一个插件里。
@@ -425,6 +447,8 @@ Cargo 不能用同一个仓库的另一个 revision 去 patch 一个 git 来源�
 | `OCTOBUDDY_TOOL_SILENT_SECS` | 环自己的一步（一条命令、一次构建）没有消息时最多算多久的工作，单位秒（默认 900，至少 30） |
 | `OCTOBUDDY_REVIEW_EVERY` | 多久读一次提交的 App Hub issue 来跟进审核意见，单位秒（默认 300，至少 30） |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | 追加记录 Codex 转换层每次失败的调用（状态、请求和响应，从不含 key） |
+| `OCTOBUDDY_MATRIX_TOKEN` | OctoBuddy 向关联的 hagency（Matrix）房间发言用的访问令牌（否则读钥匙串项 `OCTOBUDDY_MATRIX_TOKEN::octobuddy`） |
+| `OCTOBUDDY_HAGENCY_EVERY` | 多久读一次关联的 hagency 房间来收取协调人的回复，单位秒（默认 15，至少 5） |
 
 ## 尚未完成
 

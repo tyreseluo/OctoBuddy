@@ -1,0 +1,32 @@
+# hagency tests (a_room_is_posted_to_and_its_coordinator_accepts drives a fake Matrix server on 127.0.0.1) — 2026-10-12
+# OctoBuddy 3ba84c3 + feat/hagency working tree, macOS arm64
+warning: skipping duplicate package `bitflags v2.10.0 (https://github.com/OctoSense-org/makepad.git?rev=d653bc4493619ab979ccff165cf48c0c63b77d19#d653bc44)`:
+  /Users/tyreseluo/.cargo/git/checkouts/makepad-d00a25647c09e43e/d653bc4/libs/vulkan/bitflags/Cargo.toml
+in favor of /Users/tyreseluo/.cargo/git/checkouts/makepad-d00a25647c09e43e/d653bc4/libs/bitflags/Cargo.toml
+
+warning: skipping duplicate package `cfg-if v1.0.4 (https://github.com/OctoSense-org/makepad.git?rev=d653bc4493619ab979ccff165cf48c0c63b77d19#d653bc44)`:
+  /Users/tyreseluo/.cargo/git/checkouts/makepad-d00a25647c09e43e/d653bc4/libs/vulkan/cfg-if/Cargo.toml
+in favor of /Users/tyreseluo/.cargo/git/checkouts/makepad-d00a25647c09e43e/d653bc4/libs/cfg-if/Cargo.toml
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.36s
+     Running unittests src/lib.rs (/Users/tyreseluo/Projects/octos-projects/OctoBuddy/target/debug/deps/octosense_octobuddy-3e37b2ae075de1c3)
+
+running 9 tests
+test hagency::tests::a_failed_send_backs_off_then_is_given_up ... ok
+test hagency::tests::html_escapes_what_a_slice_name_may_carry ... ok
+test hagency::tests::only_a_coordinators_command_counts ... ok
+test hagency::tests::accept_commands_parse_in_both_languages ... ok
+test hagency::tests::a_message_for_an_unlinked_project_goes_nowhere ... ok
+test hagency::tests::a_config_folds_and_skips_what_is_incomplete ... ok
+test hagency::tests::messages_speak_the_persons_language ... ok
+test hagency::tests::a_key_is_posted_at_most_once ... ok
+test hagency::tests::a_room_is_posted_to_and_its_coordinator_accepts ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 223 filtered out; finished in 0.11s
+
+     Running unittests src/main.rs (/Users/tyreseluo/Projects/octos-projects/OctoBuddy/target/debug/deps/octosense_octobuddy-bfdf22421a57fba6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -36,6 +36,9 @@ pub enum LoopEvent {
     ReviewChecked { me: Option<String>, results: Vec<crate::plugins::review_watch::Checked> },
     /// The bad-release drill published its version (and the function it broke), or why not.
     CardLoopDrilled { project: String, result: Result<(String, String), String> },
+    /// A hagency pass came back: failures to say once, the rooms' new
+    /// messages (`hagency`).
+    HagencyDone(crate::hagency::Outcome),
     /// The production loop ran a published app (`card_loop::probe`).
     CardLoopProbed { project: String, result: Result<crate::plugins::card_loop::Probe, String> },
     /// An external plugin's button ran: what it said, for the session.

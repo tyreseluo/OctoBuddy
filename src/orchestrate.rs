@@ -706,6 +706,7 @@ impl OctoBuddyView {
             .map(|p| json!({
                 "name": p.name,
                 "path": p.path,
+                "hagency": crate::hagency::status(&p.path),
                 "sessions": p.sessions.iter().map(|s| {
                     let outer = self.lead_status.get(&s.id).cloned().unwrap_or_else(|| "idle".into());
                     let waiting = self.rt.outer_queue.get(&s.id).map(|q| q.len()).unwrap_or(0);
@@ -2043,6 +2044,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),
             LoopEvent::FactoryReady { id, result } => self.factory_ready(id, result),
             LoopEvent::ReviewChecked { me, results } => self.review_checked(me, results),
+            LoopEvent::HagencyDone(outcome) => self.hagency_done(outcome),
             LoopEvent::CardLoopDrilled { project, result } => self.card_loop_drilled(&project, result),
             LoopEvent::PackReady { session, message, pack } => self.pack_ready(&session, message, pack),
             LoopEvent::PluginSaid { session, plugin, result } => self.plugin_said(&session, &plugin, result),

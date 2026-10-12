@@ -654,18 +654,23 @@ impl OctoBuddyView {
         let who = logins(&new).join(", ");
         let gist = gist(&new[new.len() - 1].body);
         log!("octobuddy: review of {} {} on {url} from {who}", w.app, w.version);
+        let hkey = format!("review:{url}:{}", new[new.len() - 1].id);
         if factory_here() {
             self.factory_add(r);
-            self.review_say(&w.project, &i18n::pick(
+            let text = i18n::pick(
                 format!("App Hub review: {who} commented on {url} — “{gist}”. A request to address it waits on the Apps page: Build opens a new session in this project with it; nothing runs until you press it."),
-                format!("App Hub 审核意见：{who} 在 {url} 留言——「{gist}」。处理它的请求在「应用」页等你：点「开始做」会在这个项目里开一个新会话；你点之前什么都不会运行。")));
+                format!("App Hub 审核意见：{who} 在 {url} 留言——「{gist}」。处理它的请求在「应用」页等你：点「开始做」会在这个项目里开一个新会话；你点之前什么都不会运行。"));
+            self.review_say(&w.project, &text);
+            crate::hagency::tell(&w.project, &hkey, &text);
             return None;
         }
         // On this computer there is no Apps page: a session of its own, its brief for the person to send.
         let title = i18n::pick(format!("Review: {} {}", w.app, w.version), format!("审核意见：{} {}", w.app, w.version));
-        self.review_say(&w.project, &i18n::pick(
+        let text = i18n::pick(
             format!("App Hub review: {who} commented on {url} — “{gist}”. Its brief waits in the new session “{title}”: open it, pick its models and send; nothing is sent until you do."),
-            format!("App Hub 审核意见：{who} 在 {url} 留言——「{gist}」。处理它的说明放在新会话「{title}」里：打开它，选好模型再发送；你发送之前什么都不会发出。")));
+            format!("App Hub 审核意见：{who} 在 {url} 留言——「{gist}」。处理它的说明放在新会话「{title}」里：打开它，选好模型再发送；你发送之前什么都不会发出。"));
+        self.review_say(&w.project, &text);
+        crate::hagency::tell(&w.project, &hkey, &text);
         let pi = self.store.projects.iter().position(|p| p.path == w.project)?;
         let at = self.store.add_session(pi)?;
         let session = self.store.session_mut(at)?;
