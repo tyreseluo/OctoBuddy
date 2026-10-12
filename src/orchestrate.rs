@@ -2015,30 +2015,6 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_plugin" => {
                 self.plugin_mcp_call(&session, &args, reply);
             }
-            LoopEvent::McpCall { session, name, args, reply } if matches!(name.as_str(), "octobuddy_app_probe" | "octobuddy_app_drive") && !session.starts_with("inner:") => {
-                let Some(dir) = self.store.find_session(&session).map(|at| self.store.projects[at.0].path.clone()) else {
-                    let _ = reply.send(Err("no such session".into()));
-                    return;
-                };
-                let source = args.get("source").and_then(|s| s.as_str()).unwrap_or("").to_string();
-                std::thread::spawn(move || {
-                    let answer = if !crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) {
-                        Err("this project is not an OctoSense app".into())
-                    } else if name == "octobuddy_app_drive" {
-                        crate::plugins::octosense_app::drive(&dir, args.get("steps").unwrap_or(&serde_json::Value::Null))
-                    } else {
-                        crate::plugins::octosense_app::probe(&dir, &source)
-                    };
-                    let _ = reply.send(answer);
-                });
-            }
-            LoopEvent::McpCall { session, name, args, reply } if session.starts_with("inner:") => {
-                let peer = session.trim_start_matches("inner:").to_string();
-                self.inner_mcp_call(&peer, &name, &args, reply);
-            }
-            LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_plugin" => {
-                self.plugin_mcp_call(&session, &args, reply);
-            }
             // The outer loop's disk tools (a scan is seconds, not ms): off
             // the UI thread, the way probe/drive are.
             LoopEvent::McpCall { session, name, args, reply } if name.starts_with("octobuddy_disk_") && !session.starts_with("inner:") => {
