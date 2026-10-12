@@ -5,7 +5,7 @@
 //!
 //! The model is what `lifecycle::build_slice_machine` derives from the
 //! store. The view does not write back.
-use crate::lifecycle::{DocItem, DocKind, SliceMachine, SliceState, TransitionKind};
+use crate::lifecycle::{SliceMachine, SliceState, TransitionKind};
 use crate::model::now_secs;
 use crate::{i18n, OctoBuddyView, Stage};
 use makepad_widgets::*;
@@ -156,6 +156,7 @@ fn transition_to_state(k: TransitionKind) -> Option<SliceState> {
 impl ScriptHook for LifecycleCanvas {}
 
 impl LifecycleCanvas {
+    #[allow(dead_code)]
     fn node_at(&self, s: SliceState) -> Option<NodePos> {
         nodes().into_iter().find(|n| n.state == s)
     }
@@ -206,6 +207,7 @@ impl LifecycleCanvas {
         }
     }
 
+    #[allow(dead_code)]
     fn label(&mut self, cx: &mut Cx2d, pos: DVec2, text: &str, size: f32, color: Vec4f) {
         self.draw_text.text_style.font_size = size;
         self.draw_text.color = color;
@@ -308,6 +310,7 @@ impl Widget for LifecycleCanvas {
             }
             // Arrowhead at the destination.
             let dir = (bx - pts[pts.len() - 2].0, by - pts[pts.len() - 2].1);
+            let _ = dir;
             self.draw_vector.set_color_hex(color, if lit { 1.0 } else { 0.45 });
             self.draw_vector.move_to(bx as f32, by as f32);
             self.draw_vector.line_to((bx - 6.0) as f32, (by - 4.0) as f32);
@@ -323,7 +326,7 @@ impl Widget for LifecycleCanvas {
         }
         // The SentBack loop: a curve above the row from Accepted back to Running.
         if let (Some(a), Some(b)) = (pos_of(SliceState::Accepted), pos_of(SliceState::Running)) {
-            let color = if picked_edges.contains(&(SliceState::Accepted, SliceState::Running)) { crate::theme::hex("warning") } else { crate::theme::hex("warning") };
+            let color = crate::theme::hex("warning");
             let ax = self.rect.pos.x + a.x + NODE_W * 0.5;
             let ay = self.rect.pos.y + a.y;
             let bx = self.rect.pos.x + b.x + NODE_W * 0.5;
@@ -347,7 +350,7 @@ impl Widget for LifecycleCanvas {
         }
 
         // Nodes on top.
-        let on_picked = |s: SliceState| picked.iter().any(|p| *p == s);
+        let on_picked = |s: SliceState| picked.contains(&s);
         for n in &pos_map {
             let r = self.node_rect(*n);
             let color = self.color_for(n.state);
@@ -433,6 +436,7 @@ impl LifecycleCanvasRef {
         }
     }
 
+    #[allow(dead_code)]
     pub fn picked(&self) -> Option<String> {
         self.borrow().and_then(|c| c.picked.clone())
     }
@@ -531,7 +535,7 @@ impl OctoBuddyView {
                 if let Some(body) = &d.body {
                     text.push_str(body);
                 } else if d.path.is_some() {
-                    text.push_str(&i18n::t("(use Open LIVING.md or pick a request/plan/report to read here)", "（使用「打开 LIVING.md」或选一条需求/计划/报告查看）").to_string());
+                    text.push_str(i18n::t("(use Open LIVING.md or pick a request/plan/report to read here)", "（使用「打开 LIVING.md」或选一条需求/计划/报告查看）"));
                 }
                 text
             })

@@ -84,7 +84,6 @@ mod liveness;
 mod e2e_tests;
 use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
-use lifecycle_view::LifecycleCanvasWidgetRefExt;
 use model::{now_secs, Peer, SessionRef, Store};
 use lifecycle::DocItem;
 use orchestrate::Runtime;
