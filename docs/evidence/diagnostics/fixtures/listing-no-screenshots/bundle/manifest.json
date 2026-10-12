@@ -1,0 +1,10 @@
+{
+  "capabilities": [],
+  "id": "dev.evidence.noshots",
+  "integrity": {
+    "bundle_blake3": "55c8f4ca4db86735dfbe04c57c80481867010da9b6e4d0c1d590a3d162f08eb7"
+  },
+  "name": "No Screenshots Evidence",
+  "schema": 1,
+  "version": "1.0.0"
+}
