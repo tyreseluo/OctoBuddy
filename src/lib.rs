@@ -80,6 +80,8 @@ mod liveness;
 
 #[cfg(test)]
 mod e2e_tests;
+#[cfg(test)]
+mod bench;
 use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};

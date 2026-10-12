@@ -1,0 +1,1 @@
+python3 -c 'import calc; assert calc.add(1, 2) == 3 and calc.add(-1, 1) == 0'
