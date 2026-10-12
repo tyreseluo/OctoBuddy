@@ -3888,6 +3888,9 @@ impl OctoBuddyView {
         if time {
             self.sync_time(cx);
         }
+        if life {
+            self.sync_life(cx);
+        }
         self.sync_flow_menu(cx, flow);
         self.view.view(cx, ids!(new_peer_btn)).set_visible(cx, flow);
         self.view.label(cx, ids!(new_peer_btn.name)).set_text(cx, i18n::t("+ Peer", "+ Peer"));
@@ -4839,6 +4842,7 @@ impl OctoBuddyView {
             self.relayout(cx);
         }
         self.handle_time_actions(cx, actions);
+        self.handle_life_actions(cx, actions);
         self.handle_plan_actions(cx, actions);
         self.handle_side_menu(cx, actions);
         if self.view.button(cx, ids!(confirm_cancel)).clicked(actions) {

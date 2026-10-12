@@ -5,8 +5,9 @@
 //!
 //! The model is what `lifecycle::build_slice_machine` derives from the
 //! store. The view does not write back.
-use crate::i18n;
 use crate::lifecycle::{SliceMachine, SliceState, TransitionKind};
+use crate::model::now_secs;
+use crate::{i18n, OctoBuddyView, Stage};
 use makepad_widgets::*;
 
 /// Where a node sits on the canvas. The layout is hand-picked: the happy
@@ -428,5 +429,41 @@ impl LifecycleCanvasRef {
         let uid = self.widget_uid();
         actions.iter().filter_map(|a| a.as_widget_action()).filter(|a| a.widget_uid == uid)
             .map(|a| a.cast::<LifeAction>()).filter(|a| !matches!(a, LifeAction::None)).collect()
+    }
+}
+
+impl OctoBuddyView {
+    /// Build the shown session slice machine and hand it to the canvas.
+    pub(crate) fn sync_life(&mut self, cx: &mut Cx) {
+        let Some(at) = self.selected.filter(|at| self.store.session(*at).is_some()) else { return };
+        let session = self.store.session(at).unwrap();
+        let machine = crate::lifecycle::build_slice_machine(session);
+        let rounds = crate::lifecycle::build_round_machine(session);
+        let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
+        canvas.set_slices(cx, machine);
+        // A summary of where each round is, for the legend.
+        let mut bits: Vec<String> = Vec::new();
+        for r in &rounds.rounds {
+            bits.push(i18n::pick(format!("round {} → {}", r.round, r.current.label()), format!("第 {} 轮 → {}", r.round, r.current.label())));
+        }
+        let summary = if bits.is_empty() { i18n::t("No rounds yet.", "还没有轮次。").to_string() } else { bits.join(" · ") };
+        self.view.label(cx, ids!(life_round)).set_text(cx, &summary);
+        self.view.label(cx, ids!(life_legend)).set_text(cx, i18n::t(
+            "Green: success - red: failed - orange: stopped - yellow: over budget - light: discarded. Back-curve: sent back. Click a slice to highlight its path. Counts: how many of each edge the session crossed.",
+            "Green: success - red: failed - orange: stopped - yellow: over budget - light: discarded. Back-curve: sent back. Click a slice to highlight its path. Counts: how many of each edge the session crossed."
+        ));
+        let _ = now_secs();
+    }
+
+    /// What the lifecycle view does on clicks (slice picked, docs tab).
+    pub(crate) fn handle_life_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        if self.stage != Stage::Life { return; }
+        let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
+        for a in canvas.actions(actions) {
+            match a {
+                LifeAction::Picked(slug) => { let _ = slug; }
+                LifeAction::None => {}
+            }
+        }
     }
 }
