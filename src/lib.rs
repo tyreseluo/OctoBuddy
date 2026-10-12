@@ -85,7 +85,10 @@ mod liveness;
 mod e2e_tests;
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod dsl_ids;
 use flow::FlowCanvasWidgetRefExt;
+use resize::{ResizeAction, ResizeHandleWidgetRefExt};
 use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};
 use lifecycle::DocItem;
@@ -1991,7 +1994,55 @@ script_mod! {
                     // The disk map panel: the project's tree, the snapshot history,
                     // and a button to ask the outer loop about the picked tile.
                     disk_divider := View{width: Fit height: Fill visible: false disk_handle := ResizeHandle{}}
-                    disk_panel := View{width: 420 height: Fill flow: Right visible: false}
+                    disk_panel := SolidView{
+                        width: 420 height: Fill flow: Down new_batch: true visible: false
+                        draw_bg.color: th_panel
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                            padding: Inset{left: 16 right: 10 top: 14 bottom: 4}
+                            disk_title := Label{text: "Disk map" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
+                            Filler{}
+                            disk_rescan := SegOff{text: "Rescan" height: 24}
+                            close_disk := SmallButton{text: "x"}
+                        }
+                        // Where a scan starts: the project, or the agents' worktrees.
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 4 padding: Inset{left: 16 right: 16 bottom: 8}
+                            disk_root_project := SegOff{text: "Project" height: 22 visible: false}
+                            disk_root_project_on := SegOn{text: "Project" height: 22}
+                            disk_root_worktrees := SegOff{text: "Worktrees" height: 22 visible: false}
+                            disk_root_worktrees_on := SegOn{text: "Worktrees" height: 22 visible: false}
+                        }
+                        View{
+                            width: Fill height: Fit padding: Inset{left: 16 right: 16 bottom: 8}
+                            disk_meta := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                        }
+                        // The treemap itself: the canvas draws the tiles, the frame
+                        // around it the border (the canvas's own back is clear).
+                        RoundedView{
+                            width: Fill height: Fill new_batch: true
+                            margin: Inset{left: 12 right: 12}
+                            draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                            disk_canvas := DiskCanvas{width: Fill height: Fill draw_bg +: {color: #x00000000}}
+                        }
+                        // The tile picked: up one level, where it is, ask about it.
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                            padding: Inset{left: 16 right: 16 top: 8 bottom: 6}
+                            disk_back := SegOff{text: "Up" height: 24}
+                            disk_crumbs := Label{width: Fill text: "" draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                            disk_ask := SegOff{text: "Ask the outer loop" height: 24}
+                        }
+                        // Below the map: what is worth a look, and what grew.
+                        ScrollYView{
+                            width: Fill height: 180 flow: Down spacing: 4
+                            padding: Inset{left: 16 right: 16 bottom: 12}
+                            disk_worth_l := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.text_style: theme.font_bold{font_size: 9}}
+                            disk_worth := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                            disk_growth_l := Label{width: Fill text: "" padding: 0 margin: Inset{top: 8} draw_text.color: muted draw_text.text_style: theme.font_bold{font_size: 9}}
+                            disk_growth := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                        }
+                    }
 
                     inner_divider := View{width: Fit height: Fill visible: false inner_handle := ResizeHandle{}}
                     inner_panel := SolidView{
@@ -2957,8 +3008,21 @@ pub struct OctoBuddyView {
     disk_growth_text: String,
     #[rust]
     disk_last_auto_at: u64,
+    /// The scan in flight, as (project path, root kind): results that come
+    /// home for anything else are dropped, and a second start for the same
+    /// pair waits for the one already walking. The pair is what the scan
+    /// event carries, so it compares without a generation counter.
     #[rust]
-    disk_scanning: bool,
+    disk_scan_target: Option<(String, String)>,
+    /// Why the last scan failed, shown in the panel until the person
+    /// rescans (a failure is never retried on its own: a project whose
+    /// folder went missing would loop otherwise).
+    #[rust]
+    disk_error: Option<String>,
+    /// The canvas has the scan the state holds (it is handed over once per
+    /// scan: every pass would re-clone the tree and reset the drill-down).
+    #[rust]
+    disk_canvas_fed: bool,
     /// Boxed: the Widget derive's parser doesn't like `plugins::disk_map::Scan`
     /// (a generic with a foreign crate), so the state holds a boxed pointer
     /// instead and the widget reads via `as_ref`.
@@ -3310,6 +3374,7 @@ impl OctoBuddyView {
         self.fit_pills(cx);
         // The panes shown now, fitted to the window.
         self.apply_panes(cx);
+        self.apply_disk_pane(cx);
         self.view.redraw(cx);
     }
 
@@ -3854,48 +3919,84 @@ impl OctoBuddyView {
         }
     }
 
-    /// Runs the shown app project's app in the preview panel when it is open
     /// The disk map panel: its title, the root toggle, the rescan button,
-    /// and the scan started (off the UI thread) when the panel opens or
-    /// the root changes. Stops the work when the panel closes or the
-    /// plugin is switched off.
+    /// and the scan state. The panel follows the selected session's project
+    /// (another project is another tree), and a scan runs on a worker
+    /// thread (`start_disk_scan`) when the panel opens, the project moves or
+    /// the root changes — never as a retry of a failed one.
     fn sync_disk(&mut self, cx: &mut Cx, project: Option<String>) {
+        // A different project while the panel is open: the old scan, its
+        // texts and the crumbs all go (a scan still walking for the old
+        // project is dropped whole when it comes home).
+        if self.show_disk && project.as_deref() != self.disk_project_path.as_deref() {
+            self.disk_project_path = project.clone();
+            self.reset_disk_scan();
+        }
         self.view.label(cx, ids!(disk_title)).set_text(cx, i18n::t("Disk map", "磁盘地图"));
         let worktrees = project.as_deref().map(plugins::disk_map::worktrees_root).unwrap_or_default();
         let worktrees_exists = worktrees.exists();
         let id = project.as_deref().unwrap_or("");
         let project_id = std::path::Path::new(id).file_name().and_then(|n| n.to_str()).unwrap_or("");
         let has_worktrees = worktrees_exists && !project_id.is_empty();
-        self.view.button(cx, ids!(disk_root_worktrees)).set_visible(cx, has_worktrees);
-        self.view.button(cx, ids!(disk_root_worktrees_on)).set_visible(cx, has_worktrees);
-        // The toggle reflects the active root; one of two button variants is on.
+        // The root toggle: the pill that is lit names the root scanned; a
+        // project without worktrees offers no choice, so no toggle at all.
         let want_project = plugins::disk_map::Root::from_u8(self.disk_root_kind) == plugins::disk_map::Root::Project;
-        self.view.button(cx, ids!(disk_root_project)).set_visible(cx, has_worktrees && want_project);
-        self.view.button(cx, ids!(disk_root_project_on)).set_visible(cx, has_worktrees && !want_project);
-        self.view.button(cx, ids!(disk_root_worktrees)).set_visible(cx, has_worktrees && want_project);
-        self.view.button(cx, ids!(disk_root_worktrees_on)).set_visible(cx, has_worktrees && !want_project);
-        let meta = match (&self.disk_scan, self.disk_scanned_at) {
-            (Some(_), Some(at)) => {
-                let ago = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).saturating_sub(at);
-                let status_en = if self.disk_scanning { "rescanning…".to_string() } else { format!("{} snapshots", self.disk_snapshot_count) };
-                let status_zh = if self.disk_scanning { "重扫中…".to_string() } else { format!("{} 张快照", self.disk_snapshot_count) };
-                i18n::pick(
-                    format!("{} · {} files · scanned {}s ago · {}", plugins::disk_map::human_bytes(self.disk_total), self.disk_files, ago, status_en),
-                    format!("{} · {} 个文件 · {}秒前扫描 · {}", plugins::disk_map::human_bytes(self.disk_total), self.disk_files, ago, status_zh),
-                )
-            }
-            _ => i18n::t("no scan yet", "尚未扫描").to_string(),
+        for (id, text, show) in [
+            (ids!(disk_root_project), i18n::t("Project", "项目"), has_worktrees && !want_project),
+            (ids!(disk_root_project_on), i18n::t("Project", "项目"), has_worktrees && want_project),
+            (ids!(disk_root_worktrees), i18n::t("Worktrees", "工作树"), has_worktrees && want_project),
+            (ids!(disk_root_worktrees_on), i18n::t("Worktrees", "工作树"), has_worktrees && !want_project),
+        ] {
+            let button = self.view.button(cx, id);
+            button.set_visible(cx, show);
+            button.set_text(cx, text);
+        }
+        self.view.button(cx, ids!(disk_rescan)).set_text(cx, i18n::t("Rescan", "重新扫描"));
+        self.view.button(cx, ids!(disk_back)).set_text(cx, i18n::t("Up", "上一级"));
+        self.view.button(cx, ids!(disk_ask)).set_text(cx, i18n::t("Ask the outer loop", "问外环"));
+        self.view.label(cx, ids!(disk_worth_l)).set_text(cx, i18n::t("Worth a look", "值得一看"));
+        self.view.label(cx, ids!(disk_growth_l)).set_text(cx, i18n::t("Growth", "增长"));
+        let meta = if let Some(err) = &self.disk_error {
+            i18n::pick(format!("Scan failed: {err}"), format!("扫描失败：{err}"))
+        } else if self.disk_scan_target.is_some() {
+            i18n::t("Scanning…", "正在扫描…").to_string()
+        } else if let (Some(scan), Some(at)) = (&self.disk_scan, self.disk_scanned_at) {
+            let ago = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0).saturating_sub(at);
+            let volume = scan.space.as_ref().map(|s| i18n::pick(
+                format!(" · {} free of {}", plugins::disk_map::human_bytes(s.available), plugins::disk_map::human_bytes(s.total)),
+                format!(" · 卷剩 {} / {}", plugins::disk_map::human_bytes(s.available), plugins::disk_map::human_bytes(s.total)),
+            )).unwrap_or_default();
+            i18n::pick(
+                format!("{} · {} files{volume} · scanned {}s ago · {} snapshots", plugins::disk_map::human_bytes(self.disk_total), self.disk_files, ago, self.disk_snapshot_count),
+                format!("{} · {} 个文件{volume} · {} 秒前扫描 · {} 张快照", plugins::disk_map::human_bytes(self.disk_total), self.disk_files, ago, self.disk_snapshot_count),
+            )
+        } else {
+            i18n::t("no scan yet", "尚未扫描").to_string()
         };
         self.view.label(cx, ids!(disk_meta)).set_text(cx, &meta);
+        // The canvas holds the tree it was last given: a scan passes once,
+        // when it arrives (handing it over every pass would re-clone the
+        // tree and reset the directory the person drilled into). The crumbs
+        // go with it — the canvas starts the new tree at its root.
+        if !self.disk_canvas_fed {
+            let scan = self.disk_scan.as_ref().map(|b| (**b).clone());
+            if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
+                canvas.set_scan(cx, scan);
+            }
+            self.disk_crumbs.clear();
+            self.disk_canvas_fed = true;
+        }
+        // The picked tile: its path from the scan root, its size, its
+        // category, and — when the picker flagged it — why it could be
+        // reclaimed (the root itself when nothing is picked).
         let mut crumb_text = String::new();
         if let Some(scan) = &self.disk_scan {
-            let mut node = &scan.tree;
-            crumb_text.push_str(node.name.as_ref());
-            for c in &self.disk_crumbs {
-                if let Some(next) = node.children.get(*c as usize) {
-                    crumb_text.push_str(&format!(" / {}", next.name));
-                    node = next;
-                }
+            let crumbs: Vec<usize> = self.disk_crumbs.iter().map(|c| *c as usize).collect();
+            let chain = scan.chain(&crumbs);
+            if let Some(node) = chain.last() {
+                let path = chain.iter().map(|n| n.name.as_ref()).collect::<Vec<_>>().join("/");
+                let why = node.reclaim.map(|r| format!(" · {}", r.label())).unwrap_or_default();
+                crumb_text = format!("{} · {} · {}{why}", path, plugins::disk_map::human_bytes(node.bytes), node.category.label());
             }
         }
         self.view.label(cx, ids!(disk_crumbs)).set_text(cx, &crumb_text);
@@ -3905,17 +4006,96 @@ impl OctoBuddyView {
         self.view.button(cx, ids!(disk_ask)).set_visible(cx, can_ask);
         self.view.label(cx, ids!(disk_worth)).set_text(cx, &self.disk_worth);
         self.view.label(cx, ids!(disk_growth)).set_text(cx, &self.disk_growth_text);
-        // Hand the latest scan to the canvas.
-        if let Some(scan) = &self.disk_scan {
-            if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
-                canvas.set_scan(cx, Some((**scan).clone()));
+        // A scan starts when the panel is open with nothing to show, nothing
+        // in flight and no failure to report: a failed scan is retried by
+        // the rescan button, never on its own.
+        if self.show_disk && self.disk_scan.is_none() && self.disk_scan_target.is_none() && self.disk_error.is_none() {
+            if let Some(project) = project {
+                self.start_disk_scan(project, plugins::disk_map::Root::from_u8(self.disk_root_kind));
             }
         }
-        // Start a scan if the panel is open and we have nothing fresh.
-        if self.show_disk && self.disk_scan.is_none() && !self.disk_scanning {
-            if let Some(project) = project {
-                self.disk_scanning = true;
-                self.start_disk_scan(project, plugins::disk_map::Root::from_u8(self.disk_root_kind));
+    }
+
+    /// Drop the scan the panel holds (another project, another root, a new
+    /// walk): its tree, its texts and the crumbs all belong to what was
+    /// shown. A scan still in flight for the old choice is not stopped —
+    /// its result is dropped when it comes home.
+    fn reset_disk_scan(&mut self) {
+        self.disk_scan = None;
+        self.disk_error = None;
+        self.disk_scan_target = None;
+        self.disk_canvas_fed = false;
+        self.disk_crumbs.clear();
+        self.disk_total = 0;
+        self.disk_files = 0;
+        self.disk_scanned_at = None;
+        self.disk_snapshot_count = 0;
+        self.disk_worth.clear();
+        self.disk_growth_text.clear();
+        self.disk_last_auto_at = 0;
+    }
+
+    /// The disk panel's width limits and its default (the panes in
+    /// `layout.rs` keep theirs beside these in the store).
+    const DISK_PANE: (f64, f64, f64) = (280.0, 900.0, 420.0);
+
+    /// The disk panel's width as kept (its default before a drag).
+    fn disk_width(&self) -> f64 {
+        self.store.panes.iter().flatten().find(|p| p.id == "disk").map(|p| p.width).unwrap_or(Self::DISK_PANE.2)
+    }
+
+    fn set_disk_width(&mut self, width: f64) {
+        let panes = self.store.panes.get_or_insert_with(Vec::new);
+        match panes.iter_mut().find(|p| p.id == "disk") {
+            Some(p) => p.width = width,
+            None => panes.push(model::PaneWidth { id: "disk".to_string(), width }),
+        }
+    }
+
+    /// The disk panel fitted to the window, like `layout.rs` fits its panes:
+    /// the sidebar (the only pane that shows beside it — the other side
+    /// panels close when it opens) and the conversation's least room leave
+    /// the rest for it. The panel itself lives in this file, so its handle
+    /// answers here rather than in the `PANES` loop.
+    fn apply_disk_pane(&mut self, cx: &mut Cx) {
+        let window = self.view.area().rect(cx).size.x;
+        let sidebar = if self.view.view(cx, ids!(sidebar)).visible() { self.pane_width("sidebar") } else { 0.0 };
+        let room = if window > 0.0 { (window - sidebar - 360.0).max(Self::DISK_PANE.0) } else { Self::DISK_PANE.1 };
+        let width = self.disk_width().min(room);
+        let mut w = self.view.widget(cx, ids!(disk_panel));
+        script_apply_eval!(cx, w, { width: #(width) });
+    }
+
+    /// The disk panel's handle dragged (or double-clicked, for its default
+    /// width): the same answers `layout.rs` gives its panes.
+    fn disk_resize_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        for action in self.view.widget(cx, ids!(disk_handle)).as_resize_handle().actions(actions) {
+            match action {
+                ResizeAction::Start => {
+                    let shown = self.view.view(cx, ids!(disk_panel)).area().rect(cx).size.x;
+                    let start = if shown > 0.0 { shown } else { self.disk_width() };
+                    self.resizing = Some(("disk", start));
+                }
+                ResizeAction::Drag(dx) => {
+                    let Some((_, start)) = self.resizing.filter(|(k, _)| *k == "disk") else { continue };
+                    // The handle is on the panel's left: dragging left widens it.
+                    self.set_disk_width((start - dx).clamp(Self::DISK_PANE.0, Self::DISK_PANE.1));
+                    self.apply_disk_pane(cx);
+                    // The canvas is not redrawn with its parent.
+                    cx.redraw_all();
+                }
+                ResizeAction::End => {
+                    self.resizing = None;
+                    self.save();
+                    self.relayout(cx);
+                }
+                ResizeAction::Reset => {
+                    self.set_disk_width(Self::DISK_PANE.2);
+                    self.apply_disk_pane(cx);
+                    self.save();
+                    self.relayout(cx);
+                }
+                ResizeAction::None => {}
             }
         }
     }
@@ -3923,14 +4103,36 @@ impl OctoBuddyView {
     /// Begin a scan in a worker thread. The walk, the snapshot bookkeeping,
     /// and the panel text all happen off the UI thread; the result arrives
     /// as a [`DiskScanned`] LoopEvent with the computed `DiskScanOutcome`,
-    /// and the UI thread only updates state and redraws.
-    fn start_disk_scan(&mut self, project: String, kind: plugins::disk_map::Root) {
+    /// and the UI thread only updates state and redraws. One scan per
+    /// project and root at a time: a second ask for the same pair waits
+    /// for the one already walking.
+    fn start_disk_scan(&mut self, project: String, mut kind: plugins::disk_map::Root) {
+        // A worktrees root that does not exist cannot be scanned (its toggle
+        // hides, but the choice can outlive the folder): the project root is
+        // the fallback, or there would be nothing to scan and no way back.
         let project_id = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-        let root = plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, kind);
-        if !root.exists() {
-            self.disk_scanning = false;
+        if kind == plugins::disk_map::Root::Worktrees && !plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, plugins::disk_map::Root::Worktrees).exists() {
+            kind = plugins::disk_map::Root::Project;
+            self.disk_root_kind = kind.to_u8();
+        }
+        let target = (project.clone(), kind.as_str().to_string());
+        if self.disk_scan_target.as_ref() == Some(&target) {
             return;
         }
+        let root = plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, kind);
+        if !root.exists() {
+            // Said once, retried only by the rescan button: an automatic
+            // retry would start a walk on every sync for a folder that is
+            // not coming back.
+            self.disk_scan_target = None;
+            self.disk_error = Some(i18n::pick(
+                format!("cannot scan {}: the folder does not exist", root.display()),
+                format!("没法扫 {}：文件夹不存在", root.display()),
+            ));
+            return;
+        }
+        self.disk_error = None;
+        self.disk_scan_target = Some(target);
         let inbox = self.rt.inbox.clone();
         let lang = crate::i18n::lang();
         std::thread::spawn(move || {
@@ -3978,11 +4180,32 @@ impl OctoBuddyView {
         self.life_write_failed = Some(why);
     }
 
+    /// A disk scan finished. The worker thread already wrote the
+    /// auto-snapshot (when the gap allowed) and computed the panel text;
+    /// here we only drop the outcome into state and wake the UI. A result
+    /// that no longer matches the scan in flight — the session or the root
+    /// moved while it walked — is dropped whole, and whatever the panel
+    /// now shows is not disturbed by it.
     fn disk_scan_done(&mut self, project: &str, kind: &str, outcome: Result<plugins::disk_map::DiskScanOutcome, String>) {
-        self.disk_scanning = false;
-        let Ok(outcome) = outcome else { return };
-        let kind_root = plugins::disk_map::Root::from_u8(self.disk_root_kind);
-        if Some(project) != self.disk_project_path.as_deref() || kind != kind_root.as_str() {
+        let came = (project.to_string(), kind.to_string());
+        if self.disk_scan_target.as_ref() != Some(&came) {
+            return;
+        }
+        self.disk_scan_target = None;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            // Said, not retried: the person presses rescan to try again.
+            Err(err) => {
+                self.disk_error = Some(err);
+                makepad_widgets::makepad_platform::thread::SignalToUI::set_ui_signal();
+                return;
+            }
+        };
+        // The scan that came home is the one in flight; the choice may have
+        // moved on anyway (the panel was closed and reopened elsewhere):
+        // drop this one without showing it.
+        let kind_now = plugins::disk_map::Root::from_u8(self.disk_root_kind);
+        if Some(project) != self.disk_project_path.as_deref() || kind != kind_now.as_str() {
             return;
         }
         let scan = outcome.scan;
@@ -3994,6 +4217,7 @@ impl OctoBuddyView {
         self.disk_growth_text = outcome.growth;
         self.disk_snapshot_count = outcome.snapshot_count;
         self.disk_last_auto_at = outcome.auto_at;
+        self.disk_canvas_fed = false;
         // Wake the UI so the new scan shows; the next draw picks it up.
         makepad_widgets::makepad_platform::thread::SignalToUI::set_ui_signal();
     }
@@ -5137,6 +5361,7 @@ impl OctoBuddyView {
             self.show_inner = !self.show_inner;
             // One side panel at a time: the conversation keeps its room.
             self.show_preview &= !self.show_inner;
+            self.show_disk &= !self.show_inner;
             self.relayout(cx);
         }
         if tapped(&self.view.view(cx, ids!(outer_btn)), actions) {
@@ -5185,6 +5410,7 @@ impl OctoBuddyView {
         self.handle_flow_actions(cx, actions);
         self.plugin_button_actions(cx, actions);
         self.resize_actions(cx, actions);
+        self.disk_resize_actions(cx, actions);
         self.tui_actions(cx, actions);
         self.workbench_actions(cx, actions);
         self.live_page_actions(cx, actions);
@@ -5210,6 +5436,7 @@ impl OctoBuddyView {
         if tapped(&self.view.view(cx, ids!(preview_btn)), actions) || tapped(&self.view.view(cx, ids!(preview_btn_on)), actions) {
             self.show_preview = !self.show_preview;
             self.show_inner &= !self.show_preview;
+            self.show_disk &= !self.show_preview;
             self.relayout(cx);
         }
         if self.view.button(cx, ids!(close_preview)).clicked(actions) {
@@ -5218,13 +5445,11 @@ impl OctoBuddyView {
         }
         if tapped(&self.view.view(cx, ids!(disk_btn)), actions) || tapped(&self.view.view(cx, ids!(disk_btn_on)), actions) {
             self.show_disk = !self.show_disk;
+            // One side panel at a time: the conversation keeps its room. The
+            // panel follows the selected session's project from here on
+            // (`sync_disk` resets the scan when it moves).
             self.show_inner &= !self.show_disk;
             self.show_preview &= !self.show_disk;
-            if self.show_disk && self.disk_project_path.is_none() {
-                if let Some(at) = self.selected {
-                    self.disk_project_path = Some(self.store.projects[at.0].path.clone());
-                }
-            }
             self.relayout(cx);
         }
         if self.view.button(cx, ids!(close_disk)).clicked(actions) {
@@ -5233,17 +5458,15 @@ impl OctoBuddyView {
         }
         if self.view.button(cx, ids!(disk_rescan)).clicked(actions) {
             if let Some(project) = self.disk_project_path.clone() {
-                let kind = plugins::disk_map::Root::from_u8(self.disk_root_kind);
-                self.disk_scan = None;
-                self.disk_scanning = true;
-                self.start_disk_scan(project, kind);
+                // The tree on screen stays until the new one arrives; the
+                // walk itself starts once (a second press waits for it).
+                self.start_disk_scan(project, plugins::disk_map::Root::from_u8(self.disk_root_kind));
                 self.relayout(cx);
             }
         }
         if self.view.button(cx, ids!(disk_root_project)).clicked(actions) {
             self.disk_root_kind = plugins::disk_map::Root::Project.to_u8();
-            self.disk_scan = None;
-            self.disk_scanning = true;
+            self.reset_disk_scan();
             if let Some(project) = self.disk_project_path.clone() {
                 self.start_disk_scan(project, plugins::disk_map::Root::Project);
             }
@@ -5251,8 +5474,7 @@ impl OctoBuddyView {
         }
         if self.view.button(cx, ids!(disk_root_worktrees)).clicked(actions) {
             self.disk_root_kind = plugins::disk_map::Root::Worktrees.to_u8();
-            self.disk_scan = None;
-            self.disk_scanning = true;
+            self.reset_disk_scan();
             if let Some(project) = self.disk_project_path.clone() {
                 self.start_disk_scan(project, plugins::disk_map::Root::Worktrees);
             }
