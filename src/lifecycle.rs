@@ -12,6 +12,7 @@
 //! first request to now, with the open ends marked.
 use crate::model::{Gate, Peer, Role, Session, Waiting};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// Where one slice is in the lifecycle.
 ///
@@ -994,6 +995,213 @@ pub fn write_living_md(project_path: &str, content: &str) -> LivingWrite {
     }
 }
 
+/// One commit's worth of file changes, already extracted from git. The
+/// background worker hands the pure logic a `Vec<PeerCommit>` per slice
+/// and never touches git itself.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PeerCommit {
+    pub slug: String,
+    pub round: u64,
+    pub hash: String,
+    pub at: u64,
+    /// `A` (added), `M` (modified), `D` (deleted), `R` (renamed). Each entry
+    /// is `(status, path)`.
+    pub files: Vec<(char, String)>,
+}
+
+/// One version of a repo doc: a path that a commit touched, the commit's
+/// status, when, and which slice round wrote it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RepoDocVersion {
+    /// 1, 2, 3... in commit-time order.
+    pub version: u32,
+    pub commit: String,
+    pub at: u64,
+    pub status: char,
+    pub round: u64,
+    pub slug: String,
+}
+
+/// Is `path` a document OctoBuddy should track? `*.md` anywhere, anything
+/// under `docs/`. The project's own bookkeeping (`.octobuddy/`) is skipped.
+pub fn is_doc_path(path: &str) -> bool {
+    if path.starts_with(".octobuddy/") || path.contains("/.octobuddy/") {
+        return false;
+    }
+    path.ends_with(".md") || path.starts_with("docs/") || path.contains("/docs/")
+}
+
+/// Group commits into the doc paths they touched, versioned by time.
+///
+/// Each path's versions are sorted by commit time (oldest first), numbered
+/// 1, 2, 3... Returns paths that are docs (`is_doc_path`). A commit that
+/// touches several doc paths produces a version for each.
+pub fn group_repo_docs(commits: &[PeerCommit]) -> BTreeMap<String, Vec<RepoDocVersion>> {
+    let mut out: BTreeMap<String, Vec<(u64, &str, char, u64, &str)>> = BTreeMap::new();
+    for c in commits {
+        for (status, path) in &c.files {
+            if !is_doc_path(path) { continue; }
+            out.entry(path.clone()).or_default().push((c.at, &c.hash, *status, c.round, &c.slug));
+        }
+    }
+    let mut result: BTreeMap<String, Vec<RepoDocVersion>> = BTreeMap::new();
+    for (path, mut vs) in out {
+        vs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        let mut versions: Vec<RepoDocVersion> = Vec::new();
+        for (i, (at, hash, status, round, slug)) in vs.iter().enumerate() {
+            versions.push(RepoDocVersion {
+                version: (i + 1) as u32,
+                commit: hash.to_string(),
+                at: *at,
+                status: *status,
+                round: *round,
+                slug: slug.to_string(),
+            });
+        }
+        result.insert(path, versions);
+    }
+    result
+}
+
+/// One acceptance sheet, looked up by `crate::acceptance::path` and
+/// checked for existence on disk.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AcceptanceItem {
+    pub round: u64,
+    pub path: PathBuf,
+    pub at: u64,
+    /// `true`: a `Confirmed` receipt for this session+round; `false`: prepared
+    /// but not confirmed yet; `None`: no receipt at all.
+    pub status: Option<bool>,
+}
+
+/// What an acceptance receipt's status means for the sheet.
+pub fn acceptance_status_for(
+    session: &str,
+    round: u64,
+    receipts: &[ReceiptStatus],
+) -> Option<bool> {
+    receipts.iter()
+        .find(|r| r.kind == "Acceptance" && r.session == session && r.round == Some(round))
+        .map(|r| r.confirmed)
+}
+
+/// A small view of a receipt's status, passed in by the caller (the real
+/// receipts module exposes more fields; this lets the pure logic stay
+/// testable without I/O).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceiptStatus {
+    pub kind: String,
+    pub session: String,
+    pub round: Option<u64>,
+    pub confirmed: bool,
+}
+
+/// Build the acceptance sheet entries for every session/round, in time
+/// order. `now_secs` is used when a file's mtime cannot be read.
+pub fn acceptance_items(
+    project_path: &str,
+    sessions: &[&Session],
+    receipts: &[ReceiptStatus],
+    now_secs: u64,
+) -> Vec<AcceptanceItem> {
+    let mut out = Vec::new();
+    for s in sessions {
+        let max_round = s.peers().iter().map(|p| p.round).max().unwrap_or(0);
+        for round in 1..=max_round {
+            let path = crate::acceptance::path(project_path, &s.id, round);
+            let at = std::fs::metadata(&path).and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(now_secs);
+            if !path.exists() {
+                continue;
+            }
+            out.push(AcceptanceItem {
+                round,
+                path,
+                at,
+                status: acceptance_status_for(&s.id, round, receipts),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.at.cmp(&b.at));
+    out
+}
+
+/// Add repo doc versions and acceptance sheets to a `DocStream`. The
+/// caller still controls the order (items are appended in version/path
+/// order; the doc stream sort step places them in time).
+pub fn extend_with_repo_docs(stream: &mut DocStream, repo: &BTreeMap<String, Vec<RepoDocVersion>>) {
+    for (path, versions) in repo {
+        for v in versions {
+            stream.items.push(DocItem {
+                id: format!("repo/{path}/v{}", v.version),
+                session: String::new(),
+                round: Some(v.round),
+                kind: DocKind::RepoDoc,
+                title: format!("{path} v{} ({})", v.version, status_label(v.status)),
+                author: v.slug.clone(),
+                at: v.at,
+                path: Some(path.clone()),
+                version: Some(v.version),
+                commit: Some(v.commit.clone()),
+                peer: None,
+                body: None,
+            });
+        }
+        stream.path_versions.insert(path.clone(), (1..=versions.len() as u32).collect());
+    }
+    stream.items.sort_by_key(|i| (i.at, i.id.clone()));
+}
+
+/// Add acceptance sheets as DocItems to a stream.
+pub fn extend_with_acceptance(
+    stream: &mut DocStream,
+    project_path: &str,
+    items: &[AcceptanceItem],
+) {
+    for a in items {
+        let status = match a.status {
+            Some(true) => "confirmed",
+            Some(false) => "prepared",
+            None => "no receipt",
+        };
+        stream.items.push(DocItem {
+            id: format!("acceptance/round-{}-{}", a.round, a.at),
+            session: String::new(),
+            round: Some(a.round),
+            kind: DocKind::Acceptance,
+            title: format!("Acceptance sheet (round {}, {})", a.round, status),
+            author: "OctoBuddy".into(),
+            at: a.at,
+            path: Some(a.path.to_string_lossy().into_owned()),
+            version: None,
+            commit: None,
+            peer: None,
+            body: None,
+        });
+    }
+    stream.items.sort_by_key(|i| (i.at, i.id.clone()));
+    let _ = project_path;
+}
+
+/// Read `path` at `commit` from the project's git history.
+pub fn git_show_file(project: &str, commit: &str, path: &str) -> Result<String, String> {
+    crate::workspace::git(project, &["show", &format!("{commit}:{path}")])
+}
+
+fn status_label(s: char) -> &'static str {
+    match s {
+        'A' => "added",
+        'M' => "modified",
+        'D' => "deleted",
+        'R' => "renamed",
+        _ => "touched",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1201,5 +1409,84 @@ mod tests {
             s.peers_mut().push(p.clone());
         }
         build_slice_machine(s)
+    }
+
+    fn pc(slug: &str, round: u64, hash: &str, at: u64, files: &[(&str, char)]) -> PeerCommit {
+        PeerCommit { slug: slug.into(), round, hash: hash.into(), at, files: files.iter().map(|(p, s)| (*s, p.to_string())).collect() }
+    }
+
+    #[test]
+    fn doc_path_filter_accepts_md_and_docs_and_skips_octobuddy() {
+        assert!(is_doc_path("README.md"));
+        assert!(is_doc_path("docs/architecture.md"));
+        assert!(is_doc_path("src/docs/api.md"));
+        assert!(!is_doc_path("README.mdx"));
+        assert!(!is_doc_path(".octobuddy/notes.md"));
+        assert!(!is_doc_path("src/.octobuddy/foo.md"));
+        assert!(!is_doc_path("src/main.rs"));
+    }
+
+    #[test]
+    fn repo_docs_are_grouped_by_path_and_versioned_in_time_order() {
+        // Same path touched twice across two slices; another path touched
+        // by one slice only; a non-doc path is dropped.
+        let commits = vec![
+            pc("alpha", 1, "aaa1111", 1000, &[("README.md", 'A'), ("src/lib.rs", 'M')]),
+            pc("beta", 1, "bbb2222", 1100, &[("README.md", 'M'), ("docs/plan.md", 'A')]),
+            pc("alpha", 1, "ccc3333", 1200, &[("README.md", 'M')]),
+        ];
+        let grouped = group_repo_docs(&commits);
+        let readme = grouped.get("README.md").expect("README tracked");
+        assert_eq!(readme.len(), 3);
+        assert_eq!(readme[0].version, 1);
+        assert_eq!(readme[0].commit, "aaa1111");
+        assert_eq!(readme[0].status, 'A');
+        assert_eq!(readme[0].slug, "alpha");
+        assert_eq!(readme[2].version, 3);
+        assert_eq!(readme[2].commit, "ccc3333");
+        let plan = grouped.get("docs/plan.md").expect("plan tracked");
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].slug, "beta");
+        assert!(!grouped.contains_key("src/lib.rs"), "non-docs dropped");
+    }
+
+    #[test]
+    fn acceptance_items_list_existing_sheets_per_round() {
+        // Make a temp project and write a fake acceptance sheet for one
+        // round. The pure helper still uses the same path formula.
+        let dir = std::env::temp_dir().join(format!("octobuddy-life-acc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = Store::default();
+        let pi = store.add_project(&dir.to_string_lossy()).unwrap();
+        let at = store.add_session(pi).unwrap();
+        let session_id = store.session(at).unwrap().id.clone();
+        // A peer with round=1 so the helper iterates that round.
+        let mut p = make_peer("w1", "thing", 1, 1);
+        p.log_mut().push(exchange("lead", "spec", Some("done"), Some("completed"), 1100, Some(50)));
+        store.session_mut(at).unwrap().peers_mut().push(p);
+        let s = store.session(at).unwrap();
+        let project = dir.to_string_lossy().into_owned();
+        let sheet = crate::acceptance::path(&project, &session_id, 1);
+        std::fs::create_dir_all(sheet.parent().unwrap()).unwrap();
+        std::fs::write(&sheet, "fake sheet").unwrap();
+
+        let items = acceptance_items(&project, &[s], &[], 9999);
+        assert_eq!(items.len(), 1, "round 1's sheet exists");
+        assert_eq!(items[0].round, 1);
+        assert_eq!(items[0].path, sheet);
+        assert!(items[0].at > 0);
+
+        // A receipt flags it confirmed.
+        let confirmed = vec![ReceiptStatus { kind: "Acceptance".into(), session: session_id.clone(), round: Some(1), confirmed: true }];
+        let items2 = acceptance_items(&project, &[s], &confirmed, 9999);
+        assert_eq!(items2[0].status, Some(true));
+
+        // No sheet → no entry.
+        std::fs::remove_file(&sheet).unwrap();
+        let items3 = acceptance_items(&project, &[s], &[], 9999);
+        assert!(items3.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
