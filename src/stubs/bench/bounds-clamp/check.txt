@@ -1,0 +1,1 @@
+python3 -c "import bounds; assert bounds.clamp(5, 0, 10) == 5 and bounds.clamp(-1, 0, 10) == 0 and bounds.clamp(11, 0, 10) == 10; exec('try:\n  bounds.clamp(1, 10, 0)\n  raise SystemExit(1)\nexcept ValueError:\n  pass')"

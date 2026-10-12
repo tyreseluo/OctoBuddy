@@ -292,8 +292,8 @@ fn key_of(store: &crate::model::Store, peer: &str) -> String {
 /// The first message to an inner loop: where it works, its task, what
 /// OctoBuddy gathered for it (`extra`: its files' map, the excerpts its lead
 /// already read, the memory), then the few rules (the task first, the rest
-/// short).
-fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str, extra: &str) -> String {
+/// short). `pub(crate)` for the real-agent benchmark (`bench.rs`).
+pub(crate) fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str, extra: &str) -> String {
     let place = match branch {
         Some(branch) => format!("{dir}, the session's git worktree (branch {branch})"),
         None => format!("{dir}, the project directory"),

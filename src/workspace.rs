@@ -7,7 +7,8 @@ pub fn git(dir: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git").arg("-C").arg(dir).args(args).env("PATH", search_path()).output()
         .map_err(|err| format!("could not run git: {err}"))?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        // No trim(): a porcelain status line can start with a space (" M f").
+        Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
     } else {
         Err(format!("git {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()))
     }
@@ -289,6 +290,10 @@ mod tests {
         let made = commit_files(&p, &["b.txt".into()], "feat: add b").unwrap();
         assert!(made.ends_with(" feat: add b"));
         assert_eq!(uncommitted(&p), vec!["c.txt".to_string()], "the other loop's file is left alone");
+        // A tracked file changed, not staged: its porcelain line starts with
+        // a space, and its name must come back whole.
+        std::fs::write(root.join("a.txt"), "a2\n").unwrap();
+        assert_eq!(uncommitted(&p), vec!["a.txt".to_string(), "c.txt".to_string()], "an unstaged change is not clipped");
         let d = peer_diff(&p, &base, &["b.txt".into()], &[made]).unwrap();
         assert_eq!(d.files, vec![("1".into(), "0".into(), "b.txt".into())]);
         assert!(d.patch.contains("+b") && !d.patch.contains("half"));
