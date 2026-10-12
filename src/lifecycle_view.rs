@@ -519,11 +519,19 @@ impl OctoBuddyView {
     fn maybe_refresh_life_docs(&mut self, at: crate::model::SessionRef) {
         let project = self.store.projects[at.0].path.clone();
         let project_name = self.store.projects[at.0].name.clone();
-        let token: u64 = self.store.projects[at.0].sessions.iter()
-            .flat_map(|s| s.peers().iter())
-            .filter(|p| p.commits.is_some())
-            .map(|p| (p.id.as_str(), p.commits.as_ref().map(|c| c.len()).unwrap_or(0)))
-            .fold(0u64, |acc, (id, n)| acc.wrapping_add(id.len() as u64).wrapping_add(n as u64));
+        // What the docs and LIVING.md are built from: each slice's commits,
+        // state and review, each session's messages, and its sheet.
+        let token: u64 = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for s in &self.store.projects[at.0].sessions {
+                (s.id.as_str(), s.messages.len(), self.sheets.get(&s.id).and_then(Option::as_ref).map(|r| r.status.key())).hash(&mut h);
+                for p in s.peers() {
+                    (p.id.as_str(), p.commits.as_ref().map(Vec::len), p.status.as_str(), p.review.as_deref(), p.landed.as_deref()).hash(&mut h);
+                }
+            }
+            h.finish()
+        };
         if token == self.life_token && self.life_repo_cache.iter().any(|c| c.project == project) {
             return;
         }
@@ -536,9 +544,12 @@ impl OctoBuddyView {
             }).collect();
             SessionCommits { session: s.clone(), peers }
         }).collect();
-        // No real receipts API here yet — pass an empty list; once the
-        // receipts module is wired through, callers can populate it.
-        let receipts: Vec<crate::lifecycle::ReceiptStatus> = Vec::new();
+        // Each session's latest acceptance sheet, as its receipt says.
+        let receipts: Vec<crate::lifecycle::ReceiptStatus> = self.store.projects[at.0].sessions.iter().filter_map(|s| {
+            let r = self.sheet_of(&s.id)?;
+            let (_, round) = crate::acceptance::parse_key(&r.inputs)?;
+            Some(crate::lifecycle::ReceiptStatus { kind: "Acceptance".into(), session: s.id.clone(), round: Some(round), confirmed: r.status == crate::receipts::Status::Confirmed })
+        }).collect();
         let inbox = self.rt.inbox.clone();
         refresh_life_docs(project, project_name, sessions, receipts, inbox);
     }

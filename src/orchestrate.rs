@@ -2644,8 +2644,7 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
                 self.life_acceptance_cache.retain(|(p, _)| p != &project);
                 self.life_acceptance_cache.push((project, acceptance));
             }
-            // LIVING.md was written (or skipped) by the background worker:
-            // say so on the session's chat.
+            // LIVING.md as the background worker left it (a failed write is said once).
             LoopEvent::LivingWrite { project, outcome } => {
                 self.life_written(project, outcome);
             }

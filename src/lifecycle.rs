@@ -833,56 +833,8 @@ fn collect_session_docs(s: &Session, out: &mut DocStream) {
                 body: Some(r.to_string()),
             });
         }
-
-        // Commits of repo docs: the commit list says what the slice touched.
-        // We do not have the per-commit file list here; the caller layers
-        // git's `show --name-status` on top in `octobuddy_docs`.
-        for c in p.commits.as_deref().unwrap_or(&[]) {
-            let hash = c.split_whitespace().next().unwrap_or("").to_string();
-            if hash.is_empty() { continue; }
-            // The path is unknown without git; the view adds it from `show`.
-            out.items.push(DocItem {
-                id: format!("{}/commit/{}/{}", s.id, p.slug, hash),
-                session: s.id.clone(),
-                round: Some(p.round),
-                kind: DocKind::RepoDoc,
-                title: format!("{} · {}", p.slug, first_line(c, 60)),
-                author: "OctoBuddy".into(),
-                at: last_work_at(p),
-                path: None,
-                version: None,
-                commit: Some(hash),
-                peer: Some(p.id.clone()),
-                body: None,
-            });
-        }
-    }
-
-    // Acceptance sheets: a system message that says one was written.
-    for m in s.messages.iter().filter(|m| m.role() == Role::System) {
-        if m.text.contains("acceptance sheet") || m.text.contains("验收单") {
-            let sheet = format!("{}/acceptance/{}-r1.md", project_path_for(s), s.id);
-            out.items.push(DocItem {
-                id: format!("{}/acceptance/{}", s.id, m.at),
-                session: s.id.clone(),
-                round: None,
-                kind: DocKind::Acceptance,
-                title: "Acceptance sheet".into(),
-                author: "OctoBuddy".into(),
-                at: m.at,
-                path: Some(sheet),
-                version: None,
-                commit: None,
-                peer: None,
-                body: None,
-            });
-        }
     }
 }
-
-/// Look up the project path for a session: the store keeps it, but we
-/// don't have it here. The caller passes the path through `with_project`.
-fn project_path_for(_s: &Session) -> &'static str { "." }
 
 /// Build LIVING.md: a markdown story of the project so far. Returns the
 /// full document text; the caller decides whether to write it (compare

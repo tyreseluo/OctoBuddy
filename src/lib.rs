@@ -2738,6 +2738,9 @@ pub struct OctoBuddyView {
     /// view uses it to skip recomputing when nothing did.
     #[rust]
     life_token: u64,
+    /// The last LIVING.md write failure said (said once).
+    #[rust]
+    life_write_failed: Option<String>,
     // The timeline last drawn, for its panels.
     #[rust]
     time_tl: Timeline,
@@ -3907,27 +3910,21 @@ impl OctoBuddyView {
     /// A disk scan finished. The worker thread already wrote the
     /// auto-snapshot (when the gap allowed) and computed the panel text;
     /// here we only drop the outcome into state and wake the UI.
-    /// LIVING.md was rewritten by the background worker: say so on the
-    /// project's first session so the person sees it. Skipped or unchanged
-    /// writes stay silent.
+    /// LIVING.md as the background worker left it: rewritten or unchanged
+    /// goes unsaid (it is rewritten as the work moves); a write that failed
+    /// is said once, in the project's latest session.
     fn life_written(&mut self, project: String, outcome: crate::lifecycle::LivingWrite) {
-        match outcome {
-            crate::lifecycle::LivingWrite::Wrote(path) => {
-                let Some((pi, _)) = self.store.projects.iter().enumerate().find(|(_, p)| p.path == project) else { return };
-                let Some(at) = self.store.projects.get(pi).and_then(|p| p.sessions.first()).map(|_| (pi, 0)) else { return };
-                self.system(at, &crate::i18n::pick(format!("LIVING.md updated: {}", path.display()), format!("已更新 LIVING.md: {}", path.display())));
-            }
-            crate::lifecycle::LivingWrite::Skipped(why) => {
-                let Some((pi, _)) = self.store.projects.iter().enumerate().find(|(_, p)| p.path == project) else { return };
-                let Some(at) = self.store.projects.get(pi).and_then(|p| p.sessions.first()).map(|_| (pi, 0)) else { return };
-                self.system(at, &crate::i18n::pick(format!("Could not write LIVING.md: {why}"), format!("无法写 LIVING.md：{why}")));
-            }
-            crate::lifecycle::LivingWrite::Unchanged => {}
+        let crate::lifecycle::LivingWrite::Skipped(why) = outcome else { return };
+        if self.life_write_failed.as_deref() == Some(why.as_str()) {
+            return;
         }
+        let Some(pi) = self.store.projects.iter().position(|p| p.path == project) else { return };
+        let Some(si) = self.store.projects[pi].sessions.len().checked_sub(1) else { return };
+        self.system((pi, si), &crate::i18n::pick(format!("Could not write LIVING.md: {why}"), format!("无法写 LIVING.md：{why}")));
+        self.life_write_failed = Some(why);
     }
 
     fn disk_scan_done(&mut self, project: &str, kind: &str, outcome: Result<plugins::disk_map::DiskScanOutcome, String>) {
-        self.disk_scanning = false;
         self.disk_scanning = false;
         let Ok(outcome) = outcome else { return };
         let kind_root = plugins::disk_map::Root::from_u8(self.disk_root_kind);
