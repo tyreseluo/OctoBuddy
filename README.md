@@ -333,6 +333,30 @@ On the host, Settings › AI Providers is OctoBuddy's own, set up the way Cindy 
   - Make primary reordered the rows;
   - removing every row deleted the keychain items.
 
+## Lifecycle view
+
+The fourth view, beside **Chat**, **Flow**, and **Timeline**, is the
+**Lifecycle** view: the slice state machine and the project's doc stream,
+in one place.
+
+- **State machine.** Each slice is a row from `Waiting` to `Landed`, with
+  `SentBack` looping back to `Running` and the side exits (`Failed`,
+  `Stopped`, `OverBudget`, `Discarded`) below the main row. Nodes show
+  how many slices are at each state; edges show how many times the
+  session crossed them. Pick a slice from the side panel to highlight
+  its path.
+- **Docs.** The project's doc stream: each request, plan, slice brief,
+  report, gate, review, acceptance sheet, publish / submit receipt,
+  and (when present) repo docs a slice touched in a commit. Pick an
+  item on the left to read it on the right.
+- **LIVING.md.** OctoBuddy keeps `<project>/.octobuddy/living/LIVING.md`
+  up to date: a markdown story of the project so far. Click *Open
+  LIVING.md* to open it in your default editor.
+
+The outer loop and inner loops also see the docs through the
+`octobuddy_docs` MCP tool — useful when an agent is about to re-derive
+something it could just read.
+
 ## Build and test
 
 In this repository:
