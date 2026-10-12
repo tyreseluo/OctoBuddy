@@ -143,6 +143,12 @@ fn inner_tools() -> Value {
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "octobuddy_app_look", "description": "For an OctoSense app: run it headless now and get its script errors, a screenshot (a PNG under .octobuddy/shots/ you can read) and the widgets on screen (type, id, text), the way a test finds them.",
          "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "octobuddy_docs", "description": "What this project has already produced: requests, plans, slice briefs, reports, gates, reviews, and (when given) repo docs touched by commits. Use query / round / kind to filter; LIVING.md path is included so you can read it instead of re-deriving the story. Capped at 30 entries.",
+         "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "case-insensitive substring matched against title, author and path"},
+            "round": {"type": "integer", "description": "limit to one round of the session"},
+            "kind": {"type": "string", "enum": ["Request", "Plan", "Spec", "Report", "Gate", "Review", "RepoDoc", "Acceptance", "Receipt"]}
+        }}},
         probe_tool(),
         drive_tool()
     ])
@@ -197,7 +203,13 @@ fn tools() -> Value {
         drive_tool(),
         {"name": "octobuddy_learn", "description": "Keep a lesson OctoBuddy's later runs start from (every project): topic splash for how Splash and the app runtime behave (verify it with octobuddy_app_probe first), orchestration for how to plan, split and pick agents and models. Say it as a rule an agent can follow; evidence is what showed it.",
          "inputSchema": {"type": "object", "required": ["topic", "lesson", "evidence"], "properties": {
-            "topic": {"type": "string", "enum": ["splash", "orchestration"]}, "lesson": {"type": "string"}, "evidence": {"type": "string"}}}}
+            "topic": {"type": "string", "enum": ["splash", "orchestration"]}, "lesson": {"type": "string"}, "evidence": {"type": "string"}}}},
+        {"name": "octobuddy_docs", "description": "What this project has already produced: requests, plans, slice briefs, reports, gates, reviews, acceptance sheets, publish / submit receipts, and (when given) repo docs touched by commits. Use query / round / kind to filter; LIVING.md path is included so the agent can read it instead of re-deriving the story. Capped at 30 entries.",
+         "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "case-insensitive substring matched against title, author and path"},
+            "round": {"type": "integer", "description": "limit to one round of the session"},
+            "kind": {"type": "string", "enum": ["Request", "Plan", "Spec", "Report", "Gate", "Review", "RepoDoc", "Acceptance", "Receipt"]}
+        }}}
     ])
 }
 
@@ -251,6 +263,66 @@ impl OctoBuddyView {
                 self.system(at, &crate::i18n::pick(format!("The outer loop kept a lesson for later runs ({}): {}", get("topic"), get("lesson")),
                     format!("外环沉淀了一条经验（{}），之后的运行都会用到：{}", get("topic"), get("lesson"))));
                 Ok(said)
+            }
+            "octobuddy_docs" => {
+                // The doc stream is one session's view of one project's docs.
+                let project_path = self.store.projects[at.0].path.clone();
+                let project_name = self.store.projects[at.0].name.clone();
+                let session = self.store.session(at).unwrap().clone();
+                let rounds = crate::lifecycle::build_round_machine(&session);
+                let slices = crate::lifecycle::build_slice_machine(&session);
+                let stream = crate::lifecycle::build_doc_stream(&[&session], &Default::default());
+                let query = args.get("query").and_then(Value::as_str);
+                let round = args.get("round").and_then(Value::as_u64);
+                let kind_str = args.get("kind").and_then(Value::as_str);
+                let kind_filter = kind_str.and_then(|k| match k {
+                    "Request" => Some(crate::lifecycle::DocKind::Request),
+                    "Plan" => Some(crate::lifecycle::DocKind::Plan),
+                    "Spec" => Some(crate::lifecycle::DocKind::Spec),
+                    "Report" => Some(crate::lifecycle::DocKind::Report),
+                    "Gate" => Some(crate::lifecycle::DocKind::Gate),
+                    "Review" => Some(crate::lifecycle::DocKind::Review),
+                    "RepoDoc" => Some(crate::lifecycle::DocKind::RepoDoc),
+                    "Acceptance" => Some(crate::lifecycle::DocKind::Acceptance),
+                    "Receipt" => Some(crate::lifecycle::DocKind::Receipt),
+                    _ => None,
+                });
+                let mut entries: Vec<_> = stream.items.iter()
+                    .filter(|i| round.is_none_or(|r| i.round == Some(r)))
+                    .filter(|i| kind_filter.is_none_or(|k| i.kind == k))
+                    .filter(|i| query.is_none_or(|q| {
+                        let q = q.to_ascii_lowercase();
+                        i.title.to_ascii_lowercase().contains(&q)
+                            || i.author.to_ascii_lowercase().contains(&q)
+                            || i.path.as_deref().is_some_and(|p| p.to_ascii_lowercase().contains(&q))
+                    }))
+                    .take(30)
+                    .map(|i| serde_json::json!({
+                        "id": i.id,
+                        "kind": i.kind.label(),
+                        "title": i.title,
+                        "author": i.author,
+                        "at": i.at,
+                        "path": i.path,
+                        "version": i.version,
+                        "commit": i.commit,
+                        "peer": i.peer,
+                        "round": i.round,
+                    }))
+                    .collect();
+                let living = crate::lifecycle::living_path(&project_path);
+                let living_md = crate::lifecycle::build_living(&project_name, &slices, &rounds, &stream);
+                // Drop the body for the listing: keep it small. The agent can
+                // read LIVING.md if it wants the full story.
+                let _ = &mut entries;
+                let payload = serde_json::json!({
+                    "session": session.id,
+                    "project": project_path,
+                    "living_md_path": living.to_string_lossy(),
+                    "living_md": living_md,
+                    "items": entries,
+                });
+                Ok(payload.to_string())
             }
             "octobuddy_plan" => {
                 let reply = plan::split_reply(&format!("```octobuddy-plan\n{args}\n```"));
@@ -345,7 +417,7 @@ mod tests {
         assert!(answer(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}), "s", &inbox).is_none(), "a notification gets no answer");
         let tools = answer(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}), "s", &inbox).unwrap();
         let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_app_drive", "octobuddy_learn"]);
+        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_app_drive", "octobuddy_learn", "octobuddy_docs"]);
 
         let server = Server::start(&inbox).unwrap();
         let config: Value = serde_json::from_str(&server.config("s1")).unwrap();
