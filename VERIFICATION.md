@@ -8,12 +8,12 @@ How each mechanism of v0.3.0 was verified: what ran for real and what was a stub
 
 | | |
 | --- | --- |
-| OctoBuddy | v0.3.0 (branch `feat/verified-loops`, `122995a` when recorded; the released tag is on Releases) |
+| OctoBuddy | [v0.3.0](https://github.com/tyreseluo/OctoBuddy/releases/tag/v0.3.0) (the tag's commit is `f714871`; each evidence file names the commit it was recorded at) |
 | System | macOS 26.0.1, Apple silicon (arm64) |
 | Rust | rustc 1.99.0 (b940084d7 2026-09-28) |
 | OctoBuddy's own agents | Claude Code 2.1.286, Codex 0.152.0, pi 0.99.2, octos 2.0.3-rc.12 (pinned in `src/agents.rs`, checked against npm's / GitHub's digests) |
 | Dependencies | Makepad `d653bc4`, App Hub `3863591`, OctoSense `b9d66d0f` (what OctoSense's main pins, 2026-10-11) |
-| Inside OctoSense | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344), head `84a6b23`, on OctoSense main `b9d66d0f` |
+| Inside OctoSense | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344), head `95dff53` (pinning OctoBuddy `v0.3.0`), on OctoSense main `b9d66d0f` |
 | Local App Hub | `~/.octobuddy/hub` (a real catalog, artifacts and publisher key) |
 
 ## Real runs and synthetic ones
