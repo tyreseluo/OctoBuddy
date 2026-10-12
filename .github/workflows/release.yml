@@ -228,7 +228,14 @@ jobs:
           APPLE_ID: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_ID || '' }}
           APPLE_PASSWORD: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_APP_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ steps.notarization.outputs.configured == 'true' && secrets.APPLE_TEAM_ID || '' }}
-        run: cargo packager --release --formats dmg --target "$TARGET"
+        # An empty one is still set, and cargo-packager then tries to
+        # import a certificate that is not there: unset the empty ones.
+        shell: bash
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [[ -n "${!name}" ]] || unset "$name"
+          done
+          cargo packager --release --formats dmg --target "$TARGET"
 
       - name: Name it and sum it
         id: dmg
