@@ -601,7 +601,9 @@ impl crate::OctoBuddyView {
         self.rt.silent_said = keep;
         for key in &new {
             if let Some((at, who, secs, outer)) = silent.get(key) {
-                self.system(*at, &silent_line(who, *secs, *outer));
+                let line = silent_line(who, *secs, *outer);
+                self.system(*at, &line);
+                crate::hagency::tell(&self.store.projects[at.0].path, &format!("silent:{key}:{}", now.saturating_sub(*secs)), &line);
             }
         }
         !new.is_empty()

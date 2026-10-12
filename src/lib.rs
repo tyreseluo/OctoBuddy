@@ -23,6 +23,7 @@ pub use plugins::native_tui::own_terminal_settings;
 mod chat;
 mod context;
 mod handoff;
+mod hagency;
 pub mod flow;
 pub mod i18n;
 pub mod contract;
@@ -5876,6 +5877,7 @@ impl Widget for OctoBuddyView {
         if self.clock.is_event(event).is_some() {
             self.card_loop_tick();
             self.review_watch_tick(cx);
+            self.hagency_tick();
             if self.page == Page::Live && now_secs().is_multiple_of(5) {
                 self.relayout(cx);
             }

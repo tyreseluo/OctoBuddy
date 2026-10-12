@@ -1171,6 +1171,8 @@ impl OctoBuddyView {
         let drill = if p.drill.is_some() { i18n::t(" (drill: its API cut off)", "（演练：断开了它的 API）") }
             else if w.bad_release.as_ref().is_some_and(|(v, _)| *v == p.version) { i18n::t(" (drill: a bad release)", "（演练：坏版本）") } else { "" };
         let mut text = None;
+        // An incident opened or closed goes to the hagency room too (its key).
+        let mut hkey: Option<String> = None;
         match (w.incident.take(), health) {
             // Well, and was: nothing to say (but the first run).
             (None, Health::Healthy) => {
@@ -1191,6 +1193,7 @@ impl OctoBuddyView {
             // Well again: the incident's story, start to end.
             (Some(inc), Health::Healthy) => {
                 w.bad_release = None;
+                hkey = Some(format!("incident-closed:{project}:{}", inc.since));
                 let mut steps = Vec::new();
                 if let Some((_, at)) = &inc.repair {
                     steps.push(i18n::pick(format!("handed to the outer loop after {}", span(at.saturating_sub(inc.since))), format!("{}后交给外环", span(at.saturating_sub(inc.since)))));
@@ -1222,6 +1225,7 @@ impl OctoBuddyView {
             (None, bad) => {
                 let bad_release = w.bad_release.as_ref().is_some_and(|(v, _)| *v == p.version).then(|| "bad-release".to_string());
                 let inc = Incident { since: p.at, version: p.version.clone(), health: bad, why: why.clone(), shot: shot_of(project, &p), texts: w.texts, drill: p.drill.clone().or(bad_release), repair: None, published: None, reports: Vec::new() };
+                hkey = Some(format!("incident:{project}:{}:{}", p.version, inc.since));
                 let lines: Vec<String> = why.iter().map(|l| format!("· {l}")).collect();
                 let shot = inc.shot.clone().unwrap_or_default();
                 text = Some(i18n::pick(
@@ -1270,6 +1274,9 @@ impl OctoBuddyView {
         for text in [text, note].into_iter().flatten() {
             if let Some(at) = at {
                 self.system(at, &text);
+            }
+            if let Some(key) = hkey.take() {
+                crate::hagency::tell(project, &key, &text);
             }
         }
     }

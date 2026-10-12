@@ -18,6 +18,8 @@ OctoBuddy 只有一个数据目录，下文记作 `<data>`。
 | `<data>/state.json` | 项目、会话、每条消息（用户、lead、peer、系统）、重启后排队的待办 | `src/model.rs:798-800`，`src/persist.rs:32-64` |
 | `<data>/state.json.corrupt-<secs>` | 解析不通过的 `state.json` 副本：文件先被改名，再从空 store 启动，避免覆盖原文件 | `src/model.rs:741-756` |
 | `<data>/appearance.json` | 主题选择（Light、Dark、GitHub Light、…，以及「跟随 OctoSense」） | `src/theme.rs:265-266` |
+| `<data>/hagency.json` | 项目到 hagency（Matrix）房间的可选关联：homeserver、房间 id、OctoBuddy 发言用的用户、协调人白名单（不含机密） | `src/hagency.rs:32-63` |
+| `<data>/hagency-state.json` | 发到房间的内容记录：去重键（每件事最多发一次）、各房间的已读标记、各项目最近一次汇报与最近的错误（`0600`） | `src/hagency.rs:86-145` |
 
 `state.json` 先写到 `.json.tmp` 再改名，崩溃时不会留下半个文件（`src/model.rs:758-766`）。
 
@@ -115,6 +117,10 @@ OctoBuddy 把 AI provider 的 key 放进 macOS 钥匙串，不放进 profile：
 
 非 macOS 上 key 直接放在 profile 里（`src/own_providers.rs:42-45`）；profile 写入时是 `0600`（`src/own_providers.rs:79-83`）。
 
+### hagency 房间的访问令牌
+
+OctoBuddy 向关联的 hagency（Matrix）房间发言用的访问令牌来自 `OCTOBUDDY_MATRIX_TOKEN`，否则读钥匙串里 octos 条目下 OctoBuddy 自己的账户 `OCTOBUDDY_MATRIX_TOKEN::octobuddy`（`src/hagency.rs:65-70`）。它不会写进日志、不会写进文件、也不会出现在子进程命令行：curl 从标准输入的配置里读取它，消息体走 `0600` 临时文件（`src/hagency.rs:341-381`）。发到房间的只有「向 hagency 房间汇报」（README）列出的内容——状态行和回执，绝不包含代码、密钥或对话记录；从房间读回的内容只用于解析验收命令，绝不喂给 agent。
+
 ### 测试连接
 
 向导的「测试连接」会用 `curl -K -` 发一个 token 的请求，key 也走 stdin（`src/own_providers.rs:222-251`）。任何报错信息里出现的 key 都会被替换成 `•••`（`src/own_providers.rs:262-267`）。
@@ -145,6 +151,7 @@ OctoBuddy 把 AI provider 的 key 放进 macOS 钥匙串，不放进 profile：
 | 模板仓库（默认 `github.com/tyreseluo/octosense-app-templates`，可用 `OCTOBUDDY_TEMPLATES_REPO` 替换） | 每次打开「新建应用」对话框 | `src/plugins/new_app.rs:20`，`src/plugins/new_app.rs:55-89` |
 | `github.com/<你>/<app>`（项目的公开仓库）和 `github.com/OctoSense-org/OctoSense-App-Hub`（用 `OCTOBUDDY_APP_HUB_REPO` 替换） | 提交 App Hub：`git push` 推送 `bundle/` 的 `v<version>` tag，并开 `Submit <id> <version>` issue | `src/plugins/app_hub.rs:23`，`src/plugins/workbench.rs:342`，`README.md:96-98` |
 | 新 app 的 manifest 列出的 host（每个 app 自己访问） | app 启动运行时 | 各 app 的 `bundle/manifest.json` |
+| 你在 `<data>/hagency.json` 里关联的项目的 Matrix homeserver | 有可汇报的事情时发贴（验收单、验收、事故、审核、回执）；每 `OCTOBUDDY_HAGENCY_EVERY` 秒读一次房间（默认 15） | `src/hagency.rs:383-429` |
 
 App Hub 的 `hub` 和 `card-host` 是外部工具（由 `OCTOSENSE_APP_HUB` 指向），不是 OctoBuddy 的服务器（`src/plugins/app_hub.rs:195-198`，`src/plugins/octosense_app.rs:391-404`）。
 

@@ -419,6 +419,11 @@ pub fn still(r: &Receipt, now: &Snapshot) -> Result<(), String> {
 /// The read-back's checks into `r`: confirmed, a mismatch, or unknown.
 pub fn settle(r: &mut Receipt, checks: Vec<Check>, result: Option<String>) {
     ledger().settle(r, checks, result);
+    // A publish or submission that read back (or did not) goes to the
+    // project's hagency room, at most once per receipt.
+    if matches!(r.kind, Kind::Publish | Kind::PublishFix | Kind::HubSubmit) && matches!(r.status, Status::Confirmed | Status::Mismatch) {
+        crate::hagency::tell(&r.project, &format!("receipt:{}", r.id), &line(r));
+    }
 }
 
 /// `r` not done, and why.

@@ -61,7 +61,7 @@ const REVIEW_WAVE_1: &str = include_str!("stubs/review_wave_1.md");
 
 /// The tests here set process-wide variables (`OCTOBUDDY_HOME`, the octos
 /// binary): one at a time.
-static E2E: Mutex<()> = Mutex::new(());
+pub(crate) static E2E: Mutex<()> = Mutex::new(());
 
 /// Builds a fresh worktree-less git repo at `dir`, with one initial commit.
 fn init_repo(dir: &Path) {
