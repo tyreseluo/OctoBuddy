@@ -2596,6 +2596,14 @@ enum FlowOpen {
     Create,
 }
 
+/// What the lifecycle background worker caches for one project: a project
+/// path and the repo docs it found.
+#[derive(Clone, Debug, Default)]
+struct CachedRepoDocs {
+    project: String,
+    paths: Vec<(String, Vec<crate::lifecycle::RepoDocVersion>)>,
+}
+
 #[derive(Script, ScriptHook, Widget)]
 pub struct OctoBuddyView {
     #[deref]
@@ -2723,7 +2731,7 @@ pub struct OctoBuddyView {
     /// project, keyed by project path. Held as flat pairs so the script
     /// macro accepts the field.
     #[rust]
-    life_docs_cache: Vec<(String, Vec<(String, Vec<crate::lifecycle::RepoDocVersion>)>)>,
+    life_repo_cache: Vec<CachedRepoDocs>,
     #[rust]
     life_acceptance_cache: Vec<(String, Vec<crate::lifecycle::AcceptanceItem>)>,
     /// A token that bumps each time a session's events change; the lifecycle
@@ -3903,21 +3911,19 @@ impl OctoBuddyView {
     /// project's first session so the person sees it. Skipped or unchanged
     /// writes stay silent.
     fn life_written(&mut self, project: String, outcome: crate::lifecycle::LivingWrite) {
-        use crate::events::Inbox;
         match outcome {
             crate::lifecycle::LivingWrite::Wrote(path) => {
                 let Some((pi, _)) = self.store.projects.iter().enumerate().find(|(_, p)| p.path == project) else { return };
-                let Some(at) = self.store.projects.get(pi).and_then(|p| p.sessions.first()).map(|s| (pi, 0)) else { return };
+                let Some(at) = self.store.projects.get(pi).and_then(|p| p.sessions.first()).map(|_| (pi, 0)) else { return };
                 self.system(at, &crate::i18n::pick(format!("LIVING.md updated: {}", path.display()), format!("已更新 LIVING.md: {}", path.display())));
             }
             crate::lifecycle::LivingWrite::Skipped(why) => {
                 let Some((pi, _)) = self.store.projects.iter().enumerate().find(|(_, p)| p.path == project) else { return };
-                let Some(at) = self.store.projects.get(pi).and_then(|p| p.sessions.first()).map(|s| (pi, 0)) else { return };
+                let Some(at) = self.store.projects.get(pi).and_then(|p| p.sessions.first()).map(|_| (pi, 0)) else { return };
                 self.system(at, &crate::i18n::pick(format!("Could not write LIVING.md: {why}"), format!("无法写 LIVING.md：{why}")));
             }
             crate::lifecycle::LivingWrite::Unchanged => {}
         }
-        let _ = Inbox::default();
     }
 
     fn disk_scan_done(&mut self, project: &str, kind: &str, outcome: Result<plugins::disk_map::DiskScanOutcome, String>) {

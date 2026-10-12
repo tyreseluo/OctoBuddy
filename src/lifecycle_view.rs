@@ -508,7 +508,7 @@ impl OctoBuddyView {
     /// Find the cached repo docs + acceptance for a project. The cache is
     /// filled by `LoopEvent::LifeDocs` from the background worker.
     fn lookup_life_cache(&self, project: &str) -> (Vec<(String, Vec<crate::lifecycle::RepoDocVersion>)>, Vec<crate::lifecycle::AcceptanceItem>) {
-        let repo_docs = self.life_docs_cache.iter().find(|(p, _)| p == project).map(|(_, v)| v.clone()).unwrap_or_default();
+        let repo_docs = self.life_repo_cache.iter().find(|c| c.project == project).map(|c| c.paths.clone()).unwrap_or_default();
         let acceptance = self.life_acceptance_cache.iter().find(|(p, _)| p == project).map(|(_, v)| v.clone()).unwrap_or_default();
         (repo_docs, acceptance)
     }
@@ -523,9 +523,8 @@ impl OctoBuddyView {
             .flat_map(|s| s.peers().iter())
             .filter(|p| p.commits.is_some())
             .map(|p| (p.id.as_str(), p.commits.as_ref().map(|c| c.len()).unwrap_or(0)))
-            .map(|(id, n)| (id, n))
             .fold(0u64, |acc, (id, n)| acc.wrapping_add(id.len() as u64).wrapping_add(n as u64));
-        if token == self.life_token && self.life_docs_cache.iter().any(|(p, _)| p == &project) {
+        if token == self.life_token && self.life_repo_cache.iter().any(|c| c.project == project) {
             return;
         }
         self.life_token = token;
@@ -659,7 +658,7 @@ pub fn refresh_life_docs(
                         .ok()
                         .and_then(|s| s.trim().parse::<u64>().ok())
                         .unwrap_or(0);
-                    let files = files.into_iter().map(|(s, p)| (s, p)).collect();
+                    let files = files.into_iter().collect();
                     peer_commits.push(crate::lifecycle::PeerCommit {
                         slug: peer.slug.clone(),
                         round: peer.round,
@@ -679,8 +678,8 @@ pub fn refresh_life_docs(
         // everything it needs. The project's sessions all fold into one
         // document, so we combine their slice/round machines and doc
         // streams first.
-        let machines: Vec<crate::lifecycle::SliceMachine> = owned.iter().map(|s| crate::lifecycle::build_slice_machine(s)).collect();
-        let round_machines: Vec<crate::lifecycle::RoundMachine> = owned.iter().map(|s| crate::lifecycle::build_round_machine(s)).collect();
+        let machines: Vec<crate::lifecycle::SliceMachine> = owned.iter().map(crate::lifecycle::build_slice_machine).collect();
+        let round_machines: Vec<crate::lifecycle::RoundMachine> = owned.iter().map(crate::lifecycle::build_round_machine).collect();
         let mut combined_stream = crate::lifecycle::DocStream::default();
         for s in &owned {
             let mut st = crate::lifecycle::build_doc_stream(&[s], &Default::default());

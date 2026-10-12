@@ -12,7 +12,7 @@
 //! first request to now, with the open ends marked.
 use crate::model::{Gate, Peer, Role, Session, Waiting};
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Where one slice is in the lifecycle.
 ///
@@ -1066,25 +1066,26 @@ pub fn is_doc_path(path: &str) -> bool {
 /// 1, 2, 3... Returns paths that are docs (`is_doc_path`). A commit that
 /// touches several doc paths produces a version for each.
 pub fn group_repo_docs(commits: &[PeerCommit]) -> BTreeMap<String, Vec<RepoDocVersion>> {
-    let mut out: BTreeMap<String, Vec<(u64, &str, char, u64, &str)>> = BTreeMap::new();
+    type Entry = (u64, String, char, u64, String);
+    let mut out: BTreeMap<String, Vec<Entry>> = BTreeMap::new();
     for c in commits {
         for (status, path) in &c.files {
             if !is_doc_path(path) { continue; }
-            out.entry(path.clone()).or_default().push((c.at, &c.hash, *status, c.round, &c.slug));
+            out.entry(path.clone()).or_default().push((c.at, c.hash.clone(), *status, c.round, c.slug.clone()));
         }
     }
     let mut result: BTreeMap<String, Vec<RepoDocVersion>> = BTreeMap::new();
     for (path, mut vs) in out {
-        vs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+        vs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
         let mut versions: Vec<RepoDocVersion> = Vec::new();
         for (i, (at, hash, status, round, slug)) in vs.iter().enumerate() {
             versions.push(RepoDocVersion {
                 version: (i + 1) as u32,
-                commit: hash.to_string(),
+                commit: hash.clone(),
                 at: *at,
                 status: *status,
                 round: *round,
-                slug: slug.to_string(),
+                slug: slug.clone(),
             });
         }
         result.insert(path, versions);
@@ -1163,7 +1164,7 @@ pub fn acceptance_items(
             });
         }
     }
-    out.sort_by(|a, b| a.at.cmp(&b.at));
+    out.sort_by_key(|a| a.at);
     out
 }
 

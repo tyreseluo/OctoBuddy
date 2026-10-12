@@ -2639,8 +2639,8 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
             // The lifecycle background worker finished: cache its result so
             // `sync_life` can fold it into the doc stream without touching git.
             LoopEvent::LifeDocs { project, repo_docs, acceptance } => {
-                self.life_docs_cache.retain(|(p, _)| p != &project);
-                self.life_docs_cache.push((project.clone(), repo_docs.into_iter().collect()));
+                self.life_repo_cache.retain(|c| c.project != project);
+                self.life_repo_cache.push(crate::CachedRepoDocs { project: project.clone(), paths: repo_docs.into_iter().collect() });
                 self.life_acceptance_cache.retain(|(p, _)| p != &project);
                 self.life_acceptance_cache.push((project, acceptance));
             }
