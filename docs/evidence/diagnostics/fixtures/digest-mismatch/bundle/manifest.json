@@ -1,0 +1,10 @@
+{
+  "capabilities": [],
+  "id": "dev.evidence.digest",
+  "integrity": {
+    "bundle_blake3": "4b46ff70480268719cd7d62691365f2c2b131837ca47bea7c3922d7cd5a21316"
+  },
+  "name": "Digest Evidence",
+  "schema": 1,
+  "version": "1.0.0"
+}

@@ -18,6 +18,8 @@ Everything below lives under `<data>`, except where noted.
 | `<data>/state.json` | Projects, sessions, every message (user, lead, peer, system), the queue waiting for a restart | `src/model.rs:798-800`, `src/persist.rs:32-64` |
 | `<data>/state.json.corrupt-<secs>` | A copy of `state.json` that did not parse; the file is renamed and a fresh empty store is started so nothing is overwritten | `src/model.rs:741-756` |
 | `<data>/appearance.json` | The theme choice (Light, Dark, GitHub Light, …, "Follow OctoSense") | `src/theme.rs:265-266` |
+| `<data>/hagency.json` | The optional link from a project to its hagency (Matrix) room: homeserver, room id, the user OctoBuddy posts as, the coordinator allow-list (no secrets) | `src/hagency.rs:32-63` |
+| `<data>/hagency-state.json` | What went to the room: dedupe keys (each thing posted at most once, ever), each room's read marker, each project's last post and last error (`0600`) | `src/hagency.rs:86-145` |
 
 `state.json` is written through a `.json.tmp` sibling and renamed, so a crash never leaves half a file (`src/model.rs:758-766`).
 
@@ -115,6 +117,10 @@ OctoBuddy keeps AI-provider keys in the macOS keychain, not in its profile:
 
 Outside macOS the key lives in the profile itself (`src/own_providers.rs:42-45`); the profile is written `0600` (`src/own_providers.rs:79-83`).
 
+### The hagency room's token
+
+The access token OctoBuddy posts to a linked hagency (Matrix) room with comes from `OCTOBUDDY_MATRIX_TOKEN`, else the keychain item octos reads under OctoBuddy's own account `OCTOBUDDY_MATRIX_TOKEN::octobuddy` (`src/hagency.rs:65-70`). It is never logged, never written to a file and never on a child process's command line: curl gets it in its config on standard input, and the message body travels in a `0600` temp file (`src/hagency.rs:341-381`). What goes to the room is only what "Reporting to a hagency room" (README) lists — status lines and receipts, never code, keys or transcripts; what comes back is only parsed for an accept command, never fed to an agent.
+
 ### Tests with a key
 
 The wizard's "Test connection" sends a one-token request through `curl -K -` with the key on stdin (`src/own_providers.rs:222-251`). On any error response the message shown has the key replaced by `•••` (`src/own_providers.rs:262-267`).
@@ -145,6 +151,7 @@ Only destinations the person picked. There is no OctoBuddy-owned endpoint.
 | `<data>/templates/octosense-app-templates.git` (`github.com/tyreseluo/octosense-app-templates` by default, or `$OCTOBUDDY_TEMPLATES_REPO`) | Each time the new-app dialog opens | `src/plugins/new_app.rs:20`, `src/plugins/new_app.rs:55-89` |
 | `github.com/<you>/<app>` (the project's public repo) and `github.com/OctoSense-org/OctoSense-App-Hub` (`$OCTOBUDDY_APP_HUB_REPO` to override) | App Hub submission: `git push` of `bundle/` at tag `v<version>`, plus the `Submit <id> <version>` issue | `src/plugins/app_hub.rs:23`, `src/plugins/workbench.rs:342`, `README.md:96-98` |
 | The hosts the new app's manifest lists (each app's own network calls) | Once the app runs | The app's `bundle/manifest.json` |
+| The Matrix homeserver of a project you linked in `<data>/hagency.json` | Posts when something reportable happens (a sheet, an accept, an incident, a review, a receipt); the room read every `OCTOBUDDY_HAGENCY_EVERY` seconds (default 15) | `src/hagency.rs:383-429` |
 
 App Hub's `hub` and `card-host` are external tools OctoBuddy calls (`OCTOSENSE_APP_HUB`), never its own servers (`src/plugins/app_hub.rs:195-198`, `src/plugins/octosense_app.rs:391-404`).
 

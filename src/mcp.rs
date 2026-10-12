@@ -150,7 +150,10 @@ fn inner_tools() -> Value {
             "kind": {"type": "string", "enum": ["Request", "Plan", "Spec", "Report", "Gate", "Review", "RepoDoc", "Acceptance", "Receipt"]}
         }}},
         probe_tool(),
-        drive_tool()
+        drive_tool(),
+        disk_map_tool(),
+        disk_growth_tool(),
+        disk_reclaim_tool(),
     ])
 }
 
@@ -164,6 +167,33 @@ fn drive_tool() -> Value {
 fn probe_tool() -> Value {
     json!({"name": "octobuddy_app_probe", "description": "For an OctoSense app: run a small Splash program of your own headless (as the app's main.splash, with its manifest) and get its script errors and widgets in seconds. When unsure how Splash behaves (a widget lookup, a string function, a layout), try it here instead of guessing or reading the runtime's source.",
         "inputSchema": {"type": "object", "required": ["source"], "properties": {"source": {"type": "string", "description": "a whole main.splash: declarations, then one root widget"}}}})
+}
+
+/// The disk map plugin's three read-only tools (outer and inner loops alike).
+/// They never delete anything; the decision is the person's.
+fn disk_map_tool() -> Value {
+    json!({"name": "octobuddy_disk_map", "description": "Where the bytes are at <path> (default: the project root): the biggest children with their sizes, share, category and reclaim reason. Read-only. Backed by the disk map plugin (Settings › Plugins); refuses when it is switched off.",
+     "inputSchema": {"type": "object", "properties": {
+        "path": {"type": "string", "description": "path relative to the project (or worktrees) root"},
+        "root": {"type": "string", "enum": ["project", "worktrees"], "description": "which root to scan; default 'project'"},
+        "depth": {"type": "integer", "description": "1-4, how deep to list", "minimum": 1, "maximum": 4, "default": 2},
+        "top": {"type": "integer", "description": "how many top children to list", "default": 15}
+    }}})
+}
+
+fn disk_growth_tool() -> Value {
+    json!({"name": "octobuddy_disk_growth", "description": "How the disk changed since the last snapshot of <root>: total delta, the biggest growths and shrinks, when that snapshot was taken and its commit. If there is no snapshot yet, takes one now and says so. Read-only.",
+     "inputSchema": {"type": "object", "properties": {
+        "since": {"type": "string", "enum": ["last", "first"], "description": "compare against the most recent (default) or the very first snapshot"},
+        "root": {"type": "string", "enum": ["project", "worktrees"], "description": "which root to scan; default 'project'"}
+    }}})
+}
+
+fn disk_reclaim_tool() -> Value {
+    json!({"name": "octobuddy_disk_reclaim", "description": "Worth-a-look candidates from the latest scan: paths, sizes, reasons, and the command that usually clears each. OctoBuddy does not delete anything — the person decides. Backed by the disk map plugin (Settings › Plugins); refuses when it is switched off.",
+     "inputSchema": {"type": "object", "properties": {
+        "root": {"type": "string", "enum": ["project", "worktrees"], "description": "which root to scan; default 'project'"}
+    }}})
 }
 
 fn tools() -> Value {
@@ -209,7 +239,10 @@ fn tools() -> Value {
             "query": {"type": "string", "description": "case-insensitive substring matched against title, author and path"},
             "round": {"type": "integer", "description": "limit to one round of the session"},
             "kind": {"type": "string", "enum": ["Request", "Plan", "Spec", "Report", "Gate", "Review", "RepoDoc", "Acceptance", "Receipt"]}
-        }}}
+        }}},
+        disk_map_tool(),
+        disk_growth_tool(),
+        disk_reclaim_tool(),
     ])
 }
 
@@ -230,8 +263,18 @@ impl OctoBuddyView {
                 "octobuddy_app_look" => crate::i18n::t("OctoBuddy runs its app for it", "OctoBuddy 在替它运行应用").into(),
                 "octobuddy_app_probe" => crate::i18n::t("OctoBuddy tries its Splash for it", "OctoBuddy 在替它试运行一段 Splash").into(),
                 "octobuddy_app_drive" => crate::i18n::t("OctoBuddy drives its app for it", "OctoBuddy 在替它操作应用").into(),
+                name if name.starts_with("octobuddy_disk_") => crate::i18n::t("OctoBuddy scans the disk for it", "OctoBuddy 在替它扫盘").into(),
                 _ => crate::i18n::t("OctoBuddy runs its check for it", "OctoBuddy 在替它跑检查").into(),
             });
+        }
+        // The disk tools run off the UI thread; an inner loop's check does too.
+        if let Some(stripped) = name.strip_prefix("octobuddy_disk_") {
+            let args = args.clone();
+            let tool = stripped.to_string();
+            std::thread::spawn(move || {
+                let _ = reply.send(crate::plugins::disk_map::run_tool(&dir, &tool, &args));
+            });
+            return;
         }
         std::thread::spawn(move || {
             let answer = match name.as_str() {
@@ -255,6 +298,9 @@ impl OctoBuddyView {
 
     pub(crate) fn mcp_call(&mut self, session: &str, name: &str, args: &Value) -> Result<String, String> {
         let at = self.store.find_session(session).ok_or("no such session")?;
+        // The disk tools run on the UI thread, but with a 60-second cache
+        // The outer-loop disk tools dispatch in `apply_event` (the worker
+        // thread keeps the UI responsive, like `octobuddy_app_probe`).
         match name {
             "octobuddy_status" => Ok(self.status_block(at).unwrap_or_else(|| "STATUS\n(no inner loops yet)".into())),
             "octobuddy_learn" => {
@@ -417,7 +463,7 @@ mod tests {
         assert!(answer(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"}), "s", &inbox).is_none(), "a notification gets no answer");
         let tools = answer(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}), "s", &inbox).unwrap();
         let names: Vec<&str> = tools["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_app_drive", "octobuddy_learn", "octobuddy_docs"]);
+        assert_eq!(names, ["octobuddy_plan", "octobuddy_send", "octobuddy_review", "octobuddy_plugin", "octobuddy_status", "octobuddy_app_probe", "octobuddy_app_drive", "octobuddy_learn", "octobuddy_docs", "octobuddy_disk_map", "octobuddy_disk_growth", "octobuddy_disk_reclaim"]);
 
         let server = Server::start(&inbox).unwrap();
         let config: Value = serde_json::from_str(&server.config("s1")).unwrap();

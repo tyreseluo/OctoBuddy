@@ -1,0 +1,12 @@
+{
+  "capabilities": [
+    "teleport"
+  ],
+  "id": "dev.evidence.teleport",
+  "integrity": {
+    "bundle_blake3": "c40d54815ebe7fd42d39da5802ece053bd73adc6331e631cdb9e3353ba21e4d6"
+  },
+  "name": "Unknown Capability Evidence",
+  "schema": 1,
+  "version": "1.0.0"
+}

@@ -1,0 +1,1 @@
+python3 -c "import words; assert words.top_words('b a b a c', 2) == ['a', 'b']; assert words.top_words('Apple banana apple BANANA cherry', 2) == ['apple', 'banana']; assert words.top_words('x y', 5) == ['x', 'y']"

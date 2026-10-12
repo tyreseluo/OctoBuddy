@@ -36,6 +36,9 @@ pub enum LoopEvent {
     ReviewChecked { me: Option<String>, results: Vec<crate::plugins::review_watch::Checked> },
     /// The bad-release drill published its version (and the function it broke), or why not.
     CardLoopDrilled { project: String, result: Result<(String, String), String> },
+    /// A hagency pass came back: failures to say once, the rooms' new
+    /// messages (`hagency`).
+    HagencyDone(crate::hagency::Outcome),
     /// The production loop ran a published app (`card_loop::probe`).
     CardLoopProbed { project: String, result: Result<crate::plugins::card_loop::Probe, String> },
     /// An external plugin's button ran: what it said, for the session.
@@ -47,6 +50,11 @@ pub enum LoopEvent {
     LeadToolEnd { session: String, id: String, ok: bool },
     /// A tool call made by one of the lead's subagents, inside its Agent call `parent`.
     LeadSubTool { session: String, parent: String, name: String, detail: String },
+    /// A disk scan finished (the disk map plugin's worker thread).
+    /// `outcome`: the new scan, the panel text, and the snapshot bookkeeping,
+    /// or why not. `Err`: the scan itself failed (worker already tried to
+    /// write a snapshot — UI just shows no panel text).
+    DiskScanned { project: String, kind: String, outcome: Result<crate::plugins::disk_map::DiskScanOutcome, String> },
     /// The model the lead's process runs.
     LeadInfo { session: String, model: String },
     /// One assistant message of the lead is complete (its text may be empty).

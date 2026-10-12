@@ -234,6 +234,21 @@ const SELF_FIX: u32 = 2;
 
 /// What a check's known errors mean, for the inner loop that fixes them.
 fn check_hints(output: &str) -> String {
+    // The check's own fixes first: App Hub's gate prints `fix [code]: …` under
+    // each finding it knows (docs/evidence/diagnostics/before-after-2026-10-12.md),
+    // so the inner loop gets the code and the tool's own one-line fix; what
+    // the app did when it ran (a widget, a closure) is still explained below.
+    let mut fixes: Vec<&str> = Vec::new();
+    for line in output.lines().map(str::trim) {
+        if let Some(fix) = line.strip_prefix("fix [") {
+            if !fixes.contains(&fix) {
+                fixes.push(fix);
+            }
+        }
+    }
+    let coded = if fixes.is_empty() { String::new() } else { format!("\n\nWhat the check says to do:\n- [{}]", fixes.join("]\n- [")) };
+    // The texts we know: all of them for an older tool, which prints no
+    // fixes; else only the run's own, the gate's being coded above.
     let mut out = Vec::new();
     if output.contains("not found in tree") {
         out.push("`widget 'x' not found in tree`: `ui.x` finds a widget anywhere in the tree once it exists, so `x` is not \
@@ -248,13 +263,13 @@ renames that widget and its nearest named ancestor to `text_style` (write `draw_
         out.push("A closure raised while it ran (often an index past the end, a nil field, or a value of the wrong type): \
 guard each access in it, and check the other closures of the same kind.");
     }
-    if output.contains("refused") {
+    if fixes.is_empty() && output.contains("refused") {
         out.push("`refused`: the app used something its manifest does not grant (a capability or a host): declare it, or do not use it.");
     }
-    if !output.contains("PASSED") && output.contains("gate") && output.contains("FAILED") {
+    if fixes.is_empty() && !output.contains("PASSED") && output.contains("gate") && output.contains("FAILED") {
         out.push("App Hub's gate refused the bundle: its lines above say which field or file.");
     }
-    if out.is_empty() { String::new() } else { format!("\n\nWhat these mean:\n- {}", out.join("\n- ")) }
+    if out.is_empty() { coded } else { format!("{coded}\n\nWhat these mean:\n- {}", out.join("\n- ")) }
 }
 
 /// A reply that ends on what its agent is about to do ("Let me rewrite the
@@ -277,8 +292,8 @@ fn key_of(store: &crate::model::Store, peer: &str) -> String {
 /// The first message to an inner loop: where it works, its task, what
 /// OctoBuddy gathered for it (`extra`: its files' map, the excerpts its lead
 /// already read, the memory), then the few rules (the task first, the rest
-/// short).
-fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str, extra: &str) -> String {
+/// short). `pub(crate)` for the real-agent benchmark (`bench.rs`).
+pub(crate) fn first_prompt(brief: &str, dir: &str, branch: Option<&str>, check: Option<&str>, context: &str, extra: &str) -> String {
     let place = match branch {
         Some(branch) => format!("{dir}, the session's git worktree (branch {branch})"),
         None => format!("{dir}, the project directory"),
@@ -691,6 +706,7 @@ impl OctoBuddyView {
             .map(|p| json!({
                 "name": p.name,
                 "path": p.path,
+                "hagency": crate::hagency::status(&p.path),
                 "sessions": p.sessions.iter().map(|s| {
                     let outer = self.lead_status.get(&s.id).cloned().unwrap_or_else(|| "idle".into());
                     let waiting = self.rt.outer_queue.get(&s.id).map(|q| q.len()).unwrap_or(0);
@@ -2015,10 +2031,25 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_plugin" => {
                 self.plugin_mcp_call(&session, &args, reply);
             }
+            // The outer loop's disk tools (a scan is seconds, not ms): off
+            // the UI thread, the way probe/drive are.
+            LoopEvent::McpCall { session, name, args, reply } if name.starts_with("octobuddy_disk_") && !session.starts_with("inner:") => {
+                let Some(at) = self.store.find_session(&session) else {
+                    let _ = reply.send(Err("no such session".into()));
+                    return;
+                };
+                let dir = self.store.projects[at.0].path.clone();
+                let tool = name.strip_prefix("octobuddy_disk_").unwrap_or("").to_string();
+                let args = args.clone();
+                std::thread::spawn(move || {
+                    let _ = reply.send(crate::plugins::disk_map::run_tool(&dir, &tool, &args));
+                });
+            }
             LoopEvent::McpCall { session, name, args, reply } => {
                 let answer = self.mcp_call(&session, &name, &args);
                 let _ = reply.send(answer);
             }
+            LoopEvent::DiskScanned { project, kind, outcome } => self.disk_scan_done(&project, &kind, outcome),
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
             LoopEvent::ProvidersDone { job, result } => self.providers_done(job, result),
             LoopEvent::HubDone { project, step, result } => self.hub_done(&project, step, result),
@@ -2028,6 +2059,7 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::CardLoopProbed { project, result } => self.card_loop_probed(&project, result),
             LoopEvent::FactoryReady { id, result } => self.factory_ready(id, result),
             LoopEvent::ReviewChecked { me, results } => self.review_checked(me, results),
+            LoopEvent::HagencyDone(outcome) => self.hagency_done(outcome),
             LoopEvent::CardLoopDrilled { project, result } => self.card_loop_drilled(&project, result),
             LoopEvent::PackReady { session, message, pack } => self.pack_ready(&session, message, pack),
             LoopEvent::PluginSaid { session, plugin, result } => self.plugin_said(&session, &plugin, result),
@@ -2431,6 +2463,12 @@ It works for you now: message it, review its work, or close it.)\n"));
                 let session_id = self.store.session(at).unwrap().id.clone();
                 if let Some(Ok(_)) = &commit {
                     self.stale_reviews(at, &peer, &files);
+                    // An inner loop committed files: take an auto-snapshot
+                    // for the project (paced by `AUTO_GAP_SECS` inside
+                    // `disk_map::auto_snapshot`, which is a no-op when the
+                    // gap is not up).
+                    let project = self.store.projects[at.0].path.clone();
+                    crate::plugins::disk_map::auto_snapshot(&project);
                 }
                 if passed == Some(true) || matches!(&commit, Some(Ok(_))) {
                     self.rt.progress.insert(session_id.clone());
@@ -3686,6 +3724,24 @@ mod tests {
         let hints = check_hints("[E] splash:1:313:8 - widget 'month_label' not found in tree\nthe app logged script errors (above)");
         assert!(hints.contains("every `ui.` reference"), "{hints}");
         assert_eq!(check_hints("it starts and draws with no script errors"), "");
+    }
+
+    #[test]
+    fn a_check_that_names_its_fixes_wins_over_text_matching() {
+        // App Hub's coded report: the codes and the tool's own fixes come through.
+        let gate = "dev.example.app 1.0.0 — REFUSED\n  [refused] digest: the bundle hashes to e785…, the manifest claims 4b46…\n    fix [hub-digest-mismatch]: run `hub stamp <bundle>` after every edit (tools/octo check stamps first), then check again\n  [refused] listing: no listing.json: a store needs a description, a category, screenshots, a publisher and the platforms it runs on\n    fix [hub-listing-missing]: add listing.json with description, category, screenshots, publisher and platforms\nhub: the bundle was refused";
+        let hints = check_hints(gate);
+        assert!(hints.contains("[hub-digest-mismatch]: run `hub stamp"), "{hints}");
+        assert!(hints.contains("[hub-listing-missing]: add listing.json"), "{hints}");
+        assert!(!hints.contains("What these mean"), "the coded fixes replace the gate's text guesses: {hints}");
+        // A run's own error alongside the gate's codes is still explained.
+        let both = check_hints(&format!("{gate}\nscript error: widget 'total' not found in tree"));
+        assert!(both.contains("[hub-digest-mismatch]") && both.contains("not found in tree") && !both.contains("App Hub's gate refused"), "{both}");
+        let twice = format!("{gate}\n    fix [hub-digest-mismatch]: run `hub stamp <bundle>` after every edit (tools/octo check stamps first), then check again");
+        assert_eq!(check_hints(&twice).matches("hub-digest-mismatch").count(), 1, "a repeated fix is listed once");
+        // Without fix lines (an older hub), the known texts still match.
+        let old = check_hints("[refused] listing: no listing.json: a store needs a description, a category, screenshots, a publisher and the platforms it runs on\nthe App Hub gate FAILED");
+        assert!(old.contains("What these mean"), "{old}");
     }
 
     #[test]

@@ -1,0 +1,10 @@
+{
+  "capabilities": [],
+  "id": "dev.evidence.nolisting",
+  "integrity": {
+    "bundle_blake3": "77267bbbc3f3b1db8fb0ce74ea345e84ed698b0b38c5162c702d7881660e3dac"
+  },
+  "name": "No Listing Evidence",
+  "schema": 1,
+  "version": "1.0.0"
+}

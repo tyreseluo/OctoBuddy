@@ -1,0 +1,15 @@
+{
+  "capabilities": [
+    "net"
+  ],
+  "id": "dev.evidence.nohost",
+  "integrity": {
+    "bundle_blake3": "a202be4bbe803f0479f711b63382e27a8b8e60944902cfefa7b0b25ad2eae629"
+  },
+  "name": "Undeclared Host Evidence",
+  "network": {
+    "hosts": []
+  },
+  "schema": 1,
+  "version": "1.0.0"
+}

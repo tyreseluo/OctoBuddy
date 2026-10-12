@@ -73,7 +73,7 @@ OctoBuddy 是 OctoSense 的原生编码应用，分内外两层循环：
   - **终端**只属于打开它的那个对话（或内环）。切到别的对话、删掉这个对话、关掉插件或退出 OctoBuddy 时，它都会结束，里面的 CLI 也一起结束。
   - **实时视图。**只读地显示外环或某个内环此刻在做什么：它写的话、每次工具调用、它的子代理。它照常工作，不接管任何东西。记录在 `<data>/live/`。这一轮结束后，「接管终端」会在同一个会话上打开 agent 自己的终端。
   - **时间轴。**环与环之间的每条线，都从发出它的那一轮连到接手它的那一轮。每段等待画成点线并写明原因：等 agent 启动、等前一个 wave 验收、排队、OctoBuddy 在检查、等你、重启。汇总按原因累计，几条泳道同时等待的时段只算一次。没有留下来的工作会单独标出：被后来的内环取代的泳道画成斜线（历史），后来重做过的一轮只画轮廓，每处返工有一个圆环并注明可能的原因，下方的面板列出它们和浪费的时间。「从中学习」让外环从中总结经验（见下文）。
-- **插件。**内置的有：OctoSense 应用（一个应用项目的全部功能，包括应用工作台，见下文）、应用数据、原生 TUI（默认关闭）；只在 OctoSense 里有的：应用工厂和生产回路（见下文）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
+- **插件。**内置的有：OctoSense 应用（一个应用项目的全部功能，包括应用工作台，见下文）、应用数据、磁盘地图（项目目录的 treemap，外加三个只读的 agent 工具）、原生 TUI（默认关闭）；只在 OctoSense 里有的：应用工厂和生产回路（见下文）。每个内置插件是 `src/plugins/` 下的一个文件（框架在 `src/plugins/mod.rs`）。外部插件放在 `<data>/plugins/<id>/plugin.json`，旁边放一个程序，OctoBuddy 每次调用都运行它一次。
 
 ## OctoBuddy 自己核对的事
 
@@ -107,7 +107,30 @@ agent 提议、干活；算不算完成，由 OctoBuddy 自己运行、自己读
   - 已结束：已验收、失败、关闭、被打断。
 
   这些显示在 inner 的标签和卡片上、流程图里和外环处。无动静的环变成警示色，会话里提醒一次，并写明可以怎么做（打断并发送、结束或停止）。`octobuddy.status` 给出每个环的状态、在等谁、原因、距上次有消息多久，以及 `as_of`；Live 页上超过两倍巡检间隔没有运行的应用标为 `stale`，不再当作健康。
+- **真实 agent 基准。**`bench_real_inner_loops`（`src/bench.rs`，默认忽略）用本人的 provider 和密钥跑真实内环——octos、Claude Code、Codex、pi——任务是 `src/stubs/bench` 里的三个小题目；每轮结束后 OctoBuddy 做它该做的：receipts 提交、真跑检查、声明核对、验收闸。运行：`OCTOBUDDY_BENCH_AGENTS="octos:MiniMax-M3,claude:MiniMax-M3" cargo test --locked bench_real_inner_loops -- --ignored --nocapture`，结果写入 `docs/evidence/bench/`。2026-10-12 实测（两轮矩阵 × 3 任务 × 2 次）：octos 与 Claude Code 跑 MiniMax-M3 24/24 检查通过，无一条声明被判 ✗，提交回执全部 confirmed；pi 跑 glm-5.3 一轮 6/6，另一轮没有改动任何文件——检查 FAILED，那六个 accept 都会被验收闸拒绝；Codex 十二次全部撞上 provider 的 429 限流；没配 provider 的组合如实记录，绝不伪造。
 - **CI 里已验证**（`cargo test --locked`，不联网、没有 API key）：`a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` 用一个 stub 内环：它把代码改坏了，却汇报「所有测试通过」，还声称改了一个它根本没碰的文件。OctoBuddy 的检查失败，提交读回核对，两条声明都判 ✗，汇报带着原因退回，不带 override 的 accept 被拒，带 override 的通过，下一个 wave 在此之前一直等待。回执、快照、隔离块和失败分类各有单元测试（`receipts.rs`、`app_publish.rs`、`app_hub.rs`、`card_loop.rs`、`app_factory.rs`、`untrusted.rs`、`failure.rs`），验收单（`acceptance.rs`；e2e 测试也用被覆盖验收的切片生成了一张）和各环的状态（`liveness.rs`）也是。发布读回也能对本机真实的本地 App Hub 跑（`reads_back_a_published_app_from_the_local_hub`，默认忽略）：2026-10-11 对小账本（pocket-ledger）0.1.3、提交 `5f58490` 读回，四项核对（catalog、摘要、内容、提交）全部通过；它的工作副本里有一处未提交的 manifest 改动，被正确识别为「不是已发布的内容」（[输出](docs/evidence/receipts/live-readback-2026-10-11.txt)）。验证记录（含真实与合成运行的区分、失败矩阵、尚未验证的部分）见 [VERIFICATION.zh-CN.md](VERIFICATION.zh-CN.md)。
+
+## 向 hagency 房间汇报
+
+在 [hagency](https://github.com/hagency-org/hagency-rs) 项目房间（Palpo Matrix 服务器上的 Matrix 房间，大家在 Rinx 里协作）里跑 agent 的团队，可以让 OctoBuddy 把关键时刻汇报到房间里，协调人（coordinator）不用离开 Rinx 就能验收一轮。
+
+- **关联项目**：在 `<data>/hagency.json` 里配置（不是机密）：
+
+  ```json
+  { "projects": { "/path/to/project": {
+      "homeserver": "https://matrix.example.org",
+      "room": "!project:example.org",
+      "as": "@octobuddy:example.org",
+      "coordinators": ["@you:example.org"] } } }
+  ```
+
+  `as` 是 OctoBuddy 发言用的 Matrix 用户；`coordinators` 是白名单，只有他们的回复算本人的决定。
+- **访问令牌是机密**：`OCTOBUDDY_MATRIX_TOKEN`（演示用），或者像 OctoBuddy 保存 provider key 那样放进 macOS 钥匙串：`security add-generic-password -s octos -a "OCTOBUDDY_MATRIX_TOKEN::octobuddy" -w`。它永远不会写进日志，也永远不会出现在子进程的命令行里：curl 从标准输入读取它（`src/hagency.rs`）。
+- **汇报什么**，每件最多一次（去重键保存在 `<data>/hagency-state.json`，重启不会重发）：一轮验收单完成（切片、说法 ✓/✗/?、强行通过项、仍需你确认的事、如何验收）、一轮被验收及验收人、环无动静、Live 事故开始或结束、App Hub 审核请求、发布或提交回执确认或不符。消息是 `m.text`，带 HTML 版本供 Rinx 显示。绝不发送代码、密钥或对话记录。
+- **在 Rinx 里验收**：在房间回复 `accept round N`（或 `验收 第 N 轮` / `确认验收 第 N 轮`）。OctoBuddy 每 15 秒读一次房间（`OCTOBUDDY_HAGENCY_EVERY`，至少 5）。白名单协调人的回复与「确认验收」按钮等效——重读 HEAD 和这一轮的事实，项目变了就作废旧单、出新的一份——并把结果回帖到房间。不在白名单里的人发命令，只回复一次说明谁可以验收。房间里的文字永远不会喂给 agent。
+- **失败**（没有令牌、断网、限流、读不懂的回复）会按类归类，在会话里只说一次，退避重试，并留在 `octobuddy.status` 每个项目的 `hagency` 字段里（房间、最近一次汇报、最近的错误）。
+
+目前的验证是在 127.0.0.1 上的一个小型假 Matrix 服务器（`src/hagency.rs` 的集成测试）：发送、去重、协调人的 accept 以其 Matrix id 确认回执、以及确认结果回帖。还没有用真实的 Palpo 服务器跑过；见 [VERIFICATION.zh-CN.md](VERIFICATION.zh-CN.md)。
 
 ## 做 OctoSense 应用
 
@@ -180,7 +203,7 @@ OctoBuddy 把做应用的 agent 每次都要重新查、重新摸索的东西直
 
   Claude Code 和 Codex 通过 MCP 调用。octos 通过内环 profile 里的一个 stdio 小转接程序调用，因为 octos 拒绝本机回环地址上的 HTTP MCP。pi 没有 MCP，用命令 `octobuddy-app look | drive <steps.json> | probe <file> | check`。外环也有 probe 和 drive。
 - **分块。**新项目的 `bundle/main.splash` 由 `app/parts/*.splash`（共享状态、每页一块、根）在每次检查、预览和发布前拼成。这样各个页面可以由不同切片同时做。检查报错时会指出是哪一块、哪一行。
-- **审查前先检查。**切片的检查没过时，OctoBuddy 先把输出交回它的内环修，遇到认得的错误还附上提示，最多 2 次，然后才交给外环审查。一轮以「接下来我会……」这类承诺结束时，会被提醒一次把事做完。
+- **审查前先检查。**切片的检查没过时，OctoBuddy 先把输出交回它的内环修，遇到认得的错误还附上提示，最多 2 次，然后才交给外环审查。一轮以「接下来我会……」这类承诺结束时，会被提醒一次把事做完。提示优先用检查工具自己给的修复建议：App Hub 的准入检查在每条拒绝下打印稳定错误码和一行修法（`fix [hub-…]: …`，上游分支已备好，[前后对照](docs/evidence/diagnostics/before-after-2026-10-12.md)）；遇到旧版工具时，OctoBuddy 原有的文本提示照常工作。
 - **从返工中学习。**某一轮被接受但有返工浪费了时间时，或点了「从中学习」后，外环用 `octobuddy_learn` 最多记下 3 条新经验。`splash` 类的经验进入每个项目的 cookbook 和 skill，`orchestration` 类的经验进入外环的规则。保存在 `<data>/lessons/`。
 - **已验证：**2026-10-02 做了小账本（pocket-ledger）：外环是 Claude Code · Opus，内环是跑在 MiniMax 和 GLM 上的 codex、octos、pi 和 Claude Code。它已发布到本地 App Hub（0.1.1）。那次用了约 2 小时，当时还没有分块、每种 agent 的工具和这两份总结；有了它们之后的计时重跑还没做。
 - **已在 CI 里验证：**`src/e2e_tests.rs::dual_loop_plans_two_slices_runs_inner_then_checks_commits_and_accepts`——`cargo test --locked` 在临时 `OCTOBUDDY_HOME` 下跑这条链路，不需要网络和 API key：`plan::split_reply`（计划块 `src/stubs/plan_two_waves.md` 解析出两个切片，第二个在 wave 2）→ 真实的 `inner::Serve` 连上一个伪 `octos serve --stdio`（`src/stubs/stub_octos.py`，它在 session 的 cwd 里写出切片源码）→ 信封变成 `LoopEvent` → `verify::run` 跑切片检查 → `workspace::commit_files` 提交 → 审查块（`src/stubs/review_wave_1.md`）接受 wave 1 → `orchestrate::wave_may_start` 放行 wave 2（stale / fix / closed 三种分支都验证过）。**没有覆盖**的部分（集成测试没法构造 Makepad widget 层）：`OctoBuddyView::apply_event`、外环的 agent 进程（`claude`/`codex`/`pi`）。
@@ -435,6 +458,8 @@ Cargo 不能用同一个仓库的另一个 revision 去 patch 一个 git 来源�
 | `OCTOBUDDY_TOOL_SILENT_SECS` | 环自己的一步（一条命令、一次构建）没有消息时最多算多久的工作，单位秒（默认 900，至少 30） |
 | `OCTOBUDDY_REVIEW_EVERY` | 多久读一次提交的 App Hub issue 来跟进审核意见，单位秒（默认 300，至少 30） |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | 追加记录 Codex 转换层每次失败的调用（状态、请求和响应，从不含 key） |
+| `OCTOBUDDY_MATRIX_TOKEN` | OctoBuddy 向关联的 hagency（Matrix）房间发言用的访问令牌（否则读钥匙串项 `OCTOBUDDY_MATRIX_TOKEN::octobuddy`） |
+| `OCTOBUDDY_HAGENCY_EVERY` | 多久读一次关联的 hagency 房间来收取协调人的回复，单位秒（默认 15，至少 5） |
 
 ## 尚未完成
 
