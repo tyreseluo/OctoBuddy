@@ -9,6 +9,18 @@ use crate::lifecycle::{DocItem, DocKind, SliceMachine, SliceState, TransitionKin
 use crate::model::now_secs;
 use crate::{i18n, OctoBuddyView, Stage};
 use makepad_widgets::*;
+use std::path::Path;
+
+/// Open `path` with the OS default handler (text editor for a .md file).
+/// macOS: `open <path>`. Linux: `xdg-open`. Windows: `explorer`.
+/// Best-effort: a failure here is silent (the person can open it from Finder).
+fn open_in_default(path: &Path) {
+    let path = path.to_path_buf();
+    std::thread::spawn(move || {
+        let program = if cfg!(target_os = "macos") { "open" } else if cfg!(windows) { "explorer" } else { "xdg-open" };
+        let _ = std::process::Command::new(program).arg(&path).spawn();
+    });
+}
 
 /// Where a node sits on the canvas. The layout is hand-picked: the happy
 /// path runs left to right, the SentBack loop curves back to Running, and
@@ -446,7 +458,7 @@ impl OctoBuddyView {
         }
         // The state machine canvas gets the slice machine.
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
-        canvas.set_slices(cx, machine);
+        canvas.set_slices(cx, machine.clone());
         // Sub-tabs: which one is shown.
         let show_sm = self.life_tab == crate::LifeTab::StateMachine;
         self.view.view(cx, ids!(life_sm)).set_visible(cx, show_sm);
@@ -460,6 +472,21 @@ impl OctoBuddyView {
             self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
             self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
             self.render_life_docs(cx);
+            // Opening the docs stream: regenerate LIVING.md (sync, but only when content changed).
+            let sessions: Vec<&_> = self.store.projects.iter().flat_map(|p| p.sessions.iter()).collect();
+            let stream = crate::lifecycle::build_doc_stream(&sessions, &Default::default());
+            let content = crate::lifecycle::build_living(&self.store.projects[at.0].name, &machine, &rounds, &stream);
+            let project = self.store.projects[at.0].path.clone();
+            let outcome = crate::lifecycle::write_living_md(&project, &content);
+            match outcome {
+                crate::lifecycle::LivingWrite::Wrote(path) => {
+                    self.system(at, &i18n::pick(format!("LIVING.md updated: {}", path.display()), format!("已更新 LIVING.md: {}", path.display())));
+                }
+                crate::lifecycle::LivingWrite::Skipped(why) => {
+                    self.system(at, &i18n::pick(format!("Could not write LIVING.md: {why}"), format!("无法写 LIVING.md：{why}")));
+                }
+                crate::lifecycle::LivingWrite::Unchanged => {}
+            }
         }
         // A summary of where each round is, for the legend.
         let mut bits: Vec<String> = Vec::new();
@@ -523,6 +550,14 @@ impl OctoBuddyView {
         if self.view.button(cx, ids!(life_tab_docs)).clicked(actions) {
             self.life_tab = crate::LifeTab::Docs;
             self.relayout(cx);
+            return;
+        }
+        if self.view.button(cx, ids!(life_open_living)).clicked(actions) {
+            if let Some(at) = self.selected {
+                let project = self.store.projects[at.0].path.clone();
+                let path = crate::lifecycle::living_path(&project);
+                open_in_default(&path);
+            }
             return;
         }
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();

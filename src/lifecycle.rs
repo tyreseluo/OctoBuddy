@@ -956,6 +956,44 @@ pub fn build_living(project_name: &str, slices: &SliceMachine, rounds: &RoundMac
     out
 }
 
+/// Where LIVING.md is kept for `project_path`: `<project>/.octobuddy/living/LIVING.md`.
+pub fn living_path(project_path: &str) -> std::path::PathBuf {
+    std::path::Path::new(project_path).join(".octobuddy").join("living").join("LIVING.md")
+}
+
+/// What to do when LIVING.md is regenerated.
+#[derive(Debug)]
+pub enum LivingWrite {
+    /// No change since the last write: skip.
+    Unchanged,
+    /// Wrote the new contents to disk.
+    Wrote(std::path::PathBuf),
+    /// Could not write (no path, no permission, etc).
+    Skipped(String),
+}
+
+/// Write LIVING.md for the project at `project_path`. Returns `Unchanged`
+/// when the file already has the same content (so the caller can skip the
+/// system message). The directory is created if missing; existing content
+/// is preserved on `Unchanged`.
+pub fn write_living_md(project_path: &str, content: &str) -> LivingWrite {
+    let path = living_path(project_path);
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        if existing == content {
+            return LivingWrite::Unchanged;
+        }
+    }
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return LivingWrite::Skipped(format!("{e}"));
+        }
+    }
+    match std::fs::write(&path, content) {
+        Ok(()) => LivingWrite::Wrote(path),
+        Err(e) => LivingWrite::Skipped(format!("{e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
