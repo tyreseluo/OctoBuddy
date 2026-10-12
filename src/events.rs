@@ -31,6 +31,9 @@ pub enum LoopEvent {
     AgentInstalled { name: String, result: Result<String, String>, awaited: bool },
     /// A requested app's project made, its data read (`app_factory`), or why not.
     FactoryReady { id: String, result: crate::plugins::app_factory::Made },
+    /// App Hub submissions' issues read (`review_watch`): the person's
+    /// GitHub login (none: it could not be read), each issue as read or why not.
+    ReviewChecked { me: Option<String>, results: Vec<crate::plugins::review_watch::Checked> },
     /// The bad-release drill published its version (and the function it broke), or why not.
     CardLoopDrilled { project: String, result: Result<(String, String), String> },
     /// The production loop ran a published app (`card_loop::probe`).
@@ -100,7 +103,11 @@ pub enum LoopEvent {
     /// OctoBuddy's checks of a peer's work: agent-spec against its contract,
     /// and its test command (`passed` when one ran).
     /// `commit` is set when OctoBuddy committed the peer's files first (or could not).
-    PeerChecked { peer: String, verdict: String, passed: Option<bool>, commit: Option<Result<String, String>> },
+    /// `gate`: what the checks found, for its outer loop's `accept`.
+    PeerChecked { peer: String, verdict: String, passed: Option<bool>, commit: Option<Result<String, String>>, gate: Option<crate::model::Gate> },
+    /// Receipts left mid-way by a previous run, looked up (never redone):
+    /// `(project path, what was found)`.
+    ReceiptsReconciled { lines: Vec<(String, String)> },
     /// An approval was decided, resolved by policy or cancelled elsewhere: no longer the person's.
     PeerApprovalGone { peer: String, approval_id: String },
     /// A peer asks the person to approve a tool call.

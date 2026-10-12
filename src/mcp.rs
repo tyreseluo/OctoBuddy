@@ -184,9 +184,10 @@ fn tools() -> Value {
             "close": {"type": "array", "items": {"type": "string"}},
             "rerun": {"type": "array", "description": "run a slice again from its brief on another agent or model (its agent or model failed): one of STATUS's AGENTS, with a model from its list", "items": {"type": "object", "required": ["to"], "properties": {"to": {"type": "string"}, "agent": {"type": "string", "enum": ["octos", "codex", "pi", "claude"]}, "model": {"type": "string"}}}},
             "queue_ops": {"type": "array", "items": {"type": "object", "required": ["op", "to"], "properties": {"op": {"type": "string", "enum": ["cancel", "replace", "merge"]}, "to": {"type": "string"}, "id": {"type": "string"}, "ids": {"type": "array", "items": {"type": "string"}}, "message": {"type": "string"}}}}}}},
-        {"name": "octobuddy_review", "description": "Your verdict on inner loops' reported work: accept (done) or fix (send the fix with octobuddy_send). Accepting the last of a wave starts the next.",
+        {"name": "octobuddy_review", "description": "Your verdict on inner loops' reported work: accept (done) or fix (send the fix with octobuddy_send). Accepting the last of a wave starts the next. OctoBuddy refuses an accept while the slice's check failed, its report's claims are contradicted or it changed files outside its card: the answer says which.",
          "inputSchema": {"type": "object", "required": ["reviews"], "properties": {
-            "reviews": {"type": "array", "items": {"type": "object", "required": ["slug", "verdict"], "properties": {"slug": {"type": "string"}, "verdict": {"type": "string", "enum": ["accept", "fix"]}, "why": {"type": "string"}}}}}}},
+            "reviews": {"type": "array", "items": {"type": "object", "required": ["slug", "verdict"], "properties": {"slug": {"type": "string"}, "verdict": {"type": "string", "enum": ["accept", "fix"]}, "why": {"type": "string"},
+                "override": {"type": "string", "description": "accept only, when OctoBuddy refuses it: why the work is right anyway (the person sees it)"}}}}}}},
         {"name": "octobuddy_plugin", "description": "Call a tool of one of the PLUGINS your rules list (an external plugin at work for this project): its answer as text.",
          "inputSchema": {"type": "object", "required": ["plugin", "tool"], "properties": {
             "plugin": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}}},
@@ -296,8 +297,12 @@ impl OctoBuddyView {
                 let named: Vec<&str> = reply.reviews.iter().map(|r| r.slug.as_str()).collect();
                 self.known_slugs(at, &named)?;
                 let n = reply.reviews.len();
-                self.apply_reply(at, session, reply);
-                Ok(format!("Recorded {n} review(s)."))
+                let refused = self.apply_reply(at, session, reply);
+                if refused.is_empty() {
+                    return Ok(format!("Recorded {n} review(s)."));
+                }
+                let why: Vec<String> = refused.iter().map(|(slug, why)| format!("{slug} — {why}")).collect();
+                Ok(format!("Recorded {} review(s); NOT accepted: {}", n - refused.len(), why.join("\n")))
             }
             other => Err(format!("no tool {other}")),
         }

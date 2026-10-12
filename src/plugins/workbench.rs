@@ -7,6 +7,7 @@
 //! inside OctoSense).
 use crate::events::{self, LoopEvent};
 use crate::plugins::app_hub::{self, Listing};
+use crate::receipts::{self, Snapshot};
 use crate::{i18n, system, tapped, OctoBuddyView};
 use makepad_widgets::*;
 use serde_json::{json, Value};
@@ -81,8 +82,13 @@ pub struct Workbench {
     hub_status: Option<Result<String, String>>,
     /// The gate's output, from the last check.
     hub_check: String,
-    /// What Submit will do, shown for the person to confirm.
-    hub_plan: Option<String>,
+    /// What Submit will do, shown for the person to confirm, and what it
+    /// saw: Submit does it only on that.
+    hub_plan: Option<(String, Snapshot)>,
+    /// The app as a plan being worked out sees it.
+    hub_planned: Option<Snapshot>,
+    /// What this device's Publish button would publish, as drawn.
+    publish_snap: Option<(PathBuf, Snapshot)>,
     /// GitHub's gh: signed in (as whom), or why not.
     gh: Option<Result<String, String>>,
     /// What the tab says about the tools, the repository and the last
@@ -308,10 +314,14 @@ impl OctoBuddyView {
         }).filter(|s| !s.is_empty());
         self.view.label(cx, ids!(hub_status)).set_text(cx, busy.unwrap_or(&status));
         if hosted {
-            // Inside OctoSense: the local App Hub, where OctoSense installs it from.
-            self.view.label(cx, ids!(hub_hint)).set_text(cx, i18n::t(
-                "Publishes a signed copy to this device's App Hub (screenshots taken, App Hub's gate run); then install and run it from OctoSense's App Hub.",
-                "把签名副本发布到本机 App Hub（自动补截图、跑 App Hub 的检查），之后在 OctoSense 的 App Hub 里安装运行。"));
+            // Inside OctoSense: the local App Hub, where OctoSense installs it from;
+            // its button publishes the app as shown here, or nothing.
+            let snap = crate::plugins::app_publish::snapshot(&project.to_string_lossy());
+            let version = snap.version.clone().unwrap_or_default();
+            self.view.label(cx, ids!(hub_hint)).set_text(cx, &i18n::pick(
+                format!("Publishes a signed copy to this device's App Hub (screenshots taken, App Hub's gate run); then install and run it from OctoSense's App Hub. It will publish content {} ({version}).", snap.short()),
+                format!("把签名副本发布到本机 App Hub（自动补截图、跑 App Hub 的检查），之后在 OctoSense 的 App Hub 里安装运行。将发布内容 {}（{version}）。", snap.short())));
+            self.wb.publish_snap = Some((project.to_path_buf(), snap));
             self.view.button(cx, ids!(hub_publish)).set_text(cx, if self.publishing.is_some() { i18n::t("Publishing…", "发布中……") } else { i18n::t("Publish to this device's App Hub", "发布到本机 App Hub") });
             return;
         }
@@ -375,7 +385,7 @@ impl OctoBuddyView {
         } else {
             questions.iter().enumerate().map(|(i, q)| format!("{}. {q}", i + 1)).collect::<Vec<_>>().join("\n")
         });
-        self.view.label(cx, ids!(hub_plan)).set_text(cx, self.wb.hub_plan.as_deref().unwrap_or(""));
+        self.view.label(cx, ids!(hub_plan)).set_text(cx, self.wb.hub_plan.as_ref().map(|(plan, _)| plan.as_str()).unwrap_or(""));
         self.view.view(cx, ids!(hub_confirm_row)).set_visible(cx, self.wb.hub_plan.is_some() && self.wb.hub_busy.is_none());
         // The form from the files: when it is another project's, or after a step changed them.
         if self.wb.hub_for.as_deref() == Some(project) {
@@ -441,15 +451,17 @@ impl OctoBuddyView {
         if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
     }
 
-    fn hub_run(&mut self, project: &Path, step: HubStep) {
+    /// A step off the UI thread; Submit on `planned`, what its plan saw.
+    fn hub_run(&mut self, project: &Path, step: HubStep, planned: Option<Snapshot>) {
         self.wb.hub_busy = Some(step);
         self.wb.hub_status = None;
-        let (inbox, project) = (self.rt.inbox.clone(), project.to_path_buf());
+        let (inbox, project, lang) = (self.rt.inbox.clone(), project.to_path_buf(), i18n::lang());
         std::thread::spawn(move || {
+            i18n::set(lang);
             let result = match step {
                 HubStep::Prepare => app_hub::prepare(&project),
                 HubStep::Plan => app_hub::plan(&project),
-                HubStep::Submit => app_hub::submit(&project),
+                HubStep::Submit => app_hub::submit(&project, &planned.unwrap_or_default(), "person"),
                 HubStep::Gh => Ok(String::new()),
             };
             events::post(&inbox, LoopEvent::HubDone { project: project.to_string_lossy().into_owned(), step, result });
@@ -470,19 +482,25 @@ impl OctoBuddyView {
                 // Its screenshots and digest are new: the form reads the files again.
                 self.wb.hub_for = None;
             }
-            HubStep::Plan => match result {
-                Ok(plan) => {
-                    self.wb.hub_plan = Some(i18n::pick(format!("Submit will:\n{plan}"), format!("提交将会：\n{plan}")));
+            HubStep::Plan => match (result, self.wb.hub_planned.take()) {
+                (Ok(plan), Some(saw)) => {
+                    let at = saw.head.as_deref().map(receipts::short).unwrap_or("—").to_string();
+                    self.wb.hub_plan = Some((i18n::pick(format!("Submit will:\n{plan}\n\nOn content {} at commit {at}: a change before Submit voids this plan.", saw.short()),
+                        format!("提交将会：\n{plan}\n\n基于内容 {}、提交 {at}：确认之前有任何改动，这份计划就作废。", saw.short())), saw));
                 }
-                Err(e) => self.wb.hub_status = Some(Err(e)),
+                (Ok(_), None) => {}
+                (Err(e), _) => self.wb.hub_status = Some(Err(e)),
             },
             HubStep::Submit => {
                 self.wb.hub_plan = None;
                 self.wb.hub_for = None;
-                let issue = result.as_ref().ok().and_then(|log| log.lines().rev().find_map(|l| l.strip_prefix("issue: ")).map(String::from));
+                let issue = result.as_ref().ok().and_then(|log| log.lines().rev().find_map(|l| l.strip_prefix("issue: ")).filter(|i| !i.is_empty()).map(String::from));
+                // How its tag and issue read back.
+                let receipt = result.as_ref().ok().and_then(|log| log.lines().rev().find_map(|l| l.strip_prefix("receipt: ")))
+                    .map(|line| format!("\n{line}")).unwrap_or_default();
                 self.wb.hub_status = Some(result.map(|_| match &issue {
-                    Some(url) => i18n::pick(format!("Submitted: {url}. App Hub's maintainers review it there."), format!("已提交：{url}。App Hub 维护者会在那里审核。")),
-                    None => i18n::t("Submitted.", "已提交。").to_string(),
+                    Some(url) => i18n::pick(format!("Submitted: {url}. App Hub's maintainers review it there.{receipt}"), format!("已提交：{url}。App Hub 维护者会在那里审核。{receipt}")),
+                    None => i18n::pick(format!("Submitted.{receipt}"), format!("已提交。{receipt}")),
                 }));
                 if let (Some(url), Some(at)) = (issue, self.store.projects.iter().position(|p| p.path == project).and_then(|pi| {
                     self.store.projects[pi].sessions.len().checked_sub(1).map(|si| (pi, si))
@@ -530,7 +548,9 @@ impl OctoBuddyView {
         }
         // App Hub: inside OctoSense the local publish; on the host the form and its steps.
         if self.view.button(cx, ids!(hub_publish)).clicked(actions) {
-            self.publish_app(cx);
+            // As its hint showed it (none drawn for this project: refused as out of date).
+            let shown = self.wb.publish_snap.clone().filter(|(p, _)| *p == project).map(|(_, s)| s).unwrap_or_default();
+            self.publish_app(cx, shown);
         }
         let busy = self.wb.hub_busy.is_some_and(|s| s != HubStep::Gh);
         if self.view.button(cx, ids!(hub_save)).clicked(actions) {
@@ -540,7 +560,7 @@ impl OctoBuddyView {
         }
         if self.view.button(cx, ids!(hub_prepare)).clicked(actions) && !busy {
             let _ = self.hub_save(cx, &project);
-            self.hub_run(&project, HubStep::Prepare);
+            self.hub_run(&project, HubStep::Prepare, None);
             self.relayout(cx);
         }
         if self.view.button(cx, ids!(hub_answers_save)).clicked(actions) {
@@ -562,7 +582,11 @@ and the route (pass, human-review or reject) with its reasons last. Do not chang
         }
         if self.view.button(cx, ids!(hub_submit)).clicked(actions) && !busy {
             match self.hub_save(cx, &project) {
-                Ok(()) => self.hub_run(&project, HubStep::Plan),
+                Ok(()) => {
+                    // The plan is of the app as saved now: Submit does it only on that.
+                    self.wb.hub_planned = Some(app_hub::snapshot(&project));
+                    self.hub_run(&project, HubStep::Plan, None);
+                }
                 Err(e) => self.wb.hub_status = Some(Err(e)),
             }
             self.relayout(cx);
@@ -571,9 +595,11 @@ and the route (pass, human-review or reject) with its reasons last. Do not chang
             self.wb.hub_plan = None;
             self.relayout(cx);
         }
-        if self.view.button(cx, ids!(hub_confirm)).clicked(actions) && !busy && self.wb.hub_plan.is_some() {
-            self.hub_run(&project, HubStep::Submit);
-            self.relayout(cx);
+        if self.view.button(cx, ids!(hub_confirm)).clicked(actions) && !busy {
+            if let Some((_, saw)) = self.wb.hub_plan.clone() {
+                self.hub_run(&project, HubStep::Submit, Some(saw));
+                self.relayout(cx);
+            }
         }
         // Permissions: the form into the manifest (the preview reloads from it).
         if self.view.button(cx, ids!(perms_save)).clicked(actions) {

@@ -149,7 +149,10 @@ verified, partially verified or unverified, and the evidence, naming which peer 
 A [tests] line is OctoBuddy's own run of the slice's check; a [commit] line is the commit it made of the \
 peer's files (or why it made none). Then end with one block giving each peer you reviewed your call: accept \
 (verified, done: send it nothing more) or fix (not yet: send that peer exactly what to fix, and its next \
-report comes back to you). Keep reviewing and fixing until the person's request is met. Its commits stay \
+report comes back to you). OctoBuddy refuses an accept while the slice's check failed, its report claims what \
+OctoBuddy's own run contradicts (its [claims] lines) or it changed files outside its card's Files (a gate: line says \
+which): fix it, close it, or accept it with \"override\": a reason the person sees. \
+Keep reviewing and fixing until the person's request is met. Its commits stay \
 either way; to undo work, send a peer to revert it.
 ```octobuddy-review
 {\"branches\":[{\"slug\":\"slug\",\"verdict\":\"accept\",\"why\":\"tests pass, within boundaries\"}]}
@@ -195,13 +198,14 @@ no project: your working folder is a scratch folder of its own, empty at first. 
 their language. You may read files and look things up on the web; you cannot change files or run commands here \
 (for work on a codebase, the person opens a project in OctoBuddy).";
 
-/// What the lead is told: its rules, then the estimation method.
+/// What the lead is told: its rules (with what an `<untrusted>` block is,
+/// last), then the estimation method.
 pub fn lead_prompt() -> String {
     // The skill's front matter is for skill loaders, not for the model.
     let method = ESTIMATION.splitn(3, "---").nth(2).unwrap_or(ESTIMATION).trim();
     // What earlier runs taught (`lessons`): planning, splitting, agents and models.
     let learned = crate::lessons::section("orchestration", "LESSONS FROM EARLIER RUNS (OctoBuddy's own, kept with octobuddy_learn; follow them unless this request says otherwise):");
-    format!("{LEAD_RULES}\n\nAGENT-ESTIMATION (the method to estimate every plan with):\n\n{method}\n\n{}{learned}", CALIBRATION.trim())
+    format!("{LEAD_RULES}\n\n{}\n\nAGENT-ESTIMATION (the method to estimate every plan with):\n\n{method}\n\n{}{learned}", crate::untrusted::RULE, CALIBRATION.trim())
 }
 
 /// Claude Code's own model and effort settings for a project: the user's
@@ -745,6 +749,7 @@ mod tests {
         assert!(prompt.starts_with("You are the lead"));
         assert!(prompt.contains("## Estimation Procedure") && prompt.contains("# Calibration Examples"));
         assert!(!prompt.contains("name: agent-estimation"), "front matter is dropped");
+        assert!(prompt.contains(&format!("{LEAD_RULES}\n\n{}\n\nAGENT-ESTIMATION", crate::untrusted::RULE)), "what a fence means closes its rules");
     }
 
     #[test]

@@ -6,7 +6,11 @@
 //! and kept under OctoBuddy's data, never in the project), commits and tags
 //! it in the app's public repository, and opens the `Submit <id> <version>`
 //! issue App Hub's maintainers accept. Nothing is submitted until the person
-//! has seen every step (`plan`) and pressed Submit.
+//! has seen every step (`plan`) and pressed Submit, and only as the plan
+//! saw it (its snapshot: a change since voids it). A submission keeps a
+//! receipt per version: one cut off after its tag goes on from what is
+//! there (`resume`), never tags or opens an issue twice, and its tag and
+//! issue are read back from the remote and GitHub.
 //!
 //! What the form holds lives where App Hub reads it (`bundle/manifest.json`,
 //! `bundle/listing.json`); OctoBuddy's own choices for the app (its
@@ -14,6 +18,8 @@
 //! `<project>/.octobuddy/app-hub.json`. Inside OctoSense an app goes to
 //! the local App Hub instead (`app_publish.rs`).
 use super::octosense_app::{self, Tools};
+use crate::i18n;
+use crate::receipts::{self, Kind, Prior, Receipt, Snapshot};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -239,21 +245,164 @@ pub fn save_answers(project: &Path, text: &str) -> Result<(), String> {
     std::fs::write(project.join("build/REVIEW-ANSWERS.md"), text).map_err(|e| e.to_string())
 }
 
+/// What a submission is bound to: the commit, the app's content with its
+/// review answers and how it is signed, the version. A plan shown on one
+/// is void once any of it moves.
+pub fn snapshot(project: &Path) -> Snapshot {
+    let app = super::app_publish::snapshot(&project.to_string_lossy());
+    let own = read_json(&own_path(project));
+    let signing = format!("{}\n{}", s(&own["publisher_id"]), own["sign"].as_bool().unwrap_or(false));
+    Snapshot { content: receipts::digest(&[app.content.as_bytes(), answers(project).as_bytes(), signing.as_bytes()]), ..app }
+}
+
+/// A step of a submission left to do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Sign (if asked), stamp, check, commit and tag it.
+    Tag,
+    /// Push its commit and tag (its repository made first, if none).
+    Push,
+    /// Open its `Submit` issue.
+    Issue,
+}
+
+impl Step {
+    fn key(self) -> &'static str {
+        match self {
+            Step::Tag => "tag",
+            Step::Push => "push",
+            Step::Issue => "issue",
+        }
+    }
+}
+
+/// What is left of a submission, from what is there: its tag here
+/// (`local`), on the remote (`remote`), its issue (`issue`). One cut off
+/// goes on from where it stopped, and never tags or opens an issue twice.
+pub fn resume(local: bool, remote: bool, issue: bool) -> Result<Vec<Step>, String> {
+    match (local, remote, issue) {
+        (false, false, false) => Ok(vec![Step::Tag, Step::Push, Step::Issue]),
+        (true, false, false) => Ok(vec![Step::Push, Step::Issue]),
+        (true, true, false) => Ok(vec![Step::Issue]),
+        (true, false, true) => Ok(vec![Step::Push]),
+        (_, true, true) => Ok(Vec::new()),
+        (false, true, false) => Err(i18n::t("Its tag is on the remote but not here (made elsewhere?): raise the version.", "远端有这个版本的标签，本地却没有（在别处打的？）：请提高版本号。").into()),
+        (false, false, true) => Err(i18n::t("An issue for this version is open already, with no tag for it: raise the version.", "这个版本已经有提交 issue，却没有对应的标签：请提高版本号。").into()),
+    }
+}
+
+/// A file as the commit `rev` has it.
+fn at_rev(dir: &Path, rev: &str, file: &str) -> Option<Vec<u8>> {
+    let out = Command::new("git").arg("-C").arg(dir).args(["show", &format!("{rev}:{file}")]).env("PATH", crate::workspace::search_path()).output().ok()?;
+    out.status.success().then_some(out.stdout)
+}
+
+/// What is left of submitting `l`'s version, read from the repository, its
+/// remote and GitHub. A tag here must hold the app as it is now, and be
+/// the remote's, to go on from.
+fn left(project: &Path, l: &Listing) -> Result<Vec<Step>, String> {
+    let dir = project.to_string_lossy().into_owned();
+    let tag = format!("v{}", l.version);
+    let here = crate::workspace::git(&dir, &["rev-list", "-n", "1", &tag]).ok();
+    // Not reachable, or no remote: not there (pushing a tag it has is a no-op).
+    let there = receipts::remote_tag(&dir, &tag).ok().flatten();
+    if let (Some(h), Some(t)) = (&here, &there) {
+        if h != t {
+            return Err(i18n::pick(format!("The tag {tag} on the remote is another commit than here: raise the version."), format!("远端的标签 {tag} 和本地的不是同一个提交：请提高版本号。")));
+        }
+    }
+    if here.is_some() {
+        let tagged = super::app_publish::content_from(|f| at_rev(project, &tag, &format!("bundle/{f}")));
+        if tagged != super::app_publish::content(&dir) {
+            return Err(i18n::pick(format!("The tag {tag} was made from other content than the app now: raise the version."), format!("标签 {tag} 打在了和现在不同的内容上：请提高版本号。")));
+        }
+    }
+    let tagged = here.is_some() || there.is_some();
+    // Whether its issue is open, when a run before may have opened it: not known, nothing is opened.
+    let issue = match receipts::find_issue(&hub_repo(), &format!("Submit {} {}", l.id, l.version)) {
+        Ok(found) => !found.is_empty(),
+        Err(err) if tagged => return Err(i18n::pick(format!("Could not ask GitHub whether its issue is open ({err}): try again."), format!("没能向 GitHub 确认 issue 是否已开（{err}）：请重试。"))),
+        Err(_) => false,
+    };
+    resume(here.is_some(), there.is_some(), issue)
+}
+
+/// What stops a submission before anything runs.
+fn ready(project: &Path, l: &Listing) -> Result<(), String> {
+    let problems = problems(l);
+    if !problems.is_empty() {
+        return Err(problems.join("\n"));
+    }
+    if !project.join("build/REVIEW-ANSWERS.md").is_file() || answers(project).trim().is_empty() {
+        return Err(crate::i18n::t("Answer the review questions first (Check, then the answers).", "请先回答审查问题（先「检查」，再填回答）。").into());
+    }
+    Ok(())
+}
+
+/// `l`'s version submitted before, as its receipt says.
+fn already(l: &Listing, r: &Receipt) -> String {
+    let issue = r.result.clone().unwrap_or_default();
+    i18n::pick(format!("{} {} is submitted already ({issue}): nothing is done again.", l.id, l.version), format!("{} {} 已经提交过（{issue}）：不会重复提交。", l.id, l.version))
+}
+
 /// What the person's Submit does, step by step, and the issue it opens
 /// (none of it done: the dialog shows this first). Blocks.
 pub fn plan(project: &Path) -> Result<String, String> {
-    submit_or_plan(project, true)
+    let l = read(project);
+    ready(project, &l)?;
+    if let Some(Prior::Done(r)) = receipts::prior(Kind::HubSubmit, &project.to_string_lossy(), &format!("{} {}", l.id, l.version)) {
+        return Ok(format!("- {}", already(&l, &r)));
+    }
+    let steps = left(project, &l)?;
+    if steps.is_empty() {
+        return Ok(i18n::pick(format!("- nothing: {} {} is submitted already (its tag and its issue are there); Submit only reads them back", l.id, l.version),
+            format!("- 什么都不用做：{} {} 已经提交过（标签和 issue 都在）；「确认提交」只会回读核对", l.id, l.version)));
+    }
+    submit_or_plan(project, &l, true, &steps)
 }
 
-/// Submits it (after `plan` was shown and the person pressed Submit):
-/// signs it if asked, commits and tags it, pushes, opens the issue; the
-/// issue's link on the last line. Blocks.
-pub fn submit(project: &Path) -> Result<String, String> {
-    let log = submit_or_plan(project, false)?;
-    // The script's last lines: the commit, the repository, the issue.
-    let field = |k: &str| log.lines().rev().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().to_string()).unwrap_or_default();
+/// Submits it (after `plan` was shown on `expected` and the person pressed
+/// Submit): what is left of signing, committing, tagging, pushing and the
+/// issue, then its tag and issue read back; the issue's link on its line,
+/// the receipt's on the last. Refused when the plan is out of date. Blocks.
+pub fn submit(project: &Path, expected: &Snapshot, by: &str) -> Result<String, String> {
     let l = read(project);
-    let sub = Submission { version: l.version.clone(), tag: format!("v{}", l.version), commit: field("commit: "), repo: field("repo: "), issue: field("issue: ") };
+    ready(project, &l)?;
+    let dir = project.to_string_lossy().into_owned();
+    let inputs = format!("{} {}", l.id, l.version);
+    let draft = receipts::draft(Kind::HubSubmit, &dir, &inputs, expected.clone(), by);
+    receipts::still(&draft, &snapshot(project)).map_err(|moved| i18n::pick(format!("Plan out of date ({moved}) — review again: Submit for review shows what it does now."),
+        format!("计划已过期（{moved}）——请重新查看：点「提交审批…」会列出现在要做的事。")))?;
+    if let Some(Prior::Done(r)) = receipts::prior(Kind::HubSubmit, &dir, &inputs) {
+        return Ok(format!("{}\nissue: {}", already(&l, &r), r.result.clone().unwrap_or_default()));
+    }
+    let steps = left(project, &l)?;
+    let mut r = match receipts::prepare(Kind::HubSubmit, &dir, &inputs, expected.clone(), by) {
+        Ok(r) => r,
+        // Cut off before: it goes on from what is there.
+        Err(Prior::Open(r)) => *r,
+        Err(Prior::Done(r)) => return Ok(already(&l, &r)),
+    };
+    let tag = format!("v{}", l.version);
+    let title = format!("Submit {} {}", l.id, l.version);
+    let read_back = |r: &mut Receipt| {
+        let checks = vec![receipts::read_back_tag(&dir, &tag), receipts::read_back_issue(&hub_repo(), &title)];
+        let issue = checks.iter().find(|c| c.what == "issue" && c.ok == Some(true)).map(|c| c.detail.clone());
+        receipts::settle(r, checks, issue);
+    };
+    if steps.is_empty() {
+        read_back(&mut r);
+        return Ok(format!("{}\nissue: {}\nreceipt: {}", already(&l, &r), r.result.clone().unwrap_or_default(), receipts::line(&r)));
+    }
+    receipts::executing(&mut r);
+    let log = submit_or_plan(project, &l, false, &steps);
+    read_back(&mut r);
+    let line = receipts::line(&r);
+    let log = log.map_err(|e| format!("{e}\nreceipt: {line}"))?;
+    // The script's last lines: the commit, the repository, the issue (else the one read back).
+    let field = |k: &str| log.lines().rev().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().to_string()).unwrap_or_default();
+    let issue = Some(field("issue: ")).filter(|i| !i.is_empty()).or(r.result.clone()).unwrap_or_default();
+    let sub = Submission { version: l.version.clone(), tag, commit: field("commit: "), repo: field("repo: "), issue: issue.clone() };
     let opath = own_path(project);
     let mut own = read_json(&opath);
     if !own.is_object() {
@@ -261,20 +410,12 @@ pub fn submit(project: &Path) -> Result<String, String> {
     }
     own["submitted"] = json!({"version": sub.version, "tag": sub.tag, "commit": sub.commit, "repo": sub.repo, "issue": sub.issue});
     let _ = std::fs::write(&opath, serde_json::to_string_pretty(&own).unwrap_or_default() + "\n");
-    Ok(log)
+    let issue_line = if field("issue: ").is_empty() && !issue.is_empty() { format!("\nissue: {issue}") } else { String::new() };
+    Ok(format!("{log}{issue_line}\nreceipt: {line}"))
 }
 
-fn submit_or_plan(project: &Path, dry: bool) -> Result<String, String> {
-    let l = read(project);
-    let problems = problems(&l);
-    if !problems.is_empty() {
-        return Err(problems.join("\n"));
-    }
+fn submit_or_plan(project: &Path, l: &Listing, dry: bool, steps: &[Step]) -> Result<String, String> {
     let key = if l.sign { key_path(&l.publisher_id).to_string_lossy().into_owned() } else { String::new() };
-    let answered = project.join("build/REVIEW-ANSWERS.md");
-    if !answered.is_file() || answers(project).trim().is_empty() {
-        return Err(crate::i18n::t("Answer the review questions first (Check, then the answers).", "请先回答审查问题（先「检查」，再填回答）。").into());
-    }
     run_script(&[if dry { "plan" } else { "submit" }, &project.to_string_lossy()], &[
         ("APP_ID", l.id.clone()),
         ("APP_NAME", l.name.clone()),
@@ -282,6 +423,7 @@ fn submit_or_plan(project: &Path, dry: bool) -> Result<String, String> {
         ("PUBLISHER_ID", if l.sign { l.publisher_id.clone() } else { String::new() }),
         ("PUBLISHER_KEY", key),
         ("HUB_REPO", hub_repo()),
+        ("STEPS", steps.iter().map(|s| s.key()).collect::<Vec<_>>().join(" ")),
     ])
 }
 
@@ -291,6 +433,7 @@ const SCRIPT: &str = r###"#!/bin/sh
 #   prepare <project>: screenshots, stamp, gate, review packet
 #   plan <project>:    what submit does, nothing done
 #   submit <project>:  sign (if asked), gate, commit, tag, push, the issue
+#                      ($STEPS: what is left of them, `tag push issue`)
 set -u
 step="$1"; project="$2"
 {env}octo={octo}
@@ -340,31 +483,40 @@ prepare)
 plan|submit)
   dry=0; [ "$step" = plan ] && dry=1
   say() { if [ $dry -eq 1 ]; then echo "- $*"; fi; }
+  # What is left of it (OctoBuddy reads it from the tag, the remote and the
+  # issues): a run cut off after its tag goes on from there.
+  has() { case " ${STEPS:-tag push issue} " in *" $1 "*) return 0 ;; esac; return 1; }
   tag="v$APP_VERSION"
   cd "$project" || exit 2
   git rev-parse --git-dir > /dev/null 2>&1 || { echo "the project is not a git repository"; exit 1; }
-  if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then echo "the tag $tag exists already: raise the version"; exit 1; fi
+  if has tag && git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then echo "the tag $tag exists already: raise the version"; exit 1; fi
   remote=$(git remote get-url origin 2>/dev/null || echo "")
   gh auth status > /dev/null 2>&1 || { echo "GitHub's gh is not signed in: run gh auth login"; exit 1; }
-  if [ -n "$PUBLISHER_ID" ]; then
+  if ! has tag; then
+    say "go on from an earlier Submit that stopped after tagging $tag: nothing is signed, committed or tagged again"
+  elif [ -n "$PUBLISHER_ID" ]; then
     if [ -f "$PUBLISHER_KEY" ]; then say "sign it with your publisher key \"$PUBLISHER_ID\" ($PUBLISHER_KEY)"
     else say "make your publisher key \"$PUBLISHER_ID\" once ($PUBLISHER_KEY, kept on this Mac, never in the project) and sign it"; fi
   else
     say "submit it unsigned (allowed for a first submission)"
   fi
-  if [ -z "$remote" ]; then
+  if ! has push; then
+    say "$tag is on $remote already: nothing is pushed"
+  elif [ -z "$remote" ]; then
     owner=$(gh api user --jq .login 2>/dev/null)
     say "create the public repository github.com/$owner/$APP_ID and push this project to it"
   else
     say "push to $remote"
   fi
-  say "commit bundle/ (\"chore(release): $APP_NAME ${APP_VERSION}，提交 App Hub\") and tag it $tag"
-  say "open the issue \"Submit $APP_ID $APP_VERSION\" in github.com/$HUB_REPO"
-  if [ $dry -eq 1 ]; then
+  if has tag; then say "commit bundle/ (\"chore(release): $APP_NAME ${APP_VERSION}，提交 App Hub\") and tag it $tag"; fi
+  if has issue; then say "open the issue \"Submit $APP_ID $APP_VERSION\" in github.com/$HUB_REPO"
+  else say "its issue \"Submit $APP_ID $APP_VERSION\" is open already: no other is opened"; fi
+  if [ $dry -eq 1 ] && has issue; then
     echo
     echo "The issue will say:"
   fi
-  if [ $dry -eq 0 ]; then
+  check_out=$(cat "$build/check.txt" 2>/dev/null | grep -vE '^octo: (hub stamp|/)')
+  if [ $dry -eq 0 ] && has tag; then
     unsign
     "$HUB" stamp "$b" > /dev/null || exit 1
     if [ -n "$PUBLISHER_ID" ]; then
@@ -380,17 +532,18 @@ plan|submit)
     fi
     git add bundle && { git diff --cached --quiet || git commit -q -m "chore(release): $APP_NAME ${APP_VERSION}，提交 App Hub"; } || exit 1
     git tag -a "$tag" -m "$APP_NAME $APP_VERSION" || exit 1
+  fi
+  if [ $dry -eq 0 ] && has push; then
     if [ -z "$remote" ]; then
       gh repo create "$APP_ID" --public --source . --remote origin --push > /dev/null || exit 1
       remote=$(git remote get-url origin)
-    else
+    elif [ "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$tag")" ]; then
       git push -q origin HEAD || exit 1
     fi
     git push -q origin "$tag" || exit 1
-  else
-    check_out=$(cat "$build/check.txt" 2>/dev/null | grep -vE '^octo: (hub stamp|/)')
   fi
-  commit=$(git rev-parse HEAD)
+  # The commit its tag names (before it is made: the one now).
+  commit=$(git rev-list -n 1 "$tag" 2>/dev/null || git rev-parse HEAD)
   url=$(echo "$remote" | sed -E 's#^git@github.com:#https://github.com/#; s#\.git$##')
   [ -n "$url" ] || url="https://github.com/$(gh api user --jq .login 2>/dev/null)/$APP_ID"
   if [ -n "$PUBLISHER_ID" ]; then
@@ -404,14 +557,14 @@ plan|submit)
     echo
     echo "- Repository: $url"
     echo "- Tag: $tag"
-    echo "- Commit: $( [ $dry -eq 1 ] && echo '(the commit this makes)' || echo "$commit")"
+    echo "- Commit: $( [ $dry -eq 1 ] && has tag && echo '(the commit this makes)' || echo "$commit")"
     echo "- Bundle: bundle/"
     echo "- Publisher: $key_line"
     echo
     echo "## hub check"
     echo
     echo '```'
-    if [ $dry -eq 0 ]; then cat "$build/check-final.txt"; else echo "$check_out"; fi
+    if [ $dry -eq 0 ] && [ -f "$build/check-final.txt" ]; then cat "$build/check-final.txt"; else echo "$check_out"; fi
     echo '```'
     echo
     echo "## Answers to the hub scan questions"
@@ -421,13 +574,16 @@ plan|submit)
     echo "(Prepared and submitted with OctoBuddy.)"
   } > "$body"
   if [ $dry -eq 1 ]; then
-    cat "$body"
+    if has issue; then cat "$body"; fi
     exit 0
   fi
-  issue=$(gh issue create -R "$HUB_REPO" --title "Submit $APP_ID $APP_VERSION" --body-file "$body") || exit 1
+  issue=""
+  if has issue; then
+    issue=$(gh issue create -R "$HUB_REPO" --title "Submit $APP_ID $APP_VERSION" --body-file "$body") || exit 1
+  fi
   echo "commit: $commit"
   echo "repo: $url"
-  echo "issue: $issue"
+  if [ -n "$issue" ]; then echo "issue: $issue"; fi
   ;;
 *) echo "unknown step $step"; exit 2 ;;
 esac
@@ -505,6 +661,38 @@ mod tests {
         assert!(plan.contains("Submit pocket-ledger 9.9.9") && plan.contains("unsigned") && plan.contains("PASSED"), "{plan}");
         let tag = Command::new("git").args(["tag", "-l", "v9.9.9"]).current_dir(&dir).output().unwrap();
         assert!(tag.stdout.is_empty(), "the plan makes nothing");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A submission cut off after its tag goes on from there: a tag pushed
+    /// with no issue only opens the issue, a tag not pushed only pushes.
+    #[test]
+    fn a_submission_goes_on_from_what_is_there() {
+        use Step::*;
+        assert_eq!(resume(false, false, false), Ok(vec![Tag, Push, Issue]));
+        assert_eq!(resume(true, false, false), Ok(vec![Push, Issue]));
+        assert_eq!(resume(true, true, false), Ok(vec![Issue]));
+        assert_eq!(resume(true, false, true), Ok(vec![Push]), "its issue is open: no second one");
+        assert_eq!(resume(true, true, true), Ok(vec![]));
+        assert_eq!(resume(false, true, true), Ok(vec![]));
+        assert!(resume(false, true, false).is_err(), "a tag made elsewhere is not ours to go on from");
+        assert!(resume(false, false, true).is_err());
+    }
+
+    /// The plan is bound to the app, its answers and how it is signed.
+    #[test]
+    fn a_plan_is_bound_to_what_it_saw() {
+        let dir = project();
+        let before = snapshot(&dir);
+        assert_eq!(before, snapshot(&dir));
+        save_answers(&dir, "## 1. …\n\nYes.\n").unwrap();
+        let answered = snapshot(&dir);
+        assert_ne!(before.content, answered.content, "the answers");
+        let mut l = read(&dir);
+        l.sign = true;
+        l.publisher_id = "me".into();
+        write(&dir, &l).unwrap();
+        assert_ne!(answered.content, snapshot(&dir).content, "how it is signed");
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -72,6 +72,40 @@ Like Cindy, OctoBuddy keeps its own copy of each agent's program, at the version
   - **The timeline.** Each line between the loops joins the turn that sent it to the turn that took it up. Each wait is a dotted line that says why: the agent starting, the previous wave's acceptance, a queue, OctoBuddy's check, you, a restart. The summary adds them up by why, counting time once when several lanes wait together. Work that did not stand is marked: a lane replaced by a later one is hatched as history, a turn done again later is outlined, a ring marks each rework with its likely cause, and the panel under it lists them with the time they cost. **Learn from it** asks the outer loop to keep lessons from them (below).
 - **Plugins.** Built in: OctoSense apps (everything about an app project, with the app workbench: below), app data, the native TUI (off by default), and, inside OctoSense only, the app factory and the production loop (below). Each built-in one is a file in `src/plugins/` (the framework is `src/plugins/mod.rs`). External plugins live in `<data>/plugins/<id>/plugin.json`, next to a program that OctoBuddy runs once per call.
 
+## What OctoBuddy checks itself
+
+The agents propose and do the work; what counts as done is decided by what OctoBuddy runs and reads back itself.
+
+- **A report against the facts.** An inner loop ends its task with a report whose `verified:` line names what it ran. OctoBuddy holds each claim against its own run of the slice's check, the commit it made and the files:
+  - ✓ the facts bear it out;
+  - ✗ they contradict it: it says the tests pass and OctoBuddy's run of that check failed, it says it changed a file that is as it was, it says it deleted a file that is still there;
+  - ? OctoBuddy did not run that, or ran no check: it is the agent's own word, and is shown as such.
+
+  The `[claims]` lines go to the outer loop with the report. A report with a ✗ goes back to its inner loop once, with why, before the outer loop reviews it. The rules are deliberately cautious: a near match (`cargo test` against a check of `cargo test --locked`), a run that timed out, or a failure the agent reported itself is a ?, never a ✗.
+- **The accept gate.** OctoBuddy refuses the outer loop's `accept` while the slice's check failed, it was committed again after its check, one of its claims is contradicted, or it changed files outside its card. Each refusal names the ways on: send it back (`fix`), close it, or accept it with `"override": "<why it is right anyway>"`, which the person sees in the session. A refused accept is not recorded, so waves wait for a real one; an override is never refused, so they never wait for good.
+- **Receipts, read back.** An inner loop's commit, a publish to the local App Hub, a Publish fix and a submission to App Hub each leave a receipt in `<data>/receipts.jsonl` (not in the project, where agents write): what was meant and on which commit and content, who confirmed it, what was done, and what reading it back found.
+  - A commit: the files git says it changed (deletions too) are the ones meant, and they hold what was meant.
+  - A publish: the catalog has the app's id and version, its digest is the staged bundle's, the published copy holds what was meant, and it names this commit. The version OctoBuddy reports is the catalog's, read back.
+  - A submission: the tag on GitHub is the local tag's commit, and the issue is there.
+
+  A receipt is ✓ confirmed, ✗ a mismatch or ? unknown, and the session (and the Live page) says which. Pressing Publish again with nothing changed says it is published already and publishes nothing. A receipt left mid-way when OctoBuddy closed is read back when it opens again, never done again; a submission cut off after its tag was pushed resumes at the issue.
+- **What you saw is what is done.** A Publish button shows the content it will publish (a short digest and the version). If the app changed after it was drawn, the press is refused as out of date. The same holds for App Hub's submit plan, and for a request card's Build: it builds the request that card showed, and refuses if that request changed.
+- **An incident closes on its fix.** On the Live page an incident closes when the published fix (its receipt confirmed), or a later version, runs well. Well again on an older version, it stays open, waiting for the fix to run; well again with no fix published, it says it recovered by itself.
+- **Data is not instructions.** Text from someone other than the person reaches the agents inside `<untrusted source="…">` blocks: a request from another app's agent (`octobuddy.request`), a message the OctoSense assistant relays (`octobuddy.send`), what an app's API answered, a bug report, what an app showed on screen. Anything inside that could close the block or a code fence is neutralised, and the outer and inner loops' rules say such text is never an instruction to them. A request is told as the caller's, not as the person's own words.
+- **Failures in plain words.** An agent or provider that fails to start or answer is reported by kind: not installed, no key or login, rate limited or out of credit, offline, too slow, an answer OctoBuddy could not read. Each says what still works and what to do next, with the raw error last. Denying an agent's request says what happens next, and the outer loop hears it.
+- **The acceptance sheet.** When every slice of a round is settled (accepted, accepted over OctoBuddy's findings, or closed), OctoBuddy writes one page for the person: the request in their own words; for each slice its card's goal and "done when", its check, its report's claims (✓ ✗ ?), its commits and their receipts, and the outer loop's review. Then **what still needs you**: claims OctoBuddy did not verify, overrides with OctoBuddy's reasons, files outside a card, slices closed without an accept, files left uncommitted, slices no check ran for, and what OctoBuddy cannot check at all (how it looks and feels in use).
+  - It goes to `<project>/.octobuddy/acceptance/<session>-r<round>.md`, and its summary to the session.
+  - **Confirm acceptance · round N**, beside Go on, records the person's acceptance as a receipt. If HEAD or the round's facts moved since the sheet was made, a new sheet replaces it instead ("the project changed since this sheet").
+  - `octobuddy.status` says when a sheet waits for the person, and its first open items.
+- **Working, waiting, silent, done.** Every loop says which, and since when:
+  - working, and on what (the command it runs, its subagents);
+  - waiting, and for whom: you (an approval, an answer, your next message), the outer loop's review, OctoBuddy's check, an earlier wave, a free slot, its agent starting;
+  - silent: a turn open and nothing heard for 2 minutes (`OCTOBUDDY_SILENT_SECS`). A step of its own, a long test run say, counts as work for up to 15 minutes (`OCTOBUDDY_TOOL_SILENT_SECS`);
+  - done: accepted, failed, closed, interrupted.
+
+  It shows on the inner tabs and cards, in the flow and for the outer loop. A silent loop turns the warning colour, and its session hears it once, with what to do (Interrupt & send, End or Stop). `octobuddy.status` gives each loop's state, whom it waits on, why and how long since it was heard, with `as_of`; a Live page watch that has not run for twice its pace is `stale`, not healthy.
+- **Verified in CI** (`cargo test --locked`, no network, no API keys): `a_report_the_facts_contradict_is_sent_back_and_its_accept_refused` drives a stub inner loop that breaks the code yet reports "all tests pass" and a file it never touched: OctoBuddy's check fails, its commit is read back, both claims come out ✗, the report goes back with why, an accept without override is refused, one with an override passes, and the next wave waits until then. The receipts, the snapshots, the fences and the failure kinds have unit tests of their own (`receipts.rs`, `app_publish.rs`, `app_hub.rs`, `card_loop.rs`, `app_factory.rs`, `untrusted.rs`, `failure.rs`), as do the acceptance sheet (`acceptance.rs`; the e2e test also builds one from its overridden slice) and the loops' states (`liveness.rs`). The publish read-back also runs against this machine's local App Hub (`reads_back_a_published_app_from_the_local_hub`, ignored by default): on 2026-10-11, 小账本 (pocket-ledger) 0.1.3 at commit `5f58490` read back confirmed on all four checks (catalog, digest, content, commit), and its working copy, which holds an uncommitted manifest change, was told apart as not what is published ([its output](docs/evidence/receipts/live-readback-2026-10-11.txt)). What ran for real and what was a stub, the failures and refusals, and what is not verified yet are in [VERIFICATION.md](VERIFICATION.md).
+
 ## Building an OctoSense app
 
 One plugin, **OctoSense apps**, holds everything about an app project (a folder with `bundle/manifest.json`).
@@ -96,6 +130,22 @@ On this computer the workbench's **App Hub** tab takes an app to OctoSense's App
 4. **Submit for review…** first lists what Submit will do and the issue it opens, and does nothing else. **Submit** then: signs it if you ticked Sign it (a publisher key made once, kept in `<data>/publisher/`, never in the project); runs the gate on the final bytes; commits `bundle/` and tags it `v<version>`; pushes it to its repository (or makes a public one on your GitHub with `gh`); and opens the `Submit <id> <version>` issue in `OctoSense-org/OctoSense-App-Hub` with the repository, tag, commit, publisher, the gate's output and your answers. The issue's link comes back in the tab and the session.
 
 It needs GitHub's `gh`, signed in. `OCTOBUDDY_APP_HUB_REPO` names another repository for the issue.
+
+**Following its review.** After a submission, OctoBuddy follows its issue, so a reviewer's comment does not wait for you to look.
+- **What it reads:** the issue of each app's last submission, once its receipt has read the issue back. Every 5 minutes (`OCTOBUDDY_REVIEW_EVERY`, in seconds, at least 30), `gh` reads its comments and whether it is closed.
+- **A review** is the comments newer than the last it read, from someone other than you and not from a bot. The first read brings what reviewers wrote so far, unless the issue was closed by then.
+  - Inside OctoSense, it becomes a request on the Apps page from `app-hub-review`, bound to the project. Build opens a new session in that project with the comments as its brief, fenced as data. It makes no new project.
+  - On this computer there is no Apps page. It becomes a new session named for the review, and the brief goes in its composer when you open it.
+  - Either way nothing is sent until you send it, and the project's latest session says a review came in.
+- **The new version** is submitted from this tab, as before. Once its receipt is confirmed, OctoBuddy follows the new issue, and keeps following the old one until it is closed, or for 7 days.
+- **A closed issue** is said once in the session, then no longer read.
+- **When `gh` fails,** OctoBuddy tries again by itself, less often. The session hears it once: at once when `gh` is not installed or not signed in, after three failures in a row when GitHub cannot be reached. The same trouble is not said again within a day.
+- **Kept** in `<data>/reviews.json`.
+- **For a demo,** `OCTOBUDDY_APP_HUB_REPO` points the whole flow, the submission issue and its review, at a sandbox repository.
+- **Verified** on 2026-10-12, reading GitHub only:
+  - `reads_a_real_issue` (ignored by default): App Hub's issue 97 read open, its one reviewer's comment a review on a first read; issue 202 read closed (`completed`).
+  - OctoBuddy on this computer, with a scratch `OCTOBUDDY_HOME` and a hand-written confirmed receipt pointing at issue 97 (no real submission), `OCTOBUDDY_REVIEW_EVERY=30`: it followed the issue, read the comment as a review, said so in the project's session and made the session "Review: pocket-ledger 0.1.3" with the fenced brief. Restarted, it said nothing again.
+  - **Not run yet:** inside OctoSense (the Apps page request and its Build), and a real new submission taking the watch over.
 
 **Verified** on 2026-10-04 on a copy of 小账本: the form written, the screenshot taken, the gate `PASSED` (unsigned), seven questions; the plan listed making `github.com/<you>/pocket-ledger`, the commit and tag `v9.9.9` and the issue, with its body, and made nothing. **Not run yet:** a real submission.
 
@@ -129,6 +179,7 @@ The plugin `app-factory` builds OctoSense apps asked for from outside OctoBuddy.
 - **Waits for you.** The request appears on the Apps page (the pulse button beside Settings, in the accent colour while a request waits), with who asked, what for, when it is done and its data. Nothing is made, and no model is paid for, until you press **Build**. **Decline** turns it down.
 - **Built.** Build makes the app project from the design flow's template under `<data>/apps/`, and reads the data API it names. It then opens a new session with the request's brief in its composer. Pick the models for its outer and inner loops in the picker under it, and send; the data's shape goes with the message.
 - **Published.** **Publish** on its card publishes it to the local App Hub once its outer loop has stopped. Its live watch then starts.
+- **A review to address.** A request from `app-hub-review` (a reviewer's comment on an App Hub submission, see "Following its review") is bound to its project. Build opens a new session there with it and makes no project; its card has no Publish, since the new version is submitted from the workbench.
 - **Followed.** `octobuddy.status` lists the requests under `requests`, each with its status: waiting for the person, declined, preparing, building (and whether an outer loop works on it), published (the version), or failed.
 - **Kept** in `<data>/requests.json`.
 - **Verified** in OctoSense on 2026-10-02 with a Shanghai weather card on Open-Meteo's API:
@@ -339,7 +390,7 @@ The first time it starts there, OctoSense asks whether OctoBuddy's agent may sta
 
 ### Its pinned revisions
 
-`Cargo.toml` takes OctoSense and App Hub at the revisions OctoSense's main pins, and Makepad at the revision that App Hub names (`1f3b1de`, nine commits before OctoSense's `e29a0eaa`). Cargo cannot patch a git source with another revision of the same repository, so one Makepad here means App Hub's. Inside OctoSense, its `[patch]` sections resolve all of them to the shell's own checkouts. Move them when OctoSense moves its pins.
+`Cargo.toml` takes OctoSense (`b9d66d0f`) and App Hub (`3863591`) at the revisions OctoSense's main pins (as of 2026-10-11), and Makepad at the revision that App Hub names (`d653bc4`, the one OctoSense's main pins too). Cargo cannot patch a git source with another revision of the same repository, so one Makepad here means App Hub's. Inside OctoSense, its `[patch]` sections resolve all of them to the shell's own checkouts. Move them when OctoSense moves its pins.
 
 Run on its own, the divider beside the sidebar draws as a dark bar; inside OctoSense it is the thin line it should be. **Not yet looked into.**
 
@@ -350,6 +401,9 @@ Run on its own, the divider beside the sidebar draws as a dark bar; inside OctoS
 | `OCTOBUDDY_HOME` | Its data directory: projects, chats, plugins (default `~/.octobuddy`) |
 | `OCTOBUDDY_<NAME>_BIN` | The program to run for `claude`, `codex`, `pi`, `octos` (and the other tools), over OctoBuddy's copy and yours |
 | `OCTOBUDDY_DEBUG_EVENTS=1` | Prints every loop event on stderr |
+| `OCTOBUDDY_SILENT_SECS` | How long a loop with a turn open may go unheard before it shows as silent, in seconds (default 120, at least 10) |
+| `OCTOBUDDY_TOOL_SILENT_SECS` | How long one step of a loop's own (a command, a build) counts as work, unheard, in seconds (default 900, at least 30) |
+| `OCTOBUDDY_REVIEW_EVERY` | How often a submission's App Hub issue is read for review, in seconds (default 300, at least 30) |
 | `OCTOBUDDY_BRIDGE_LOG=<file>` | Appends each Codex bridge call that failed (its status, request and answer; never the key) |
 
 ## Not done yet
