@@ -3920,15 +3920,17 @@ impl OctoBuddyView {
             i18n::t("no scan yet", "尚未扫描").to_string()
         };
         self.view.label(cx, ids!(disk_meta)).set_text(cx, &meta);
+        // The picked tile: its path from the scan root, its size, its
+        // category, and — when the picker flagged it — why it could be
+        // reclaimed (the root itself when nothing is picked).
         let mut crumb_text = String::new();
         if let Some(scan) = &self.disk_scan {
-            let mut node = &scan.tree;
-            crumb_text.push_str(node.name.as_ref());
-            for c in &self.disk_crumbs {
-                if let Some(next) = node.children.get(*c as usize) {
-                    crumb_text.push_str(&format!(" / {}", next.name));
-                    node = next;
-                }
+            let crumbs: Vec<usize> = self.disk_crumbs.iter().map(|c| *c as usize).collect();
+            let chain = scan.chain(&crumbs);
+            if let Some(node) = chain.last() {
+                let path = chain.iter().map(|n| n.name.as_ref()).collect::<Vec<_>>().join("/");
+                let why = node.reclaim.map(|r| format!(" · {}", r.label())).unwrap_or_default();
+                crumb_text = format!("{} · {} · {}{why}", path, plugins::disk_map::human_bytes(node.bytes), node.category.label());
             }
         }
         self.view.label(cx, ids!(disk_crumbs)).set_text(cx, &crumb_text);
@@ -3940,12 +3942,14 @@ impl OctoBuddyView {
         self.view.label(cx, ids!(disk_growth)).set_text(cx, &self.disk_growth_text);
         // The canvas holds the tree it was last given: a scan passes once,
         // when it arrives (handing it over every pass would re-clone the
-        // tree and reset the directory the person drilled into).
+        // tree and reset the directory the person drilled into). The crumbs
+        // go with it — the canvas starts the new tree at its root.
         if !self.disk_canvas_fed {
             let scan = self.disk_scan.as_ref().map(|b| (**b).clone());
             if let Some(canvas) = self.view.widget(cx, ids!(disk_canvas)).borrow_mut::<plugins::disk_view::DiskCanvas>().as_mut() {
                 canvas.set_scan(cx, scan);
             }
+            self.disk_crumbs.clear();
             self.disk_canvas_fed = true;
         }
         // A scan starts when the panel is open with nothing to show, nothing
