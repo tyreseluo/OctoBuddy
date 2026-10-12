@@ -4052,12 +4052,19 @@ impl OctoBuddyView {
     /// and the UI thread only updates state and redraws. One scan per
     /// project and root at a time: a second ask for the same pair waits
     /// for the one already walking.
-    fn start_disk_scan(&mut self, project: String, kind: plugins::disk_map::Root) {
+    fn start_disk_scan(&mut self, project: String, mut kind: plugins::disk_map::Root) {
+        // A worktrees root that does not exist cannot be scanned (its toggle
+        // hides, but the choice can outlive the folder): the project root is
+        // the fallback, or there would be nothing to scan and no way back.
+        let project_id = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        if kind == plugins::disk_map::Root::Worktrees && !plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, plugins::disk_map::Root::Worktrees).exists() {
+            kind = plugins::disk_map::Root::Project;
+            self.disk_root_kind = kind.to_u8();
+        }
         let target = (project.clone(), kind.as_str().to_string());
         if self.disk_scan_target.as_ref() == Some(&target) {
             return;
         }
-        let project_id = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         let root = plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, kind);
         if !root.exists() {
             // Said once, retried only by the rescan button: an automatic
