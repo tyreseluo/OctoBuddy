@@ -1531,6 +1531,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "disktree-core"
+version = "0.11.0"
+source = "git+https://github.com/tobi/disktree?rev=6c8d4ce6211bf135ff4e42890faebff1040e1846#6c8d4ce6211bf135ff4e42890faebff1040e1846"
+dependencies = [
+ "chrono",
+ "rayon",
+ "rustc-hash 2.1.3",
+ "rustix",
+ "sysinfo 0.31.4",
+ "trash",
+ "winapi-util",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5251,7 +5266,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "subtle",
- "sysinfo",
+ "sysinfo 0.34.2",
  "tar",
  "tempfile",
  "tokio",
@@ -5621,12 +5636,14 @@ name = "octosense-octobuddy"
 version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
+ "disktree-core",
  "makepad-app-module",
  "makepad-terminal",
  "makepad-widgets",
  "octosense-app-peers",
  "octosense-app-policy",
  "octosense-llm-config",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
 ]
@@ -7584,6 +7601,19 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
+version = "0.31.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "355dbe4f8799b304b05e1b0f05fc59b2a18d36645cf169607da45bde2f69a1be"
+dependencies = [
+ "core-foundation-sys",
+ "libc",
+ "memchr 2.8.3",
+ "ntapi",
+ "windows 0.57.0",
+]
+
+[[package]]
+name = "sysinfo"
 version = "0.34.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4b93974b3d3aeaa036504b8eefd4c039dced109171c1ae973f1dc63b2c7e4b2"
@@ -8061,6 +8091,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "trash"
+version = "5.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be89b3fe156965d29ac4f8522f3a640c655affdd9f21cb4f36857f0c92c00317"
+dependencies = [
+ "libc",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "once_cell 1.21.4",
+ "percent-encoding",
+ "scopeguard",
+ "urlencoding",
+ "windows 0.62.2 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "tree-sitter"
 version = "0.24.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8356,6 +8403,12 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "utf-8"
