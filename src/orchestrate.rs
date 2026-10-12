@@ -2636,6 +2636,19 @@ Fix every cause, not only the first line it shows:\n\n{verdict}{}\n\nThen end wi
                     self.peer_failed(&peer, &format!("octos stopped: {error}"));
                 }
             }
+            // The lifecycle background worker finished: cache its result so
+            // `sync_life` can fold it into the doc stream without touching git.
+            LoopEvent::LifeDocs { project, repo_docs, acceptance } => {
+                self.life_docs_cache.retain(|(p, _)| p != &project);
+                self.life_docs_cache.push((project.clone(), repo_docs.into_iter().collect()));
+                self.life_acceptance_cache.retain(|(p, _)| p != &project);
+                self.life_acceptance_cache.push((project, acceptance));
+            }
+            // LIVING.md was written (or skipped) by the background worker:
+            // say so on the session's chat.
+            LoopEvent::LivingWrite { project, outcome } => {
+                self.life_written(project, outcome);
+            }
         }
     }
 

@@ -582,3 +582,66 @@ impl OctoBuddyView {
         }
     }
 }
+
+/// Compute the repo docs + acceptance sheets for one project, off the UI
+/// thread. Posts the result as `LoopEvent::LifeDocs`. The UI thread takes
+/// the cache and folds the repo docs + acceptance into the doc stream.
+///
+/// `sessions` is the slice of the project's sessions and their peers'
+/// commit lists, as the UI thread saw them. Anything the worker finds
+/// (new commits, new files) gets folded into the cached map.
+pub fn refresh_life_docs(
+    project: String,
+    sessions: Vec<SessionCommits>,
+    receipts: Vec<crate::lifecycle::ReceiptStatus>,
+    inbox: crate::events::Inbox,
+) {
+    std::thread::spawn(move || {
+        let mut peer_commits: Vec<crate::lifecycle::PeerCommit> = Vec::new();
+        for s in &sessions {
+            for peer in &s.peers {
+                for c in peer.commits.iter() {
+                    let hash = match c.split_whitespace().next() {
+                        Some(h) => h.to_string(),
+                        None => continue,
+                    };
+                    let files = crate::claims::committed(&project, &hash);
+                    let ct = crate::workspace::git(&project, &["show", "-s", "--format=%ct", &hash])
+                        .ok()
+                        .and_then(|s| s.trim().parse::<u64>().ok())
+                        .unwrap_or(0);
+                    let files = files.into_iter().map(|(s, p)| (s, p)).collect();
+                    peer_commits.push(crate::lifecycle::PeerCommit {
+                        slug: peer.slug.clone(),
+                        round: peer.round,
+                        hash,
+                        at: ct,
+                        files,
+                    });
+                }
+            }
+        }
+        let repo_docs = crate::lifecycle::group_repo_docs(&peer_commits);
+        let now = crate::model::now_secs();
+        let owned: Vec<crate::model::Session> = sessions.iter().map(|s| s.session.clone()).collect();
+        let session_refs: Vec<&_> = owned.iter().collect();
+        let acceptance = crate::lifecycle::acceptance_items(&project, &session_refs, &receipts, now);
+        crate::events::post(&inbox, crate::events::LoopEvent::LifeDocs { project: project.clone(), repo_docs, acceptance });
+    });
+}
+
+/// One session's commit list, shaped for the background worker. The UI
+/// thread clones what it needs before sending so the worker can outlive
+/// the borrow of the store.
+#[derive(Clone)]
+pub struct SessionCommits {
+    pub session: crate::model::Session,
+    pub peers: Vec<PeerCommits>,
+}
+
+#[derive(Clone)]
+pub struct PeerCommits {
+    pub slug: String,
+    pub round: u64,
+    pub commits: Vec<String>,
+}

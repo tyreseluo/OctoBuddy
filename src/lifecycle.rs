@@ -963,7 +963,7 @@ pub fn living_path(project_path: &str) -> std::path::PathBuf {
 }
 
 /// What to do when LIVING.md is regenerated.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LivingWrite {
     /// No change since the last write: skip.
     Unchanged,
@@ -1073,6 +1073,14 @@ pub struct AcceptanceItem {
     /// `true`: a `Confirmed` receipt for this session+round; `false`: prepared
     /// but not confirmed yet; `None`: no receipt at all.
     pub status: Option<bool>,
+}
+
+/// What the background worker holds for a project. Cached by the view; the
+/// worker rebuilds it when the session's events change.
+#[derive(Clone, Debug, Default)]
+pub struct LifeCache {
+    pub repo_docs: BTreeMap<String, Vec<RepoDocVersion>>,
+    pub acceptance: Vec<AcceptanceItem>,
 }
 
 /// What an acceptance receipt's status means for the sheet.
