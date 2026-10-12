@@ -5,7 +5,7 @@
 //!
 //! The model is what `lifecycle::build_slice_machine` derives from the
 //! store. The view does not write back.
-use crate::lifecycle::{SliceMachine, SliceState, TransitionKind};
+use crate::lifecycle::{DocItem, DocKind, SliceMachine, SliceState, TransitionKind};
 use crate::model::now_secs;
 use crate::{i18n, OctoBuddyView, Stage};
 use makepad_widgets::*;
@@ -439,14 +439,34 @@ impl OctoBuddyView {
         let session = self.store.session(at).unwrap();
         let machine = crate::lifecycle::build_slice_machine(session);
         let rounds = crate::lifecycle::build_round_machine(session);
+        let stream = crate::lifecycle::build_doc_stream(&[session], &Default::default());
+        self.life_docs = stream.items.clone();
+        if self.life_doc_picked.is_some_and(|i| i >= self.life_docs.len()) {
+            self.life_doc_picked = None;
+        }
+        // The state machine canvas gets the slice machine.
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
         canvas.set_slices(cx, machine);
+        // Sub-tabs: which one is shown.
+        let show_sm = self.life_tab == crate::LifeTab::StateMachine;
+        self.view.view(cx, ids!(life_sm)).set_visible(cx, show_sm);
+        self.view.view(cx, ids!(life_open_living)).set_visible(cx, true);
+        if show_sm {
+            self.set_life_docs_visible(cx, false);
+            self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
+            self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
+        } else {
+            self.set_life_docs_visible(cx, true);
+            self.view.button(cx, ids!(life_tab_sm)).set_text(cx, i18n::t("State machine", "状态机"));
+            self.view.button(cx, ids!(life_tab_docs)).set_text(cx, i18n::t("Docs", "文档流"));
+            self.render_life_docs(cx);
+        }
         // A summary of where each round is, for the legend.
         let mut bits: Vec<String> = Vec::new();
         for r in &rounds.rounds {
-            bits.push(i18n::pick(format!("round {} → {}", r.round, r.current.label()), format!("第 {} 轮 → {}", r.round, r.current.label())));
+            bits.push(i18n::pick(format!("round {} - {}", r.round, r.current.label()), format!("第 {} 轮 - {}", r.round, r.current.label())));
         }
-        let summary = if bits.is_empty() { i18n::t("No rounds yet.", "还没有轮次。").to_string() } else { bits.join(" · ") };
+        let summary = if bits.is_empty() { i18n::t("No rounds yet.", "还没有轮次。").to_string() } else { bits.join(" - ") };
         self.view.label(cx, ids!(life_round)).set_text(cx, &summary);
         self.view.label(cx, ids!(life_legend)).set_text(cx, i18n::t(
             "Green: success - red: failed - orange: stopped - yellow: over budget - light: discarded. Back-curve: sent back. Click a slice to highlight its path. Counts: how many of each edge the session crossed.",
@@ -455,13 +475,69 @@ impl OctoBuddyView {
         let _ = now_secs();
     }
 
+    /// Toggle the docs panel by id (its DSL handle).
+    fn set_life_docs_visible(&mut self, cx: &mut Cx, on: bool) {
+        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, on);
+    }
+
+    /// Render the doc stream as two labels: the list on the left, the picked
+    /// item's body on the right.
+    fn render_life_docs(&mut self, cx: &mut Cx) {
+        let mut lines: Vec<String> = Vec::new();
+        for (i, d) in self.life_docs.iter().enumerate() {
+            let marker = if Some(i) == self.life_doc_picked { ">" } else { " " };
+            let ver = d.version.map(|v| format!(" v{v}")).unwrap_or_default();
+            let round = d.round.map(|r| format!("R{r} ")).unwrap_or_default();
+            lines.push(format!("{marker} [{}{ver}] {} - {}", round, d.kind.label(), d.title));
+        }
+        let list_text = if lines.is_empty() { i18n::t("Nothing yet.", "还没有。").to_string() } else { lines.join("\n") };
+        self.view.label(cx, ids!(life_docs_list)).set_text(cx, &list_text);
+        let body = self.life_doc_picked.and_then(|i| self.life_docs.get(i))
+            .map(|d| {
+                let head = format!("[{}] {}\nby {}\n", d.kind.label(), d.title, d.author);
+                let mut text = head;
+                if let Some(path) = &d.path { text.push_str(&format!("path: {path}\n")); }
+                if let Some(commit) = &d.commit { text.push_str(&format!("commit: {commit}\n")); }
+                if let Some(peer) = &d.peer { text.push_str(&format!("peer: {peer}\n")); }
+                if let Some(round) = d.round { text.push_str(&format!("round: {round}\n")); }
+                text.push_str("---\n");
+                if let Some(body) = &d.body {
+                    text.push_str(body);
+                } else if d.path.is_some() {
+                    text.push_str(&i18n::t("(use Open LIVING.md or pick a request/plan/report to read here)", "（使用「打开 LIVING.md」或选一条需求/计划/报告查看）").to_string());
+                }
+                text
+            })
+            .unwrap_or_else(|| i18n::t("Pick a doc on the left to read it here.", "左侧选一条文档来读。").to_string());
+        self.view.label(cx, ids!(life_docs_body)).set_text(cx, &body);
+    }
+
     /// What the lifecycle view does on clicks (slice picked, docs tab).
     pub(crate) fn handle_life_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         if self.stage != Stage::Life { return; }
+        if self.view.button(cx, ids!(life_tab_sm)).clicked(actions) {
+            self.life_tab = crate::LifeTab::StateMachine;
+            self.relayout(cx);
+            return;
+        }
+        if self.view.button(cx, ids!(life_tab_docs)).clicked(actions) {
+            self.life_tab = crate::LifeTab::Docs;
+            self.relayout(cx);
+            return;
+        }
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
         for a in canvas.actions(actions) {
             match a {
-                LifeAction::Picked(slug) => { let _ = slug; }
+                LifeAction::Picked(slug) => {
+                    self.life_tab = crate::LifeTab::Docs;
+                    // Find the first doc item that came from this slice's slug.
+                    self.life_doc_picked = self.life_docs.iter().position(|d| {
+                        d.peer.as_deref() == Some(&slug)
+                            || d.author == slug
+                            || d.title.starts_with(&slug)
+                    });
+                    self.relayout(cx);
+                }
                 LifeAction::None => {}
             }
         }

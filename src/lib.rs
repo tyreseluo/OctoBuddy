@@ -86,6 +86,7 @@ use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
 use lifecycle_view::LifecycleCanvasWidgetRefExt;
 use model::{now_secs, Peer, SessionRef, Store};
+use lifecycle::DocItem;
 use orchestrate::Runtime;
 use plugins::card_loop::Loops as CardLoops;
 use plugins::app_factory::Factory as AppFactory;
@@ -1532,12 +1533,33 @@ script_mod! {
                                 life_tab_sm := SegOff{text: "State machine" height: 22}
                                 life_tab_docs := SegOff{text: "Docs" height: 22}
                                 Filler{}
+                                life_open_living := SegOff{text: "Open LIVING.md" height: 22}
                                 life_round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 9}}
                             }
                             RoundedView{
                                 width: Fill height: Fill new_batch: true padding: 1
                                 draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                 life_sm := LifecycleCanvas{}
+                            }
+                            life_docs_panel := RoundedView{
+                                width: Fill height: Fill flow: Right new_batch: true padding: 1 visible: false
+                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                RoundedView{
+                                    width: 280 height: Fill new_batch: true padding: 6
+                                    draw_bg.color: th_panel draw_bg.border_radius: 4.0
+                                    ScrollYView{
+                                        width: Fill height: Fill
+                                        life_docs_list := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                    }
+                                }
+                                RoundedView{
+                                    width: Fill height: Fill new_batch: true padding: 10
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0
+                                    ScrollYView{
+                                        width: Fill height: Fill
+                                        life_docs_body := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                                    }
+                                }
                             }
                             life_legend := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
                         }
@@ -2531,6 +2553,14 @@ enum Stage {
     Tui,
 }
 
+/// Which sub-tab of the lifecycle view is open.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum LifeTab {
+    #[default]
+    StateMachine,
+    Docs,
+}
+
 /// Playback speeds, axis seconds a second.
 const TIME_SPEEDS: [f64; 4] = [20.0, 60.0, 5.0, 1.0];
 
@@ -2658,6 +2688,15 @@ pub struct OctoBuddyView {
     // loops, or the session's timeline.
     #[rust]
     stage: Stage,
+    /// Which sub-tab of the lifecycle view is shown: the state machine or the
+    /// doc stream. Default: the state machine, the obvious first thing to read.
+    #[rust]
+    life_tab: LifeTab,
+    /// The doc stream last drawn for the shown session (and the picked item).
+    #[rust]
+    life_docs: Vec<DocItem>,
+    #[rust]
+    life_doc_picked: Option<usize>,
     // The timeline last drawn, for its panels.
     #[rust]
     time_tl: Timeline,
