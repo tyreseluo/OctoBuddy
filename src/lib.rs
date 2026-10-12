@@ -88,6 +88,7 @@ mod bench;
 #[cfg(test)]
 mod dsl_ids;
 use flow::FlowCanvasWidgetRefExt;
+use resize::{ResizeAction, ResizeHandleWidgetRefExt};
 use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};
 use lifecycle::DocItem;
@@ -3319,6 +3320,7 @@ impl OctoBuddyView {
         self.fit_pills(cx);
         // The panes shown now, fitted to the window.
         self.apply_panes(cx);
+        self.apply_disk_pane(cx);
         self.view.redraw(cx);
     }
 
@@ -3973,6 +3975,71 @@ impl OctoBuddyView {
         self.disk_worth.clear();
         self.disk_growth_text.clear();
         self.disk_last_auto_at = 0;
+    }
+
+    /// The disk panel's width limits and its default (the panes in
+    /// `layout.rs` keep theirs beside these in the store).
+    const DISK_PANE: (f64, f64, f64) = (280.0, 900.0, 420.0);
+
+    /// The disk panel's width as kept (its default before a drag).
+    fn disk_width(&self) -> f64 {
+        self.store.panes.iter().flatten().find(|p| p.id == "disk").map(|p| p.width).unwrap_or(Self::DISK_PANE.2)
+    }
+
+    fn set_disk_width(&mut self, width: f64) {
+        let panes = self.store.panes.get_or_insert_with(Vec::new);
+        match panes.iter_mut().find(|p| p.id == "disk") {
+            Some(p) => p.width = width,
+            None => panes.push(model::PaneWidth { id: "disk".to_string(), width }),
+        }
+    }
+
+    /// The disk panel fitted to the window, like `layout.rs` fits its panes:
+    /// the sidebar (the only pane that shows beside it — the other side
+    /// panels close when it opens) and the conversation's least room leave
+    /// the rest for it. The panel itself lives in this file, so its handle
+    /// answers here rather than in the `PANES` loop.
+    fn apply_disk_pane(&mut self, cx: &mut Cx) {
+        let window = self.view.area().rect(cx).size.x;
+        let sidebar = if self.view.view(cx, ids!(sidebar)).visible() { self.pane_width("sidebar") } else { 0.0 };
+        let room = if window > 0.0 { (window - sidebar - 360.0).max(Self::DISK_PANE.0) } else { Self::DISK_PANE.1 };
+        let width = self.disk_width().min(room);
+        let mut w = self.view.widget(cx, ids!(disk_panel));
+        script_apply_eval!(cx, w, { width: #(width) });
+    }
+
+    /// The disk panel's handle dragged (or double-clicked, for its default
+    /// width): the same answers `layout.rs` gives its panes.
+    fn disk_resize_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        for action in self.view.widget(cx, ids!(disk_handle)).as_resize_handle().actions(actions) {
+            match action {
+                ResizeAction::Start => {
+                    let shown = self.view.view(cx, ids!(disk_panel)).area().rect(cx).size.x;
+                    let start = if shown > 0.0 { shown } else { self.disk_width() };
+                    self.resizing = Some(("disk", start));
+                }
+                ResizeAction::Drag(dx) => {
+                    let Some((_, start)) = self.resizing.filter(|(k, _)| *k == "disk") else { continue };
+                    // The handle is on the panel's left: dragging left widens it.
+                    self.set_disk_width((start - dx).clamp(Self::DISK_PANE.0, Self::DISK_PANE.1));
+                    self.apply_disk_pane(cx);
+                    // The canvas is not redrawn with its parent.
+                    cx.redraw_all();
+                }
+                ResizeAction::End => {
+                    self.resizing = None;
+                    self.save();
+                    self.relayout(cx);
+                }
+                ResizeAction::Reset => {
+                    self.set_disk_width(Self::DISK_PANE.2);
+                    self.apply_disk_pane(cx);
+                    self.save();
+                    self.relayout(cx);
+                }
+                ResizeAction::None => {}
+            }
+        }
     }
 
     /// Begin a scan in a worker thread. The walk, the snapshot bookkeeping,
@@ -5278,6 +5345,7 @@ impl OctoBuddyView {
         self.handle_flow_actions(cx, actions);
         self.plugin_button_actions(cx, actions);
         self.resize_actions(cx, actions);
+        self.disk_resize_actions(cx, actions);
         self.tui_actions(cx, actions);
         self.workbench_actions(cx, actions);
         self.live_page_actions(cx, actions);
