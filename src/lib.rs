@@ -1941,7 +1941,55 @@ script_mod! {
                     // The disk map panel: the project's tree, the snapshot history,
                     // and a button to ask the outer loop about the picked tile.
                     disk_divider := View{width: Fit height: Fill visible: false disk_handle := ResizeHandle{}}
-                    disk_panel := View{width: 420 height: Fill flow: Right visible: false}
+                    disk_panel := SolidView{
+                        width: 420 height: Fill flow: Down new_batch: true visible: false
+                        draw_bg.color: th_panel
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                            padding: Inset{left: 16 right: 10 top: 14 bottom: 4}
+                            disk_title := Label{text: "Disk map" draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 13}}
+                            Filler{}
+                            disk_rescan := SegOff{text: "Rescan" height: 24}
+                            close_disk := SmallButton{text: "x"}
+                        }
+                        // Where a scan starts: the project, or the agents' worktrees.
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 4 padding: Inset{left: 16 right: 16 bottom: 8}
+                            disk_root_project := SegOff{text: "Project" height: 22 visible: false}
+                            disk_root_project_on := SegOn{text: "Project" height: 22}
+                            disk_root_worktrees := SegOff{text: "Worktrees" height: 22 visible: false}
+                            disk_root_worktrees_on := SegOn{text: "Worktrees" height: 22 visible: false}
+                        }
+                        View{
+                            width: Fill height: Fit padding: Inset{left: 16 right: 16 bottom: 8}
+                            disk_meta := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                        }
+                        // The treemap itself: the canvas draws the tiles, the frame
+                        // around it the border (the canvas's own back is clear).
+                        RoundedView{
+                            width: Fill height: Fill new_batch: true
+                            margin: Inset{left: 12 right: 12}
+                            draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                            disk_canvas := DiskCanvas{width: Fill height: Fill draw_bg +: {color: #x00000000}}
+                        }
+                        // The tile picked: up one level, where it is, ask about it.
+                        View{
+                            width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                            padding: Inset{left: 16 right: 16 top: 8 bottom: 6}
+                            disk_back := SegOff{text: "Up" height: 24}
+                            disk_crumbs := Label{width: Fill text: "" draw_text.color: ink draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                            disk_ask := SegOff{text: "Ask the outer loop" height: 24}
+                        }
+                        // Below the map: what is worth a look, and what grew.
+                        ScrollYView{
+                            width: Fill height: 180 flow: Down spacing: 4
+                            padding: Inset{left: 16 right: 16 bottom: 12}
+                            disk_worth_l := Label{width: Fill text: "" padding: 0 draw_text.color: muted draw_text.text_style: theme.font_bold{font_size: 9}}
+                            disk_worth := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                            disk_growth_l := Label{width: Fill text: "" padding: 0 margin: Inset{top: 8} draw_text.color: muted draw_text.text_style: theme.font_bold{font_size: 9}}
+                            disk_growth := Label{width: Fill text: "" draw_text.color: muted draw_text.wrap: Words draw_text.text_style: theme.font_code{font_size: 8.5}}
+                        }
+                    }
 
                     inner_divider := View{width: Fit height: Fill visible: false inner_handle := ResizeHandle{}}
                     inner_panel := SolidView{
