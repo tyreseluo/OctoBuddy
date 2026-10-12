@@ -24,6 +24,13 @@ pub enum LoopEvent {
     LoginsProbed(Vec<(String, crate::providers_view::Login)>),
     /// The app templates' local copy brought up to date (`plugins/new_app.rs`).
     TemplatesSynced(Result<(), String>),
+    /// The lifecycle view's repo docs + acceptance sheets are ready for the
+    /// project (`lifecycle_view.rs`). The UI thread takes the result and
+    /// merges it into the doc stream.
+    LifeDocs { project: String, repo_docs: std::collections::BTreeMap<String, Vec<crate::lifecycle::RepoDocVersion>>, acceptance: Vec<crate::lifecycle::AcceptanceItem> },
+    /// LIVING.md was written (or skipped) by the background worker for the
+    /// project. The UI thread logs a system line when it changed.
+    LivingWrite { project: String, outcome: crate::lifecycle::LivingWrite },
     /// Settings › Tools: the versions found on this machine.
     ToolsProbed(Vec<crate::tools_info::ToolInfo>),
     /// OctoBuddy's copy of an agent's program is installed (its path), or

@@ -48,6 +48,8 @@ pub mod stream;
 pub mod system;
 pub mod timeline;
 mod time_view;
+pub mod lifecycle;
+mod lifecycle_view;
 pub mod estimate;
 mod plan_panel;
 mod claude_proxy;
@@ -86,6 +88,7 @@ mod bench;
 use flow::FlowCanvasWidgetRefExt;
 use timeline::Timeline;
 use model::{now_secs, Peer, SessionRef, Store};
+use lifecycle::DocItem;
 use orchestrate::Runtime;
 use plugins::card_loop::Loops as CardLoops;
 use plugins::app_factory::Factory as AppFactory;
@@ -1050,9 +1053,17 @@ script_mod! {
         Path{d: "M3 7h9M3 12h14M3 17h6" fill: false stroke: th_muted_strong stroke_width: 1.8 stroke_linecap: "round"}
         Path{d: "M20 4v16" fill: false stroke: th_danger stroke_width: 1.6 stroke_linecap: "round"}
     }
+    let LifeIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
+        // A small node graph: a row of circles joined by curves, with a side exit.
+        Circle{cx: 4 cy: 12 r: 1.8 fill: true}
+        Circle{cx: 12 cy: 12 r: 1.8 fill: true}
+        Circle{cx: 20 cy: 12 r: 1.8 fill: true}
+        Path{d: "M5.5 12 L 10.5 12 M 13.5 12 L 18.5 12 M 20 13.5 Q 20 18 14 18 L 10 18 M 9 18 L 4 18 L 4 13.5" fill: false stroke: th_muted_strong stroke_width: 1.2 stroke_linecap: "round"}
+    }
     let FloatFlow = FloatSquare{icon := FlowIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatChat = FloatSquare{icon := ChatIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let FloatTime = FloatSquare{icon := TimeIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
+    let FloatLife = FloatSquare{icon := LifeIcon{width: 15 height: 15} name := FloatName{} sub := FloatSub{}}
     let TermIcon = Vector{width: 18 height: 18 viewbox: vec4(0 0 24 24)
         Path{d: "M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM7 10l3 2-3 2M12 15h5" fill: false stroke: th_ink stroke_width: 1.6 stroke_linecap: "round" stroke_linejoin: "round"}
     }
@@ -1172,6 +1183,13 @@ script_mod! {
         draw_text +: {text_style: theme.font_regular{font_size: 8}}
     }
     let TimelineCanvas = mod.widgets.TimelineCanvas
+    mod.widgets.LifecycleCanvasBase = #(lifecycle_view::LifecycleCanvas::register_widget(vm))
+    mod.widgets.LifecycleCanvas = set_type_default() do mod.widgets.LifecycleCanvasBase{
+        width: Fill height: Fill
+        draw_bg +: {color: th_raised}
+        draw_text +: {text_style: theme.font_regular{font_size: 8}}
+    }
+    let LifecycleCanvas = mod.widgets.LifecycleCanvas
     mod.widgets.DiskCanvasBase = #(plugins::disk_view::DiskCanvas::register_widget(vm))
     mod.widgets.DiskCanvas = set_type_default() do mod.widgets.DiskCanvasBase{
         width: Fill height: Fill
@@ -1519,6 +1537,47 @@ script_mod! {
                                 }
                             }
                         }
+                        // The lifecycle view: the slice state machine and the
+                        // doc stream, side by side. The header shows the round
+                        // state machine summary.
+                        life_view := View{
+                            width: Fill height: Fill flow: Down spacing: 8 visible: false
+                            padding: Inset{left: 16 right: 16 top: 50 bottom: 14}
+                            View{
+                                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                                life_tab_sm := SegOff{text: "State machine" height: 22}
+                                life_tab_docs := SegOff{text: "Docs" height: 22}
+                                Filler{}
+                                life_open_living := SegOff{text: "Open LIVING.md" height: 22}
+                                life_round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 9}}
+                            }
+                            RoundedView{
+                                width: Fill height: Fill new_batch: true padding: 1
+                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                life_sm := LifecycleCanvas{}
+                            }
+                            life_docs_panel := RoundedView{
+                                width: Fill height: Fill flow: Right new_batch: true padding: 1 visible: false
+                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                RoundedView{
+                                    width: 280 height: Fill new_batch: true padding: 6
+                                    draw_bg.color: th_panel draw_bg.border_radius: 4.0
+                                    ScrollYView{
+                                        width: Fill height: Fill
+                                        life_docs_list := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style.font_size: 8.5}
+                                    }
+                                }
+                                RoundedView{
+                                    width: Fill height: Fill new_batch: true padding: 10
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0
+                                    ScrollYView{
+                                        width: Fill height: Fill
+                                        life_docs_body := Label{width: Fill text: "" padding: 0 draw_text.color: th_ink draw_text.wrap: Words draw_text.text_style.font_size: 9}
+                                    }
+                                }
+                            }
+                            life_legend := Label{width: Fill text: "" max_lines: 1 padding: 0 draw_text.color: muted draw_text.text_style.font_size: 8}
+                        }
                         // The views at the left (they change what the stage shows);
                         // at the right, the outer and inner loops, the app.
                         SolidView{
@@ -1536,6 +1595,8 @@ script_mod! {
                                 view_flow_on := FloatFlow{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 view_time := FloatTime{}
                                 view_time_on := FloatTime{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
+                                view_life := FloatLife{}
+                                view_life_on := FloatLife{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 // The native TUI plugin: the outer loop's own CLI.
                                 view_tui := FloatTui{visible: false}
                                 view_tui_on := FloatTui{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
@@ -2508,8 +2569,18 @@ enum Stage {
     Chat,
     Flow,
     Time,
+    /// The lifecycle view: state machine + doc stream.
+    Life,
     /// The outer loop's own terminal UI (the native TUI plugin).
     Tui,
+}
+
+/// Which sub-tab of the lifecycle view is open.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum LifeTab {
+    #[default]
+    StateMachine,
+    Docs,
 }
 
 /// Playback speeds, axis seconds a second.
@@ -2523,6 +2594,14 @@ enum FlowOpen {
     Inner(String),
     /// A new peer agent being configured.
     Create,
+}
+
+/// What the lifecycle background worker caches for one project: a project
+/// path and the repo docs it found.
+#[derive(Clone, Debug, Default)]
+struct CachedRepoDocs {
+    project: String,
+    paths: Vec<(String, Vec<crate::lifecycle::RepoDocVersion>)>,
 }
 
 #[derive(Script, ScriptHook, Widget)]
@@ -2639,6 +2718,29 @@ pub struct OctoBuddyView {
     // loops, or the session's timeline.
     #[rust]
     stage: Stage,
+    /// Which sub-tab of the lifecycle view is shown: the state machine or the
+    /// doc stream. Default: the state machine, the obvious first thing to read.
+    #[rust]
+    life_tab: LifeTab,
+    /// The doc stream last drawn for the shown session (and the picked item).
+    #[rust]
+    life_docs: Vec<DocItem>,
+    #[rust]
+    life_doc_picked: Option<usize>,
+    /// Repo docs + acceptance sheets the background worker produced for a
+    /// project, keyed by project path. Held as flat pairs so the script
+    /// macro accepts the field.
+    #[rust]
+    life_repo_cache: Vec<CachedRepoDocs>,
+    #[rust]
+    life_acceptance_cache: Vec<(String, Vec<crate::lifecycle::AcceptanceItem>)>,
+    /// A token that bumps each time a session's events change; the lifecycle
+    /// view uses it to skip recomputing when nothing did.
+    #[rust]
+    life_token: u64,
+    /// The last LIVING.md write failure said (said once).
+    #[rust]
+    life_write_failed: Option<String>,
     // The timeline last drawn, for its panels.
     #[rust]
     time_tl: Timeline,
@@ -3162,7 +3264,7 @@ impl OctoBuddyView {
     fn fit_pills(&mut self, cx: &mut Cx) {
         let width = self.view.view(cx, ids!(chat)).area().rect(cx).size.x;
         let compact = width > 0.0 && width < 860.0;
-        let views = [live_id!(view_chat), live_id!(view_chat_on), live_id!(view_flow), live_id!(view_flow_on), live_id!(view_time), live_id!(view_time_on), live_id!(view_tui), live_id!(view_tui_on)];
+        let views = [live_id!(view_chat), live_id!(view_chat_on), live_id!(view_flow), live_id!(view_flow_on), live_id!(view_time), live_id!(view_time_on), live_id!(view_life), live_id!(view_life_on), live_id!(view_tui), live_id!(view_tui_on)];
         for id in views {
             self.view.label(cx, &[id, live_id!(name)]).set_visible(cx, !compact);
         }
@@ -3808,6 +3910,20 @@ impl OctoBuddyView {
     /// A disk scan finished. The worker thread already wrote the
     /// auto-snapshot (when the gap allowed) and computed the panel text;
     /// here we only drop the outcome into state and wake the UI.
+    /// LIVING.md as the background worker left it: rewritten or unchanged
+    /// goes unsaid (it is rewritten as the work moves); a write that failed
+    /// is said once, in the project's latest session.
+    fn life_written(&mut self, project: String, outcome: crate::lifecycle::LivingWrite) {
+        let crate::lifecycle::LivingWrite::Skipped(why) = outcome else { return };
+        if self.life_write_failed.as_deref() == Some(why.as_str()) {
+            return;
+        }
+        let Some(pi) = self.store.projects.iter().position(|p| p.path == project) else { return };
+        let Some(si) = self.store.projects[pi].sessions.len().checked_sub(1) else { return };
+        self.system((pi, si), &crate::i18n::pick(format!("Could not write LIVING.md: {why}"), format!("无法写 LIVING.md：{why}")));
+        self.life_write_failed = Some(why);
+    }
+
     fn disk_scan_done(&mut self, project: &str, kind: &str, outcome: Result<plugins::disk_map::DiskScanOutcome, String>) {
         self.disk_scanning = false;
         let Ok(outcome) = outcome else { return };
@@ -4006,16 +4122,23 @@ impl OctoBuddyView {
         let shown = at.is_some() && self.page == Page::Chat && !plain;
         let flow = self.stage == Stage::Flow && shown;
         let time = self.stage == Stage::Time && shown;
+        let life = self.stage == Stage::Life && shown;
         // The terminal stands in for the conversation, in a plain chat too.
         let tui = self.stage == Stage::Tui && at.is_some() && self.page == Page::Chat && self.tui.is_some();
-        self.view.view(cx, ids!(chat_pane)).set_visible(cx, !flow && !time && !tui);
-        self.view.view(cx, ids!(composer_area)).set_visible(cx, !flow && !time && !tui);
+        self.view.view(cx, ids!(chat_pane)).set_visible(cx, !flow && !time && !tui && !life);
+        self.view.view(cx, ids!(composer_area)).set_visible(cx, !flow && !time && !tui && !life);
         self.view.view(cx, ids!(flow_view)).set_visible(cx, flow);
         self.view.view(cx, ids!(time_view)).set_visible(cx, time);
-        self.view.view(cx, ids!(worktree_bar)).set_visible(cx, !flow && !time && !tui && self.view.view(cx, ids!(worktree_bar)).visible());
+        self.view.view(cx, ids!(life_view)).set_visible(cx, life);
+        self.view.view(cx, ids!(worktree_bar)).set_visible(cx, !flow && !time && !tui && !life && self.view.view(cx, ids!(worktree_bar)).visible());
         // The view switcher: the one in use, marked.
         let current = if plain { Stage::Chat } else { self.stage };
-        for (stage, off, on) in [(Stage::Chat, ids!(view_chat), ids!(view_chat_on)), (Stage::Flow, ids!(view_flow), ids!(view_flow_on)), (Stage::Time, ids!(view_time), ids!(view_time_on))] {
+        for (stage, off, on) in [
+            (Stage::Chat, ids!(view_chat), ids!(view_chat_on)),
+            (Stage::Flow, ids!(view_flow), ids!(view_flow_on)),
+            (Stage::Time, ids!(view_time), ids!(view_time_on)),
+            (Stage::Life, ids!(view_life), ids!(view_life_on)),
+        ] {
             self.view.view(cx, off).set_visible(cx, !plain && current != stage);
             self.view.view(cx, on).set_visible(cx, !plain && current == stage);
         }
@@ -4023,6 +4146,8 @@ impl OctoBuddyView {
         for (id, name, sub) in [
             (ids!(view_time), i18n::t("Timeline", "时间轴"), ""),
             (ids!(view_time_on), i18n::t("Timeline", "时间轴"), ""),
+            (ids!(view_life), i18n::t("Lifecycle", "生命周期"), ""),
+            (ids!(view_life_on), i18n::t("Lifecycle", "生命周期"), ""),
             (ids!(view_flow_on), i18n::t("Flow", "流程图"), ""),
             (ids!(view_chat_on), i18n::t("Chat", "对话"), ""),
         ] {
@@ -4031,6 +4156,9 @@ impl OctoBuddyView {
         }
         if time {
             self.sync_time(cx);
+        }
+        if life {
+            self.sync_life(cx);
         }
         self.sync_flow_menu(cx, flow);
         self.view.view(cx, ids!(new_peer_btn)).set_visible(cx, flow);
@@ -4978,7 +5106,12 @@ impl OctoBuddyView {
             self.stage = Stage::Time;
             self.relayout(cx);
         }
+        if tapped(&self.view.view(cx, ids!(view_life)), actions) {
+            self.stage = Stage::Life;
+            self.relayout(cx);
+        }
         self.handle_time_actions(cx, actions);
+        self.handle_life_actions(cx, actions);
         self.handle_plan_actions(cx, actions);
         self.handle_side_menu(cx, actions);
         if self.view.button(cx, ids!(confirm_cancel)).clicked(actions) {
