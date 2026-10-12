@@ -483,8 +483,9 @@ fn replaced(p: &Peer, peers: &[&Peer]) -> Option<String> {
     })
 }
 
-/// Words the outer loop sends back work with.
-fn sent_back(input: &str) -> bool {
+/// Words the outer loop sends back work with. Exposed so `lifecycle` can
+/// count sent-back turns from a peer's log without copying the list.
+pub(crate) fn sent_back(input: &str) -> bool {
     let low = input.to_lowercase();
     ["fix", "redo", "again", "did not", "didn't", "not deliver", "still", "nothing was", "ended before", "broken", "fails", "wrong", "missing",
         "修", "重做", "退回", "没有", "未", "仍", "还是", "不对", "失败"].iter().any(|w| low.contains(w))

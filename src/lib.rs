@@ -47,6 +47,7 @@ pub mod stream;
 pub mod system;
 pub mod timeline;
 mod time_view;
+pub mod lifecycle;
 pub mod estimate;
 mod plan_panel;
 mod claude_proxy;
