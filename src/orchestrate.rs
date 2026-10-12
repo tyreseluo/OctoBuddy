@@ -2015,11 +2015,49 @@ It works for you now: message it, review its work, or close it.)\n"));
             LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_plugin" => {
                 self.plugin_mcp_call(&session, &args, reply);
             }
+            LoopEvent::McpCall { session, name, args, reply } if matches!(name.as_str(), "octobuddy_app_probe" | "octobuddy_app_drive") && !session.starts_with("inner:") => {
+                let Some(dir) = self.store.find_session(&session).map(|at| self.store.projects[at.0].path.clone()) else {
+                    let _ = reply.send(Err("no such session".into()));
+                    return;
+                };
+                let source = args.get("source").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                std::thread::spawn(move || {
+                    let answer = if !crate::plugins::active(crate::plugins::OCTOSENSE_APP, &dir) {
+                        Err("this project is not an OctoSense app".into())
+                    } else if name == "octobuddy_app_drive" {
+                        crate::plugins::octosense_app::drive(&dir, args.get("steps").unwrap_or(&serde_json::Value::Null))
+                    } else {
+                        crate::plugins::octosense_app::probe(&dir, &source)
+                    };
+                    let _ = reply.send(answer);
+                });
+            }
+            LoopEvent::McpCall { session, name, args, reply } if session.starts_with("inner:") => {
+                let peer = session.trim_start_matches("inner:").to_string();
+                self.inner_mcp_call(&peer, &name, &args, reply);
+            }
+            LoopEvent::McpCall { session, name, args, reply } if name == "octobuddy_plugin" => {
+                self.plugin_mcp_call(&session, &args, reply);
+            }
+            // The outer loop's disk tools (a scan is seconds, not ms): off
+            // the UI thread, the way probe/drive are.
+            LoopEvent::McpCall { session, name, args, reply } if name.starts_with("octobuddy_disk_") && !session.starts_with("inner:") => {
+                let Some(at) = self.store.find_session(&session) else {
+                    let _ = reply.send(Err("no such session".into()));
+                    return;
+                };
+                let dir = self.store.projects[at.0].path.clone();
+                let tool = name.strip_prefix("octobuddy_disk_").unwrap_or("").to_string();
+                let args = args.clone();
+                std::thread::spawn(move || {
+                    let _ = reply.send(crate::plugins::disk_map::run_tool(&dir, &tool, &args));
+                });
+            }
             LoopEvent::McpCall { session, name, args, reply } => {
                 let answer = self.mcp_call(&session, &name, &args);
                 let _ = reply.send(answer);
             }
-            LoopEvent::DiskScanned { project, kind, result } => self.disk_scan_done(&project, &kind, result),
+            LoopEvent::DiskScanned { project, kind, outcome } => self.disk_scan_done(&project, &kind, outcome),
             LoopEvent::ToolsProbed(tools) => self.tools_probed(tools),
             LoopEvent::ProvidersDone { job, result } => self.providers_done(job, result),
             LoopEvent::HubDone { project, step, result } => self.hub_done(&project, step, result),
@@ -2432,6 +2470,12 @@ It works for you now: message it, review its work, or close it.)\n"));
                 let session_id = self.store.session(at).unwrap().id.clone();
                 if let Some(Ok(_)) = &commit {
                     self.stale_reviews(at, &peer, &files);
+                    // An inner loop committed files: take an auto-snapshot
+                    // for the project (paced by `AUTO_GAP_SECS` inside
+                    // `disk_map::auto_snapshot`, which is a no-op when the
+                    // gap is not up).
+                    let project = self.store.projects[at.0].path.clone();
+                    crate::plugins::disk_map::auto_snapshot(&project);
                 }
                 if passed == Some(true) || matches!(&commit, Some(Ok(_))) {
                     self.rt.progress.insert(session_id.clone());

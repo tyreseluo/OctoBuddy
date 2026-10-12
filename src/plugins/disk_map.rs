@@ -43,8 +43,7 @@ const MIN_ENTRY_BYTES: u64 = 1024 * 1024;
 /// The most snapshots kept on disk.
 const MAX_SNAPSHOTS: usize = 200;
 /// Minimum gap between two automatic snapshots after an inner loop commit.
-#[allow(dead_code)]
-const AUTO_GAP_SECS: u64 = 300;
+pub const AUTO_GAP_SECS: u64 = 300;
 /// Cache TTL for the agent tools, so a back-to-back call does not scan again.
 const CACHE_TTL_SECS: u64 = 60;
 
@@ -265,7 +264,9 @@ pub fn remember(scan: &Scan) {
 
 /// Like [`remember`], but tolerates a Result: an error is recorded as the
 /// absence of a scan for that root, so the next call does not block on the
-/// same failure.
+/// same failure. Kept for future use (the worker thread calls `remember`
+/// on the wrapped outcome); the agent-tool path uses the cache implicitly.
+#[allow(dead_code)]
 pub fn remember_scan(root: &Path, scan: &std::io::Result<Scan>) {
     if let Ok(s) = scan {
         remember(s);
@@ -287,7 +288,6 @@ pub fn root_for(project: &Path, project_id: &str, root: Root) -> PathBuf {
 
 /// The most recent snapshot for `project` whose `root` label matches
 /// `kind`, or `None` when there is none yet.
-#[allow(dead_code)]
 pub fn latest_snapshot(project: &Path, kind: Root) -> Option<Snapshot> {
     let label = kind.as_str();
     read_snapshots(project).into_iter().rev().find(|s| s.root == label)
@@ -296,12 +296,38 @@ pub fn latest_snapshot(project: &Path, kind: Root) -> Option<Snapshot> {
 /// True when it has been long enough since the last auto snapshot that
 /// another one is welcome. Auto-snapshots are paced so a busy inner loop
 /// does not scan after every commit.
-#[allow(dead_code)]
 pub fn ready_for_auto(project: &Path, kind: Root) -> bool {
     match latest_snapshot(project, kind) {
         None => true,
         Some(s) => now_secs().saturating_sub(s.at) >= AUTO_GAP_SECS,
     }
+}
+
+/// Take an auto-snapshot after an inner loop commit: if the gap is up
+/// (see [`ready_for_auto`]), scan and append one snapshot row. Runs on a
+/// worker thread so the UI is never blocked; the result is a no-op when
+/// the plugin is off, when the project is not active for the plugin, or
+/// when the gap has not elapsed.
+pub fn auto_snapshot(project: &str) {
+    if !crate::plugins::enabled(crate::plugins::DISK_MAP) || !crate::plugins::active(crate::plugins::DISK_MAP, project) {
+        return;
+    }
+    let project = project.to_string();
+    std::thread::spawn(move || {
+        crate::i18n::set(crate::i18n::lang());
+        let project_path = std::path::Path::new(&project);
+        if !ready_for_auto(project_path, Root::Project) {
+            return;
+        }
+        let root = root_for(project_path, std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or(""), Root::Project);
+        let Ok(scan) = scan_blocking(root.clone(), default_options()) else { return };
+        // The auto-snapshot records the current short HEAD and the scan's
+        // taken_at — same shape as the panel scan's auto-row, only
+        // triggered by the commit instead of a manual rescan.
+        let head = crate::workspace::git(&project, &["rev-parse", "--short", "HEAD"]).ok();
+        let snap = make_snapshot(&scan, Root::Project, head, None);
+        let _ = append_snapshot(project_path, &snap);
+    });
 }
 
 /// Compare a fresh scan with a previous snapshot. Returned deltas are
@@ -611,6 +637,70 @@ pub fn make_snapshot(scan: &Scan, kind: Root, head: Option<String>, round: Optio
     Snapshot::from_scan(kind.as_str(), scan, head, round)
 }
 
+/// What the scan thread computes once the walk is done: the scan itself
+/// plus the panel text and the snapshot bookkeeping, all ready for the UI
+/// thread to drop into state without re-doing the disk I/O.
+#[derive(Clone, Debug)]
+pub struct DiskScanOutcome {
+    pub scan: Scan,
+    /// Worth-a-look text for the panel.
+    pub worth: String,
+    /// Growth text (or "no snapshot yet" hint) for the panel.
+    pub growth: String,
+    /// Number of snapshots for this root, after any auto-snapshot this
+    /// scan wrote.
+    pub snapshot_count: u32,
+    /// Unix-seconds the auto-snapshot was recorded (0: no snapshot taken).
+    pub auto_at: u64,
+}
+
+/// Finish a scan and compute the panel's text + snapshot bookkeeping in
+/// one worker-thread call: reads `snapshots.jsonl`, writes one auto-row
+/// when the 5-minute gap is up, and re-reads the file to build the growth
+/// text. The UI thread just drops the outcome into state.
+pub fn finish_with_outcome(
+    root: PathBuf,
+    scan: Scan,
+    auto_gap_secs: u64,
+) -> DiskScanOutcome {
+    let now_secs = scan.taken_at;
+    let candidates = worth_a_look(&scan, now_secs as i64, 8);
+    let worth = render_reclaim(&scan, &candidates, 8);
+    let project = &scan.root;
+    // The root may differ from the project when scanning worktrees, but
+    // snapshots live under the project (`.octobuddy/disk/snapshots.jsonl`).
+    let project_path = root_for(project, project.file_name().and_then(|n| n.to_str()).unwrap_or(""), Root::Project);
+    let label = root_label_for(&root, project);
+    let snapshots = read_snapshots(&project_path);
+    let last: Option<&Snapshot> = snapshots.iter().rev().find(|s| s.root == label);
+    let mut snapshot_count = snapshots.iter().filter(|s| s.root == label).count() as u32;
+    let mut auto_at = 0u64;
+    let gap_ok = last.is_none_or(|s| now_secs.saturating_sub(s.at) >= auto_gap_secs);
+    if gap_ok {
+        let head = crate::workspace::git(project.to_string_lossy().as_ref(), &["rev-parse", "--short", "HEAD"]).ok();
+        let kind = match label {
+            "worktrees" => Root::Worktrees,
+            _ => Root::Project,
+        };
+        let snap = make_snapshot(&scan, kind, head, None);
+        let _ = append_snapshot(&project_path, &snap);
+        snapshot_count = snapshot_count.saturating_add(1);
+        auto_at = now_secs;
+    }
+    let last2 = read_snapshots(&project_path).into_iter().rev().find(|s| s.root == label);
+    let growth = match last2 {
+        Some(snap) => render_growth(&scan, &snap, 5),
+        None => crate::i18n::t("No snapshot yet — open the panel and rescan, or wait for an inner loop to commit.", "还没有快照——打开面板重新扫描，或者等 inner loop 提交一次。").to_string(),
+    };
+    DiskScanOutcome { scan, worth, growth, snapshot_count, auto_at }
+}
+
+/// Map a scan's actual root path back to its snapshot label: the worktrees
+/// root lives outside the project; the project root is "project".
+fn root_label_for(root: &Path, project: &Path) -> &'static str {
+    if root == project { "project" } else { "worktrees" }
+}
+
 /// Run one of the three disk tools against `project`. Returns the tool's
 /// text answer, or an error to send back to the agent. Reads `args` as JSON
 /// (the same shape as the MCP `inputSchema`); rejects unknown args.
@@ -749,6 +839,26 @@ mod tests {
         // The newest 200 are kept: ids 5..205.
         assert_eq!(kept.first().unwrap().at, 5);
         assert_eq!(kept.last().unwrap().at, 204);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ready_for_auto_keeps_commits_within_the_gap_apart() {
+        let dir = scratch("gap");
+        // No snapshot yet: a fresh project, ready for one.
+        assert!(ready_for_auto(&dir, Root::Project));
+        // A snapshot just written: still inside the 5-minute window.
+        let snap = Snapshot { at: now_secs(), head: Some("h".into()), round: None, root: "project".into(), total: 0, files: 0, entries: Vec::new() };
+        append_snapshot(&dir, &snap).unwrap();
+        assert!(!ready_for_auto(&dir, Root::Project), "freshly written: not ready again");
+        // An old snapshot from well past the gap: ready for another. It
+        // becomes the latest only because we append it after the fresh
+        // one, so the file's last row is its timestamp by `at` (older).
+        let old = Snapshot { at: now_secs().saturating_sub(AUTO_GAP_SECS + 1), head: Some("h".into()), round: None, root: "project".into(), total: 0, files: 0, entries: Vec::new() };
+        append_snapshot(&dir, &old).unwrap();
+        // `latest_snapshot` returns the most recently appended row, which
+        // is `old` here — its `at` is past the gap, so the next auto is ready.
+        assert!(ready_for_auto(&dir, Root::Project), "the latest row is older than the gap — ready for another");
         let _ = fs::remove_dir_all(&dir);
     }
 

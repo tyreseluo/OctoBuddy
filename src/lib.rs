@@ -3761,8 +3761,10 @@ impl OctoBuddyView {
         }
     }
 
-    /// Begin a scan in a worker thread; the answer comes back as a [`DiskScanDone`]
-    /// LoopEvent (added below), so the UI is never blocked.
+    /// Begin a scan in a worker thread. The walk, the snapshot bookkeeping,
+    /// and the panel text all happen off the UI thread; the result arrives
+    /// as a [`DiskScanned`] LoopEvent with the computed `DiskScanOutcome`,
+    /// and the UI thread only updates state and redraws.
     fn start_disk_scan(&mut self, project: String, kind: plugins::disk_map::Root) {
         let project_id = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
         let root = plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, kind);
@@ -3774,10 +3776,13 @@ impl OctoBuddyView {
         let lang = crate::i18n::lang();
         std::thread::spawn(move || {
             crate::i18n::set(lang);
-            let io_result = plugins::disk_map::scan_blocking(root.clone(), plugins::disk_map::default_options());
-            plugins::disk_map::remember_scan(&root, &io_result);
-            let result = io_result.map_err(|e| e.to_string());
-            crate::events::post(&inbox, crate::events::LoopEvent::DiskScanned { project, kind: kind.as_str().to_string(), result });
+            let outcome = plugins::disk_map::scan_blocking(root.clone(), plugins::disk_map::default_options())
+                .map(|scan| plugins::disk_map::finish_with_outcome(scan.root.clone(), scan, plugins::disk_map::AUTO_GAP_SECS))
+                .map_err(|e| e.to_string());
+            if let Ok(s) = &outcome {
+                plugins::disk_map::remember(&s.scan);
+            }
+            crate::events::post(&inbox, crate::events::LoopEvent::DiskScanned { project, kind: kind.as_str().to_string(), outcome });
         });
     }
 
@@ -3797,42 +3802,25 @@ impl OctoBuddyView {
         self.relayout(cx);
     }
 
-    /// A disk scan finished: store the result, populate the worth-a-look
-    /// text and the growth text, then redraw.
-    fn disk_scan_done(&mut self, project: &str, kind: &str, result: Result<plugins::disk_map::Scan, String>) {
+    /// A disk scan finished. The worker thread already wrote the
+    /// auto-snapshot (when the gap allowed) and computed the panel text;
+    /// here we only drop the outcome into state and wake the UI.
+    fn disk_scan_done(&mut self, project: &str, kind: &str, outcome: Result<plugins::disk_map::DiskScanOutcome, String>) {
         self.disk_scanning = false;
-        let Ok(scan) = result else { return };
+        let Ok(outcome) = outcome else { return };
         let kind_root = plugins::disk_map::Root::from_u8(self.disk_root_kind);
         if Some(project) != self.disk_project_path.as_deref() || kind != kind_root.as_str() {
             return;
         }
+        let scan = outcome.scan;
         self.disk_scan = Some(Box::new(scan.clone()));
         self.disk_total = scan.total_bytes();
         self.disk_files = scan.total_files();
         self.disk_scanned_at = Some(scan.taken_at);
-        let now_secs = scan.taken_at;
-        let candidates = plugins::disk_map::worth_a_look(&scan, now_secs as i64, 8);
-        self.disk_worth = plugins::disk_map::render_reclaim(&scan, &candidates, 8);
-        let project_path = std::path::Path::new(project);
-        let snapshots = plugins::disk_map::read_snapshots(project_path);
-        let label = kind_root.as_str();
-        let last: Option<&plugins::disk_map::Snapshot> = snapshots.iter().rev().find(|s| s.root == label);
-        self.disk_snapshot_count = snapshots.iter().filter(|s| s.root == label).count() as u32;
-        // Auto-snapshot: at most once every 5 minutes (the panel scan also
-        // records one when it runs, so a busy project is still bounded).
-        let gap_ok = last.is_none_or(|s| now_secs.saturating_sub(s.at) >= 300);
-        if gap_ok {
-            let head = workspace::git(project, &["rev-parse", "--short", "HEAD"]).ok();
-            let snap = plugins::disk_map::make_snapshot(&scan, kind_root, head, None);
-            let _ = plugins::disk_map::append_snapshot(project_path, &snap);
-            self.disk_snapshot_count = self.disk_snapshot_count.saturating_add(1);
-        }
-        let last2 = plugins::disk_map::read_snapshots(project_path).into_iter().rev().find(|s| s.root == label);
-        self.disk_growth_text = match last2 {
-            Some(snap) => plugins::disk_map::render_growth(&scan, &snap, 5),
-            None => i18n::t("No snapshot yet — open the panel and rescan, or wait for an inner loop to commit.", "还没有快照——打开面板重新扫描，或者等 inner loop 提交一次。").to_string(),
-        };
-        self.disk_last_auto_at = now_secs;
+        self.disk_worth = outcome.worth;
+        self.disk_growth_text = outcome.growth;
+        self.disk_snapshot_count = outcome.snapshot_count;
+        self.disk_last_auto_at = outcome.auto_at;
         // Wake the UI so the new scan shows; the next draw picks it up.
         makepad_widgets::makepad_platform::thread::SignalToUI::set_ui_signal();
     }

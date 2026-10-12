@@ -287,15 +287,8 @@ impl OctoBuddyView {
     pub(crate) fn mcp_call(&mut self, session: &str, name: &str, args: &Value) -> Result<String, String> {
         let at = self.store.find_session(session).ok_or("no such session")?;
         // The disk tools run on the UI thread, but with a 60-second cache
-        // so a back-to-back call (or a follow-up after the panel scanned)
-        // answers in milliseconds. The first call after a long idle will
-        // block the UI for the scan duration; the inner-loop path goes
-        // through a worker thread (`inner_mcp_call`), so its UI is unaffected.
-        if let Some(stripped) = name.strip_prefix("octobuddy_disk_") {
-            let project = self.store.projects[at.0].path.clone();
-            let name = stripped.to_string();
-            return crate::plugins::disk_map::run_tool(&project, &name, args);
-        }
+        // The outer-loop disk tools dispatch in `apply_event` (the worker
+        // thread keeps the UI responsive, like `octobuddy_app_probe`).
         match name {
             "octobuddy_status" => Ok(self.status_block(at).unwrap_or_else(|| "STATUS\n(no inner loops yet)".into())),
             "octobuddy_learn" => {
