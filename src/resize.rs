@@ -39,6 +39,10 @@ pub struct ResizeHandle {
     line_color: Vec4f,
     #[live]
     active_color: Vec4f,
+    /// A strip between two panes stacked one over the other: dragged up
+    /// and down, its line across.
+    #[live]
+    vertical: bool,
     #[rust]
     start: Option<f64>,
     #[rust]
@@ -52,11 +56,11 @@ impl Widget for ResizeHandle {
         let uid = self.widget_uid();
         match event.hits(cx, self.area) {
             Hit::FingerHoverIn(_) => {
-                cx.set_cursor(MouseCursor::ColResize);
+                cx.set_cursor(self.cursor());
                 self.hover = true;
                 self.redraw(cx);
             }
-            Hit::FingerHoverOver(_) => cx.set_cursor(MouseCursor::ColResize),
+            Hit::FingerHoverOver(_) => cx.set_cursor(self.cursor()),
             Hit::FingerHoverOut(_) => {
                 self.hover = false;
                 self.redraw(cx);
@@ -66,15 +70,16 @@ impl Widget for ResizeHandle {
                     self.start = None;
                     cx.widget_action(uid, ResizeAction::Reset);
                 } else {
-                    self.start = Some(fe.abs.x);
+                    self.start = Some(if self.vertical { fe.abs.y } else { fe.abs.x });
                     cx.widget_action(uid, ResizeAction::Start);
                 }
                 self.redraw(cx);
             }
             Hit::FingerMove(fe) => {
-                if let Some(x) = self.start {
-                    cx.set_cursor(MouseCursor::ColResize);
-                    cx.widget_action(uid, ResizeAction::Drag(fe.abs.x - x));
+                if let Some(from) = self.start {
+                    cx.set_cursor(self.cursor());
+                    let at = if self.vertical { fe.abs.y } else { fe.abs.x };
+                    cx.widget_action(uid, ResizeAction::Drag(at - from));
                 }
             }
             Hit::FingerUp(_) if self.start.take().is_some() => {
@@ -94,8 +99,19 @@ impl Widget for ResizeHandle {
         let active = self.hover || self.start.is_some();
         let w = if active { 2.0 } else { 1.0 };
         self.draw_line.color = if active { self.active_color } else { self.line_color };
-        self.draw_line.draw_abs(cx, Rect { pos: dvec2(rect.pos.x + (rect.size.x - w) * 0.5, rect.pos.y), size: dvec2(w, rect.size.y) });
+        let line = if self.vertical {
+            Rect { pos: dvec2(rect.pos.x, rect.pos.y + (rect.size.y - w) * 0.5), size: dvec2(rect.size.x, w) }
+        } else {
+            Rect { pos: dvec2(rect.pos.x + (rect.size.x - w) * 0.5, rect.pos.y), size: dvec2(w, rect.size.y) }
+        };
+        self.draw_line.draw_abs(cx, line);
         DrawStep::done()
+    }
+}
+
+impl ResizeHandle {
+    fn cursor(&self) -> MouseCursor {
+        if self.vertical { MouseCursor::RowResize } else { MouseCursor::ColResize }
     }
 }
 

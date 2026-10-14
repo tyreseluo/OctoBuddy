@@ -1502,6 +1502,7 @@ script_mod! {
                                 }
                             }
                             }
+                            life_divider := View{width: Fill height: Fit life_handle := ResizeHandle{width: Fill height: 7 vertical: true}}
                             // Under the graph: where each of its slices stands in
                             // its lifecycle, and the documents the work left.
                             // The lifecycle view: the slice state machine or the
@@ -1524,7 +1525,7 @@ script_mod! {
                                     life_fold := SegOff{text: "Hide" height: 22}
                                 }
                                 life_sm_panel := RoundedView{
-                                    width: Fill height: 300 new_batch: true padding: 1
+                                    width: Fill height: 300 padding: 1
                                     draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                                     life_sm := LifecycleCanvas{}
                                 }
@@ -2025,7 +2026,7 @@ script_mod! {
                         // The treemap itself: the canvas draws the tiles, the frame
                         // around it the border (the canvas's own back is clear).
                         RoundedView{
-                            width: Fill height: Fill new_batch: true
+                            width: Fill height: Fill
                             margin: Inset{left: 12 right: 12}
                             draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
                             disk_canvas := DiskCanvas{width: Fill height: Fill}
@@ -4054,6 +4055,63 @@ impl OctoBuddyView {
         self.store.panes.iter().flatten().find(|p| p.id == "disk").map(|p| p.width).unwrap_or(Self::DISK_PANE.2)
     }
 
+    /// The lifecycle panel under the graph: (least, most, default) height.
+    const LIFE_PANE: (f64, f64, f64) = (140.0, 900.0, 300.0);
+
+    fn life_height(&self) -> f64 {
+        self.store.panes.iter().flatten().find(|p| p.id == "life").map(|p| p.width).unwrap_or(Self::LIFE_PANE.2)
+    }
+
+    fn set_life_height(&mut self, height: f64) {
+        let panes = self.store.panes.get_or_insert_with(Vec::new);
+        match panes.iter_mut().find(|p| p.id == "life") {
+            Some(p) => p.width = height,
+            None => panes.push(model::PaneWidth { id: "life".to_string(), width: height }),
+        }
+    }
+
+    /// The panel's height as kept, short of leaving the graph too little.
+    pub(crate) fn apply_life_pane(&mut self, cx: &mut Cx) {
+        let room = self.view.view(cx, ids!(flow_view)).area().rect(cx).size.y;
+        let most = if room > 0.0 { (room - 200.0).max(Self::LIFE_PANE.0) } else { Self::LIFE_PANE.1 };
+        let height = self.life_height().min(most);
+        for id in [ids!(life_sm_panel), ids!(life_docs_panel)] {
+            let mut w = self.view.widget(cx, id);
+            script_apply_eval!(cx, w, { height: #(height) });
+        }
+    }
+
+    /// The handle over the lifecycle panel: dragging up makes it taller.
+    fn life_resize_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        for action in self.view.widget(cx, ids!(life_handle)).as_resize_handle().actions(actions) {
+            match action {
+                ResizeAction::Start => {
+                    let shown = self.view.view(cx, ids!(life_sm_panel)).area().rect(cx).size.y;
+                    let start = if shown > 0.0 { shown } else { self.life_height() };
+                    self.resizing = Some(("life", start));
+                }
+                ResizeAction::Drag(dy) => {
+                    let Some((_, start)) = self.resizing.filter(|(k, _)| *k == "life") else { continue };
+                    self.set_life_height((start - dy).clamp(Self::LIFE_PANE.0, Self::LIFE_PANE.1));
+                    self.apply_life_pane(cx);
+                    cx.redraw_all();
+                }
+                ResizeAction::End => {
+                    self.resizing = None;
+                    self.save();
+                    self.relayout(cx);
+                }
+                ResizeAction::Reset => {
+                    self.set_life_height(Self::LIFE_PANE.2);
+                    self.apply_life_pane(cx);
+                    self.save();
+                    self.relayout(cx);
+                }
+                ResizeAction::None => {}
+            }
+        }
+    }
+
     fn set_disk_width(&mut self, width: f64) {
         let panes = self.store.panes.get_or_insert_with(Vec::new);
         match panes.iter_mut().find(|p| p.id == "disk") {
@@ -5420,6 +5478,7 @@ impl OctoBuddyView {
         self.plugin_button_actions(cx, actions);
         self.resize_actions(cx, actions);
         self.disk_resize_actions(cx, actions);
+        self.life_resize_actions(cx, actions);
         self.tui_actions(cx, actions);
         self.workbench_actions(cx, actions);
         self.live_page_actions(cx, actions);
