@@ -177,6 +177,8 @@ pub enum LifeAction {
     /// A slice was picked (its slug), so the view can locate it in the
     /// doc stream too.
     Picked(String),
+    /// A slice was clicked once (its slug): its card on the flow canvas lights.
+    Selected(String),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -448,13 +450,18 @@ impl Widget for LifecycleCanvas {
         let in_list = |p: DVec2| p.x >= list_left;
         match event.hits(cx, self.area) {
             Hit::FingerDown(fe) if fe.is_primary_hit() => {
-                if in_list(fe.abs) {
+                // Where it shows (scrolled with whatever holds the canvas)
+                // to the canvas's own coordinates, which the hits are in.
+                let at = fe.abs - fe.rect.pos + self.rect.pos;
+                if in_list(at) {
                     // A slice row: one click highlights its path through
                     // the graph; a double click also opens its documents.
-                    if let Some(hit) = self.hits.iter().find(|h| h.rect.contains(fe.abs)).cloned() {
+                    if let Some(hit) = self.hits.iter().find(|h| h.rect.contains(at)).cloned() {
                         self.picked = Some(hit.slug.clone());
                         if fe.tap_count >= 2 {
                             cx.widget_action(uid, LifeAction::Picked(hit.slug));
+                        } else {
+                            cx.widget_action(uid, LifeAction::Selected(hit.slug));
                         }
                         self.redraw(cx);
                     }
@@ -484,10 +491,10 @@ impl Widget for LifecycleCanvas {
                     // way): zoom centred on the pointer, as far as it turned.
                     let factor = (fe.scroll.y * 0.005).exp();
                     if factor != 1.0 {
-                        self.view = self.view.zoom_at(fe.abs - self.rect.pos, factor);
+                        self.view = self.view.zoom_at(fe.abs - fe.rect.pos, factor);
                         self.redraw(cx);
                     }
-                } else if in_list(fe.abs) {
+                } else if in_list(fe.abs - fe.rect.pos + self.rect.pos) {
                     // The list scrolls alone.
                     self.list_scroll += fe.scroll.y;
                     self.clamp_list_scroll();
@@ -498,7 +505,8 @@ impl Widget for LifecycleCanvas {
                 }
             }
             Hit::FingerHoverOver(fe) => {
-                let hand = in_list(fe.abs) && self.hits.iter().any(|h| h.rect.contains(fe.abs));
+                let at = fe.abs - fe.rect.pos + self.rect.pos;
+                let hand = in_list(at) && self.hits.iter().any(|h| h.rect.contains(at));
                 cx.set_cursor(if hand { MouseCursor::Hand } else { MouseCursor::Default });
             }
             _ => {}
@@ -733,11 +741,24 @@ impl Widget for LifecycleCanvas {
 impl LifecycleCanvasRef {
     pub fn set_slices(&self, cx: &mut Cx, slices: SliceMachine) {
         if let Some(mut c) = self.borrow_mut() {
+            // Another set of slices: fit the graph again. The same ones
+            // (every sync passes them) keep the person's pan and zoom.
+            let key = |m: &SliceMachine| m.paths.iter().map(|p| (p.peer_id.clone(), p.current, p.transitions.len())).collect::<Vec<_>>();
+            if key(&c.slices) != key(&slices) {
+                c.seen = dvec2(0.0, 0.0);
+            }
             c.slices = slices;
-            // New data: fit the graph again (the person's zoom was for the
-            // old one).
-            c.seen = dvec2(0.0, 0.0);
             c.redraw(cx);
+        }
+    }
+
+    /// Light the slice `slug` (a card picked on the flow canvas), or none.
+    pub fn set_picked(&self, cx: &mut Cx, slug: Option<String>) {
+        if let Some(mut c) = self.borrow_mut() {
+            if c.picked != slug {
+                c.picked = slug;
+                c.redraw(cx);
+            }
         }
     }
 
@@ -787,11 +808,25 @@ impl OctoBuddyView {
         // The state machine canvas gets the slice machine.
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
         canvas.set_slices(cx, machine.clone());
+        // A card opened on the graph above: its slice picked here too.
+        let open = match &self.flow_open { Some(crate::FlowOpen::Inner(id)) => Some(id.clone()), _ => None };
+        if open != self.life_flow_seen {
+            self.life_flow_seen = open.clone();
+            if let Some(id) = open {
+                let slug = machine.paths.iter().find(|p| p.peer_id == id).map(|p| p.slug.clone());
+                if slug.is_some() {
+                    canvas.set_picked(cx, slug);
+                }
+            }
+        }
+        // Folded to its title row: the graph above takes the room.
+        self.view.label(cx, ids!(life_title)).set_text(cx, i18n::t("Lifecycle", "生命周期"));
+        self.view.button(cx, ids!(life_fold)).set_text(cx, if self.life_folded { i18n::t("Show", "展开") } else { i18n::t("Hide", "收起") });
         // The two sub-tabs, one at a time: the one in use marked (an SegOn
         // beside its SegOff, like the view switcher's pairs).
         let show_sm = self.life_tab == crate::LifeTab::StateMachine;
-        self.view.view(cx, ids!(life_sm_panel)).set_visible(cx, show_sm);
-        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, !show_sm);
+        self.view.view(cx, ids!(life_sm_panel)).set_visible(cx, show_sm && !self.life_folded);
+        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, !show_sm && !self.life_folded);
         for (off, on, here) in [
             (ids!(life_tab_sm), ids!(life_tab_sm_on), show_sm),
             (ids!(life_tab_docs), ids!(life_tab_docs_on), !show_sm),
@@ -1046,7 +1081,12 @@ impl OctoBuddyView {
     /// What the lifecycle view does on clicks (tabs, the fit button, slice
     /// picks, doc rows, version switches).
     pub(crate) fn handle_life_actions(&mut self, cx: &mut Cx, actions: &Actions) {
-        if self.stage != Stage::Life { return; }
+        if self.stage != Stage::Flow { return; }
+        if self.view.button(cx, ids!(life_fold)).clicked(actions) {
+            self.life_folded = !self.life_folded;
+            self.relayout(cx);
+            return;
+        }
         if self.view.button(cx, ids!(life_tab_sm)).clicked(actions) || self.view.button(cx, ids!(life_tab_sm_on)).clicked(actions) {
             if self.life_tab != crate::LifeTab::StateMachine {
                 self.life_tab = crate::LifeTab::StateMachine;
@@ -1115,6 +1155,15 @@ impl OctoBuddyView {
                             || d.title.starts_with(&slug)
                     });
                     self.relayout(cx);
+                }
+                LifeAction::Selected(slug) => {
+                    // Its card on the flow canvas, lit.
+                    let peer = self.selected.and_then(|at| self.store.session(at))
+                        .and_then(|s| s.peers().iter().rev().find(|p| p.slug == slug).map(|p| p.id.clone()));
+                    if peer.is_some() && self.life_flow_lit != peer {
+                        self.life_flow_lit = peer;
+                        self.relayout(cx);
+                    }
                 }
                 LifeAction::None => {}
             }

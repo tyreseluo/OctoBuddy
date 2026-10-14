@@ -1357,7 +1357,9 @@ script_mod! {
                         }
                         // The project's loops as a graph; a card's conversation opens over it.
                         flow_view := View{
-                            width: Fill height: Fill flow: Overlay visible: false
+                            width: Fill height: Fill flow: Down visible: false
+                            flow_main := View{
+                            width: Fill height: Fill flow: Overlay
                             flow := FlowCanvas{
                                 Outer := FlowOuterCard{}
                                 OuterLit := FlowOuterCardLit{}
@@ -1499,6 +1501,68 @@ script_mod! {
                                     }
                                 }
                             }
+                            }
+                            // Under the graph: where each of its slices stands in
+                            // its lifecycle, and the documents the work left.
+                            // The lifecycle view: the slice state machine or the
+                            // doc stream, one at a time (the two tabs). The header
+                            // shows the round state machine summary.
+                            life_view := View{
+                                width: Fill height: Fit flow: Down spacing: 6
+                                padding: Inset{left: 12 right: 12 top: 6 bottom: 10}
+                                View{
+                                    width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                                    life_title := Label{text: "Lifecycle" padding: Inset{right: 4} draw_text.color: ink draw_text.text_style: theme.font_bold{font_size: 10}}
+                                    life_tab_sm := SegOff{text: "State machine" height: 22}
+                                    life_tab_sm_on := SegOn{text: "State machine" height: 22 visible: false}
+                                    life_tab_docs := SegOff{text: "Docs" height: 22}
+                                    life_tab_docs_on := SegOn{text: "Docs" height: 22 visible: false}
+                                    life_fit := SegOff{text: "Fit" height: 22 visible: false}
+                                    Filler{}
+                                    life_open_living := SegOff{text: "Open LIVING.md" height: 22}
+                                    life_round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 9}}
+                                    life_fold := SegOff{text: "Hide" height: 22}
+                                }
+                                life_sm_panel := RoundedView{
+                                    width: Fill height: 300 new_batch: true padding: 1
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                    life_sm := LifecycleCanvas{}
+                                }
+                                life_docs_panel := RoundedView{
+                                    width: Fill height: 300 flow: Right new_batch: true padding: 1 visible: false
+                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
+                                    RoundedView{
+                                        width: 300 height: Fill new_batch: true padding: 6
+                                        draw_bg.color: th_panel draw_bg.border_radius: 4.0
+                                        life_docs_list := PortalList{
+                                            width: Fill height: Fill
+                                            scroll_bar: ScrollBar{}
+                                            Doc := LifeDocRow{}
+                                            DocSel := LifeDocRowSel{}
+                                            Round := LifeRoundRow{}
+                                            Empty := LifeDocEmpty{}
+                                        }
+                                    }
+                                    RoundedView{
+                                        width: Fill height: Fill flow: Down spacing: 6 new_batch: true padding: 10
+                                        draw_bg.color: th_raised draw_bg.border_radius: 4.0
+                                        life_doc_meta := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8}
+                                        life_vers := View{
+                                            width: Fit height: Fit flow: Right spacing: 4 visible: false
+                                            life_v0 := SegOff{text: "v1" height: 18 padding: Inset{left: 7 right: 7}}
+                                            life_v1 := SegOff{text: "v2" height: 18 padding: Inset{left: 7 right: 7}}
+                                            life_v2 := SegOff{text: "v3" height: 18 padding: Inset{left: 7 right: 7}}
+                                            life_v3 := SegOff{text: "v4" height: 18 padding: Inset{left: 7 right: 7}}
+                                            life_v4 := SegOff{text: "v5" height: 18 padding: Inset{left: 7 right: 7}}
+                                            life_v5 := SegOff{text: "v6" height: 18 padding: Inset{left: 7 right: 7}}
+                                        }
+                                        ScrollYView{
+                                            width: Fill height: Fill
+                                            life_docs_body := MsgMarkdown{}
+                                        }
+                                    }
+                                }
+                            }
                         }
                         // The outer loop's own terminal UI (the native TUI plugin).
                         tui_view := View{
@@ -1574,63 +1638,6 @@ script_mod! {
                                 }
                             }
                         }
-                        // The lifecycle view: the slice state machine or the
-                        // doc stream, one at a time (the two tabs). The header
-                        // shows the round state machine summary.
-                        life_view := View{
-                            width: Fill height: Fill flow: Down spacing: 8 visible: false
-                            padding: Inset{left: 16 right: 16 top: 50 bottom: 14}
-                            View{
-                                width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
-                                life_tab_sm := SegOff{text: "State machine" height: 22}
-                                life_tab_sm_on := SegOn{text: "State machine" height: 22 visible: false}
-                                life_tab_docs := SegOff{text: "Docs" height: 22}
-                                life_tab_docs_on := SegOn{text: "Docs" height: 22 visible: false}
-                                life_fit := SegOff{text: "Fit" height: 22 visible: false}
-                                Filler{}
-                                life_open_living := SegOff{text: "Open LIVING.md" height: 22}
-                                life_round := Label{text: "" padding: 0 draw_text.color: th_muted_strong draw_text.text_style: theme.font_code{font_size: 9}}
-                            }
-                            life_sm_panel := RoundedView{
-                                width: Fill height: Fill new_batch: true padding: 1
-                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
-                                life_sm := LifecycleCanvas{}
-                            }
-                            life_docs_panel := RoundedView{
-                                width: Fill height: Fill flow: Right new_batch: true padding: 1 visible: false
-                                draw_bg.color: th_raised draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
-                                RoundedView{
-                                    width: 300 height: Fill new_batch: true padding: 6
-                                    draw_bg.color: th_panel draw_bg.border_radius: 4.0
-                                    life_docs_list := PortalList{
-                                        width: Fill height: Fill
-                                        scroll_bar: ScrollBar{}
-                                        Doc := LifeDocRow{}
-                                        DocSel := LifeDocRowSel{}
-                                        Round := LifeRoundRow{}
-                                        Empty := LifeDocEmpty{}
-                                    }
-                                }
-                                RoundedView{
-                                    width: Fill height: Fill flow: Down spacing: 6 new_batch: true padding: 10
-                                    draw_bg.color: th_raised draw_bg.border_radius: 4.0
-                                    life_doc_meta := Label{width: Fill text: "" padding: 0 draw_text.color: th_muted_strong draw_text.wrap: Words draw_text.text_style.font_size: 8}
-                                    life_vers := View{
-                                        width: Fit height: Fit flow: Right spacing: 4 visible: false
-                                        life_v0 := SegOff{text: "v1" height: 18 padding: Inset{left: 7 right: 7}}
-                                        life_v1 := SegOff{text: "v2" height: 18 padding: Inset{left: 7 right: 7}}
-                                        life_v2 := SegOff{text: "v3" height: 18 padding: Inset{left: 7 right: 7}}
-                                        life_v3 := SegOff{text: "v4" height: 18 padding: Inset{left: 7 right: 7}}
-                                        life_v4 := SegOff{text: "v5" height: 18 padding: Inset{left: 7 right: 7}}
-                                        life_v5 := SegOff{text: "v6" height: 18 padding: Inset{left: 7 right: 7}}
-                                    }
-                                    ScrollYView{
-                                        width: Fill height: Fill
-                                        life_docs_body := MsgMarkdown{}
-                                    }
-                                }
-                            }
-                        }
                         // The views at the left (they change what the stage shows);
                         // at the right, the outer and inner loops, the app.
                         SolidView{
@@ -1648,8 +1655,6 @@ script_mod! {
                                 view_flow_on := FloatFlow{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 view_time := FloatTime{}
                                 view_time_on := FloatTime{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
-                                view_life := FloatLife{}
-                                view_life_on := FloatLife{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
                                 // The native TUI plugin: the outer loop's own CLI.
                                 view_tui := FloatTui{visible: false}
                                 view_tui_on := FloatTui{visible: false draw_bg.color: th_accent_soft draw_bg.border_color: th_accent_line draw_bg.border_size: 1.0}
@@ -2670,8 +2675,6 @@ enum Stage {
     Chat,
     Flow,
     Time,
-    /// The lifecycle view: state machine + doc stream.
-    Life,
     /// The outer loop's own terminal UI (the native TUI plugin).
     Tui,
 }
@@ -2823,6 +2826,15 @@ pub struct OctoBuddyView {
     /// doc stream. Default: the state machine, the obvious first thing to read.
     #[rust]
     life_tab: LifeTab,
+    /// The slice picked in the lifecycle panel: its card lit on the graph above.
+    #[rust]
+    life_flow_lit: Option<String>,
+    /// The inner card open on the graph when the panel last looked: picked below too.
+    #[rust]
+    life_flow_seen: Option<String>,
+    /// The lifecycle panel folded to its title row.
+    #[rust]
+    life_folded: bool,
     /// The doc stream last drawn for the shown session (and the picked item).
     #[rust]
     life_docs: Vec<DocItem>,
@@ -3383,7 +3395,7 @@ impl OctoBuddyView {
     fn fit_pills(&mut self, cx: &mut Cx) {
         let width = self.view.view(cx, ids!(chat)).area().rect(cx).size.x;
         let compact = width > 0.0 && width < 860.0;
-        let views = [live_id!(view_chat), live_id!(view_chat_on), live_id!(view_flow), live_id!(view_flow_on), live_id!(view_time), live_id!(view_time_on), live_id!(view_life), live_id!(view_life_on), live_id!(view_tui), live_id!(view_tui_on)];
+        let views = [live_id!(view_chat), live_id!(view_chat_on), live_id!(view_flow), live_id!(view_flow_on), live_id!(view_time), live_id!(view_time_on), live_id!(view_tui), live_id!(view_tui_on)];
         for id in views {
             self.view.label(cx, &[id, live_id!(name)]).set_visible(cx, !compact);
         }
@@ -4353,7 +4365,8 @@ impl OctoBuddyView {
                 // On its own: a column of its own, at the left.
                 let at = p.flow.map(|f| dvec2(f.x, f.y)).unwrap_or(if detached { dvec2(30.0, pos.y + j as f64 * 110.0) } else { pos + dvec2(300.0, j as f64 * 110.0) });
                 let running = p.is_active();
-                let chosen = open_peer.as_deref() == Some(p.id.as_str());
+                // Its card open, or its slice picked in the lifecycle panel below.
+                let chosen = open_peer.as_deref() == Some(p.id.as_str()) || self.life_flow_lit.as_deref() == Some(p.id.as_str());
                 let template = match (chosen, running) {
                     (true, true) => live_id!(InnerSelLit),
                     (true, false) => live_id!(InnerSel),
@@ -4403,22 +4416,21 @@ impl OctoBuddyView {
         let shown = at.is_some() && self.page == Page::Chat && !plain;
         let flow = self.stage == Stage::Flow && shown;
         let time = self.stage == Stage::Time && shown;
-        let life = self.stage == Stage::Life && shown;
+        // The lifecycle panel lives under the flow graph, folded or not.
+        let life = flow;
         // The terminal stands in for the conversation, in a plain chat too.
         let tui = self.stage == Stage::Tui && at.is_some() && self.page == Page::Chat && self.tui.is_some();
-        self.view.view(cx, ids!(chat_pane)).set_visible(cx, !flow && !time && !tui && !life);
-        self.view.view(cx, ids!(composer_area)).set_visible(cx, !flow && !time && !tui && !life);
+        self.view.view(cx, ids!(chat_pane)).set_visible(cx, !flow && !time && !tui);
+        self.view.view(cx, ids!(composer_area)).set_visible(cx, !flow && !time && !tui);
         self.view.view(cx, ids!(flow_view)).set_visible(cx, flow);
         self.view.view(cx, ids!(time_view)).set_visible(cx, time);
-        self.view.view(cx, ids!(life_view)).set_visible(cx, life);
-        self.view.view(cx, ids!(worktree_bar)).set_visible(cx, !flow && !time && !tui && !life && self.view.view(cx, ids!(worktree_bar)).visible());
+        self.view.view(cx, ids!(worktree_bar)).set_visible(cx, !flow && !time && !tui && self.view.view(cx, ids!(worktree_bar)).visible());
         // The view switcher: the one in use, marked.
         let current = if plain { Stage::Chat } else { self.stage };
         for (stage, off, on) in [
             (Stage::Chat, ids!(view_chat), ids!(view_chat_on)),
             (Stage::Flow, ids!(view_flow), ids!(view_flow_on)),
             (Stage::Time, ids!(view_time), ids!(view_time_on)),
-            (Stage::Life, ids!(view_life), ids!(view_life_on)),
         ] {
             self.view.view(cx, off).set_visible(cx, !plain && current != stage);
             self.view.view(cx, on).set_visible(cx, !plain && current == stage);
@@ -4427,8 +4439,6 @@ impl OctoBuddyView {
         for (id, name, sub) in [
             (ids!(view_time), i18n::t("Timeline", "时间轴"), ""),
             (ids!(view_time_on), i18n::t("Timeline", "时间轴"), ""),
-            (ids!(view_life), i18n::t("Lifecycle", "生命周期"), ""),
-            (ids!(view_life_on), i18n::t("Lifecycle", "生命周期"), ""),
             (ids!(view_flow_on), i18n::t("Flow", "流程图"), ""),
             (ids!(view_chat_on), i18n::t("Chat", "对话"), ""),
         ] {
@@ -5386,10 +5396,6 @@ impl OctoBuddyView {
         }
         if tapped(&self.view.view(cx, ids!(view_time)), actions) {
             self.stage = Stage::Time;
-            self.relayout(cx);
-        }
-        if tapped(&self.view.view(cx, ids!(view_life)), actions) {
-            self.stage = Stage::Life;
             self.relayout(cx);
         }
         self.handle_time_actions(cx, actions);
