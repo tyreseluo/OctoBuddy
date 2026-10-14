@@ -13,7 +13,7 @@ How each mechanism of v0.3.0 was verified: what ran for real and what was a stub
 | Rust | rustc 1.99.0 (b940084d7 2026-09-28) |
 | OctoBuddy's own agents | Claude Code 2.1.286, Codex 0.152.0, pi 0.99.2, octos 2.0.3-rc.12 (pinned in `src/agents.rs`, checked against npm's / GitHub's digests) |
 | Dependencies | Makepad `d653bc4`, App Hub `3863591`, OctoSense `ffd5e488` (what OctoSense's main pins, 2026-10-14) |
-| Inside OctoSense | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344), head `95dff53` (pinning OctoBuddy `v0.3.0`), on OctoSense main `b9d66d0f` |
+| Inside OctoSense | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344), head `d1956f4` (pinning OctoBuddy `f5cc3b1`, after `v0.3.1`), on OctoSense main `ffd5e488` |
 | Local App Hub | `~/.octobuddy/hub` (a real catalog, artifacts and publisher key) |
 
 ## Real runs and synthetic ones
