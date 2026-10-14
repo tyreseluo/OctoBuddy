@@ -358,9 +358,12 @@ On the host, Settings › AI Providers is OctoBuddy's own, set up the way Cindy 
 
 ## Lifecycle view
 
-The fourth view, beside **Chat**, **Flow**, and **Timeline**, is the
-**Lifecycle** view: the slice state machine and the project's doc stream,
-in one place.
+The **Flow** view carries the lifecycle panel under its graph: the slice
+state machine and the project's doc stream, in one place. Drag the line
+between them to give either more room (double-click it for the default), or
+fold the panel to its title row. The two follow each other: open an inner
+loop's card on the graph and the state machine lights its slice's path;
+click a slice in the panel and its card lights on the graph.
 
 - **State machine.** Each slice is a row from `Waiting` to `Landed`, with
   `SentBack` looping back to `Running` and the side exits (`Failed`,

@@ -177,6 +177,8 @@ pub enum LifeAction {
     /// A slice was picked (its slug), so the view can locate it in the
     /// doc stream too.
     Picked(String),
+    /// A slice was clicked once (its slug): its card on the flow canvas lights.
+    Selected(String),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -217,6 +219,9 @@ pub struct LifecycleCanvas {
     /// The slice the person picked, its slug.
     #[rust]
     picked: Option<String>,
+    /// The shapes of this frame, drawn as quads.
+    #[rust]
+    pen: Pen,
     /// The pan-and-zoom the graph is shown through.
     #[rust]
     view: GraphView,
@@ -344,20 +349,20 @@ impl LifecycleCanvas {
     /// One edge: a cubic bezier from `a` to `b` (canvas points) with an
     /// arrowhead at `b`.
     fn draw_edge(&mut self, a: DVec2, c1: DVec2, c2: DVec2, b: DVec2, color: Vec4f, width: f32) {
-        self.draw_vector.set_color(color.x, color.y, color.z, color.w);
-        self.draw_vector.move_to(a.x as f32, a.y as f32);
-        self.draw_vector.bezier_to(c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, b.x as f32, b.y as f32);
-        self.draw_vector.stroke(width);
+        self.pen.set_color(color.x, color.y, color.z, color.w);
+        self.pen.move_to(a.x as f32, a.y as f32);
+        self.pen.bezier_to(c1.x as f32, c1.y as f32, c2.x as f32, c2.y as f32, b.x as f32, b.y as f32);
+        self.pen.stroke(width);
         // The arrowhead points the way the curve arrives.
         let dir = (b - c2).normalize();
         let n = dvec2(-dir.y, dir.x) * 3.6;
         let back = b - dir * 7.0;
-        self.draw_vector.set_color(color.x, color.y, color.z, color.w);
-        self.draw_vector.move_to(b.x as f32, b.y as f32);
-        self.draw_vector.line_to((back.x + n.x) as f32, (back.y + n.y) as f32);
-        self.draw_vector.line_to((back.x - n.x) as f32, (back.y - n.y) as f32);
-        self.draw_vector.close();
-        self.draw_vector.fill();
+        self.pen.set_color(color.x, color.y, color.z, color.w);
+        self.pen.move_to(b.x as f32, b.y as f32);
+        self.pen.line_to((back.x + n.x) as f32, (back.y + n.y) as f32);
+        self.pen.line_to((back.x - n.x) as f32, (back.y - n.y) as f32);
+        self.pen.close();
+        self.pen.fill();
     }
 
     /// The `×N` badge on an edge: a small rounded label at `at` (canvas
@@ -367,12 +372,12 @@ impl LifecycleCanvas {
         let size = (7.5 * scale).max(3.0) as f32;
         let w = self.text_w(cx, &label, size) + 8.0;
         let h = size as f64 + 5.0;
-        self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
-        self.draw_vector.rounded_rect((at.x - w * 0.5) as f32, (at.y - h * 0.5) as f32, w as f32, h as f32, 4.0);
-        self.draw_vector.fill();
-        self.draw_vector.set_color(color.x, color.y, color.z, 1.0);
-        self.draw_vector.rounded_rect((at.x - w * 0.5) as f32, (at.y - h * 0.5) as f32, w as f32, h as f32, 4.0);
-        self.draw_vector.stroke(1.0);
+        self.pen.set_color_hex(crate::theme::hex("raised"), 1.0);
+        self.pen.rounded_rect((at.x - w * 0.5) as f32, (at.y - h * 0.5) as f32, w as f32, h as f32, 4.0);
+        self.pen.fill();
+        self.pen.set_color(color.x, color.y, color.z, 1.0);
+        self.pen.rounded_rect((at.x - w * 0.5) as f32, (at.y - h * 0.5) as f32, w as f32, h as f32, 4.0);
+        self.pen.stroke(1.0);
         texts.push(Text { pos: dvec2(at.x - w * 0.5 + 4.0, at.y - h * 0.5 + 2.5), text: label, size, color: crate::hex_color(crate::theme::hex("ink")) });
     }
 
@@ -409,20 +414,20 @@ impl LifecycleCanvas {
             }
             match hex {
                 Some(h) => {
-                    self.draw_vector.set_color_hex(h, 1.0);
-                    self.draw_vector.rounded_rect(x as f32, (y + 3.0) as f32, 8.0, 8.0, 2.0);
-                    self.draw_vector.fill();
+                    self.pen.set_color_hex(h, 1.0);
+                    self.pen.rounded_rect(x as f32, (y + 3.0) as f32, 8.0, 8.0, 2.0);
+                    self.pen.fill();
                     texts.push(Text { pos: dvec2(x + 12.0, y), text: label, size, color: crate::hex_color(crate::theme::hex("muted_strong")) });
                 }
                 None => {
                     // The ×N badge the edges wear.
                     let w = self.text_w(cx, "×N", size) + 6.0;
-                    self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
-                    self.draw_vector.rounded_rect(x as f32, (y + 1.0) as f32, w as f32, 12.0, 4.0);
-                    self.draw_vector.fill();
-                    self.draw_vector.set_color_hex(crate::theme::hex("muted_strong"), 1.0);
-                    self.draw_vector.rounded_rect(x as f32, (y + 1.0) as f32, w as f32, 12.0, 4.0);
-                    self.draw_vector.stroke(1.0);
+                    self.pen.set_color_hex(crate::theme::hex("raised"), 1.0);
+                    self.pen.rounded_rect(x as f32, (y + 1.0) as f32, w as f32, 12.0, 4.0);
+                    self.pen.fill();
+                    self.pen.set_color_hex(crate::theme::hex("muted_strong"), 1.0);
+                    self.pen.rounded_rect(x as f32, (y + 1.0) as f32, w as f32, 12.0, 4.0);
+                    self.pen.stroke(1.0);
                     texts.push(Text { pos: dvec2(x + 3.0, y + 2.5), text: "×N".to_string(), size, color: crate::hex_color(crate::theme::hex("muted_strong")) });
                     texts.push(Text { pos: dvec2(x + w + 6.0, y), text: label, size, color: crate::hex_color(crate::theme::hex("muted_strong")) });
                 }
@@ -448,13 +453,18 @@ impl Widget for LifecycleCanvas {
         let in_list = |p: DVec2| p.x >= list_left;
         match event.hits(cx, self.area) {
             Hit::FingerDown(fe) if fe.is_primary_hit() => {
-                if in_list(fe.abs) {
+                // Where it shows (scrolled with whatever holds the canvas)
+                // to the canvas's own coordinates, which the hits are in.
+                let at = fe.abs - fe.rect.pos + self.rect.pos;
+                if in_list(at) {
                     // A slice row: one click highlights its path through
                     // the graph; a double click also opens its documents.
-                    if let Some(hit) = self.hits.iter().find(|h| h.rect.contains(fe.abs)).cloned() {
+                    if let Some(hit) = self.hits.iter().find(|h| h.rect.contains(at)).cloned() {
                         self.picked = Some(hit.slug.clone());
                         if fe.tap_count >= 2 {
                             cx.widget_action(uid, LifeAction::Picked(hit.slug));
+                        } else {
+                            cx.widget_action(uid, LifeAction::Selected(hit.slug));
                         }
                         self.redraw(cx);
                     }
@@ -484,10 +494,10 @@ impl Widget for LifecycleCanvas {
                     // way): zoom centred on the pointer, as far as it turned.
                     let factor = (fe.scroll.y * 0.005).exp();
                     if factor != 1.0 {
-                        self.view = self.view.zoom_at(fe.abs - self.rect.pos, factor);
+                        self.view = self.view.zoom_at(fe.abs - fe.rect.pos, factor);
                         self.redraw(cx);
                     }
-                } else if in_list(fe.abs) {
+                } else if in_list(fe.abs - fe.rect.pos + self.rect.pos) {
                     // The list scrolls alone.
                     self.list_scroll += fe.scroll.y;
                     self.clamp_list_scroll();
@@ -498,7 +508,8 @@ impl Widget for LifecycleCanvas {
                 }
             }
             Hit::FingerHoverOver(fe) => {
-                let hand = in_list(fe.abs) && self.hits.iter().any(|h| h.rect.contains(fe.abs));
+                let at = fe.abs - fe.rect.pos + self.rect.pos;
+                let hand = in_list(at) && self.hits.iter().any(|h| h.rect.contains(at));
                 cx.set_cursor(if hand { MouseCursor::Hand } else { MouseCursor::Default });
             }
             _ => {}
@@ -552,7 +563,7 @@ impl Widget for LifecycleCanvas {
         let pos_map: Vec<NodePos> = nodes();
         let pos_of = |s: SliceState| -> Option<NodePos> { pos_map.iter().copied().find(|n| n.state == s) };
         let mut texts: Vec<Text> = Vec::new();
-        self.draw_vector.begin();
+        self.pen.begin();
 
         // Edges first (under the nodes).
         let accent = crate::hex_color(crate::theme::hex("accent"));
@@ -620,14 +631,14 @@ impl Widget for LifecycleCanvas {
             let count = at.get(&n.state).copied().unwrap_or(0);
             let lit = on_picked(n.state);
             // Background.
-            self.draw_vector.set_color_hex(crate::theme::hex("raised"), 1.0);
-            self.draw_vector.rounded_rect(p.x as f32, p.y as f32, size.x as f32, size.y as f32, 6.0 * v.scale as f32);
-            self.draw_vector.fill();
+            self.pen.set_color_hex(crate::theme::hex("raised"), 1.0);
+            self.pen.rounded_rect(p.x as f32, p.y as f32, size.x as f32, size.y as f32, 6.0 * v.scale as f32);
+            self.pen.fill();
             // Border, lit when the picked slice visited here, or always on Running.
             let border_alpha = if lit || n.state == SliceState::Running && count > 0 { 1.0 } else { 0.4 };
-            self.draw_vector.set_color_hex(color, border_alpha);
-            self.draw_vector.rounded_rect(p.x as f32, p.y as f32, size.x as f32, size.y as f32, 6.0 * v.scale as f32);
-            self.draw_vector.stroke((if lit { 1.6 } else { 1.0 }) * v.scale as f32);
+            self.pen.set_color_hex(color, border_alpha);
+            self.pen.rounded_rect(p.x as f32, p.y as f32, size.x as f32, size.y as f32, 6.0 * v.scale as f32);
+            self.pen.stroke((if lit { 1.6 } else { 1.0 }) * v.scale as f32);
             // The state's name, and under it the count: two lines that
             // cannot run into each other.
             let label = n.state.display().to_string();
@@ -645,9 +656,9 @@ impl Widget for LifecycleCanvas {
                 let r = 7.0 * v.scale;
                 let mut cxp = p.x + size.x - r - 2.0;
                 for num in nums.iter().rev() {
-                    self.draw_vector.set_color_hex(crate::theme::hex("accent"), 1.0);
-                    self.draw_vector.circle(cxp as f32, (p.y - r * 0.4) as f32, r as f32);
-                    self.draw_vector.fill();
+                    self.pen.set_color_hex(crate::theme::hex("accent"), 1.0);
+                    self.pen.circle(cxp as f32, (p.y - r * 0.4) as f32, r as f32);
+                    self.pen.fill();
                     let label = num.to_string();
                     let ns = fs(7.0);
                     let nw = self.text_w(cx, &label, ns);
@@ -658,23 +669,23 @@ impl Widget for LifecycleCanvas {
             // An active dot when something runs there.
             if n.state == SliceState::Running && count > 0 {
                 let dot = dvec2(p.x + size.x * 0.5, p.y + size.y - 4.0 * v.scale);
-                self.draw_vector.set_color_hex(crate::theme::hex("accent"), (0.6 + 0.4 * self.phase) as f32);
-                self.draw_vector.circle(dot.x as f32, dot.y as f32, ((2.0 + self.phase * 3.0) * v.scale) as f32);
-                self.draw_vector.fill();
+                self.pen.set_color_hex(crate::theme::hex("accent"), (0.6 + 0.4 * self.phase) as f32);
+                self.pen.circle(dot.x as f32, dot.y as f32, ((2.0 + self.phase * 3.0) * v.scale) as f32);
+                self.pen.fill();
             }
         }
 
         // The slice list, in its own panel on the right: never under the
         // graph, scrolled alone by the wheel over it.
         let inner = Rect { pos: list_pos + dvec2(4.0, 4.0), size: dvec2(list_w - 8.0, rect.size.y - 8.0) };
-        self.draw_vector.set_color_hex(crate::theme::hex("panel"), 1.0);
-        self.draw_vector.rounded_rect(inner.pos.x as f32, inner.pos.y as f32, inner.size.x as f32, inner.size.y as f32, 6.0);
-        self.draw_vector.fill();
+        self.pen.set_color_hex(crate::theme::hex("panel"), 1.0);
+        self.pen.rounded_rect(inner.pos.x as f32, inner.pos.y as f32, inner.size.x as f32, inner.size.y as f32, 6.0);
+        self.pen.fill();
         // The separator between the graph and the list.
-        self.draw_vector.set_color_hex(crate::theme::hex("line"), 1.0);
-        self.draw_vector.move_to((list_pos.x - LIST_GAP * 0.5) as f32, (rect.pos.y + 8.0) as f32);
-        self.draw_vector.line_to((list_pos.x - LIST_GAP * 0.5) as f32, (rect.pos.y + rect.size.y - 8.0) as f32);
-        self.draw_vector.stroke(1.0);
+        self.pen.set_color_hex(crate::theme::hex("line"), 1.0);
+        self.pen.move_to((list_pos.x - LIST_GAP * 0.5) as f32, (rect.pos.y + 8.0) as f32);
+        self.pen.line_to((list_pos.x - LIST_GAP * 0.5) as f32, (rect.pos.y + rect.size.y - 8.0) as f32);
+        self.pen.stroke(1.0);
         let title = i18n::pick(format!("Slices · {}", self.slices.paths.len()), format!("切片 · {}", self.slices.paths.len()));
         texts.push(Text { pos: dvec2(inner.pos.x + 6.0, inner.pos.y + 6.0), text: title, size: 9.0, color: muted_strong });
         self.clamp_list_scroll();
@@ -690,15 +701,15 @@ impl Widget for LifecycleCanvas {
             let row = Rect { pos: dvec2(inner.pos.x + 4.0, y), size: dvec2(inner.size.x - 8.0, row_h) };
             self.hits.push(SliceHit { rect: row, slug: slug.clone() });
             if picked_row {
-                self.draw_vector.set_color_hex(crate::theme::hex("accent_soft"), 1.0);
-                self.draw_vector.rounded_rect(row.pos.x as f32, row.pos.y as f32, row.size.x as f32, row.size.y as f32, 5.0);
-                self.draw_vector.fill();
+                self.pen.set_color_hex(crate::theme::hex("accent_soft"), 1.0);
+                self.pen.rounded_rect(row.pos.x as f32, row.pos.y as f32, row.size.x as f32, row.size.y as f32, 5.0);
+                self.pen.fill();
             }
             // A dot in the state's colour, the slug beside it, the state
             // (and any rework) under it.
-            self.draw_vector.set_color_hex(self.color_for(*current), 1.0);
-            self.draw_vector.circle((row.pos.x + 8.0) as f32, (row.pos.y + 8.0) as f32, 3.5);
-            self.draw_vector.fill();
+            self.pen.set_color_hex(self.color_for(*current), 1.0);
+            self.pen.circle((row.pos.x + 8.0) as f32, (row.pos.y + 8.0) as f32, 3.5);
+            self.pen.fill();
             let slug = self.fit_text(cx, slug, 9.0, row.size.x - 20.0);
             texts.push(Text { pos: dvec2(row.pos.x + 15.0, row.pos.y + 2.0), text: slug, size: 9.0, color: ink });
             let mut line2 = current.display().to_string();
@@ -711,11 +722,16 @@ impl Widget for LifecycleCanvas {
 
         // The legend, in the strip under the graph.
         self.draw_legend(cx, &mut texts, rect.pos.x + 6.0, rect.pos.x + graph_w - 6.0, rect.pos.y + graph_size.y + 8.0);
-        self.draw_vector.end(cx);
+        // The shapes, as quads in the order they were laid.
+        let back = self.draw_bg.color;
+        for (r, color) in std::mem::take(&mut self.pen.quads) {
+            self.draw_bg.color = color;
+            self.draw_bg.draw_abs(cx, r);
+        }
+        self.draw_bg.color = back;
 
         // Texts in their own call, after the shapes.
         self.draw_text.new_draw_call(cx);
-        self.draw_text.draw_depth = self.draw_vector.draw_depth + self.draw_vector.cur_zbias;
         for t in texts {
             self.draw_text.text_style.font_size = t.size;
             self.draw_text.color = t.color;
@@ -733,11 +749,24 @@ impl Widget for LifecycleCanvas {
 impl LifecycleCanvasRef {
     pub fn set_slices(&self, cx: &mut Cx, slices: SliceMachine) {
         if let Some(mut c) = self.borrow_mut() {
+            // Another set of slices: fit the graph again. The same ones
+            // (every sync passes them) keep the person's pan and zoom.
+            let key = |m: &SliceMachine| m.paths.iter().map(|p| (p.peer_id.clone(), p.current, p.transitions.len())).collect::<Vec<_>>();
+            if key(&c.slices) != key(&slices) {
+                c.seen = dvec2(0.0, 0.0);
+            }
             c.slices = slices;
-            // New data: fit the graph again (the person's zoom was for the
-            // old one).
-            c.seen = dvec2(0.0, 0.0);
             c.redraw(cx);
+        }
+    }
+
+    /// Light the slice `slug` (a card picked on the flow canvas), or none.
+    pub fn set_picked(&self, cx: &mut Cx, slug: Option<String>) {
+        if let Some(mut c) = self.borrow_mut() {
+            if c.picked != slug {
+                c.picked = slug;
+                c.redraw(cx);
+            }
         }
     }
 
@@ -787,11 +816,27 @@ impl OctoBuddyView {
         // The state machine canvas gets the slice machine.
         let canvas = self.view.widget(cx, ids!(life_sm)).as_lifecycle_canvas();
         canvas.set_slices(cx, machine.clone());
+        // A card opened on the graph above: its slice picked here too.
+        let open = match &self.flow_open { Some(crate::FlowOpen::Inner(id)) => Some(id.clone()), _ => None };
+        if open != self.life_flow_seen {
+            self.life_flow_seen = open.clone();
+            if let Some(id) = open {
+                let slug = machine.paths.iter().find(|p| p.peer_id == id).map(|p| p.slug.clone());
+                if slug.is_some() {
+                    canvas.set_picked(cx, slug);
+                }
+            }
+        }
+        // Folded to its title row: the graph above takes the room.
+        self.view.label(cx, ids!(life_title)).set_text(cx, i18n::t("Lifecycle", "生命周期"));
+        self.view.button(cx, ids!(life_fold)).set_text(cx, if self.life_folded { i18n::t("Show", "展开") } else { i18n::t("Hide", "收起") });
         // The two sub-tabs, one at a time: the one in use marked (an SegOn
         // beside its SegOff, like the view switcher's pairs).
         let show_sm = self.life_tab == crate::LifeTab::StateMachine;
-        self.view.view(cx, ids!(life_sm_panel)).set_visible(cx, show_sm);
-        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, !show_sm);
+        self.view.view(cx, ids!(life_divider)).set_visible(cx, !self.life_folded);
+        self.apply_life_pane(cx);
+        self.view.view(cx, ids!(life_sm_panel)).set_visible(cx, show_sm && !self.life_folded);
+        self.view.view(cx, ids!(life_docs_panel)).set_visible(cx, !show_sm && !self.life_folded);
         for (off, on, here) in [
             (ids!(life_tab_sm), ids!(life_tab_sm_on), show_sm),
             (ids!(life_tab_docs), ids!(life_tab_docs_on), !show_sm),
@@ -1046,7 +1091,12 @@ impl OctoBuddyView {
     /// What the lifecycle view does on clicks (tabs, the fit button, slice
     /// picks, doc rows, version switches).
     pub(crate) fn handle_life_actions(&mut self, cx: &mut Cx, actions: &Actions) {
-        if self.stage != Stage::Life { return; }
+        if self.stage != Stage::Flow { return; }
+        if self.view.button(cx, ids!(life_fold)).clicked(actions) {
+            self.life_folded = !self.life_folded;
+            self.relayout(cx);
+            return;
+        }
         if self.view.button(cx, ids!(life_tab_sm)).clicked(actions) || self.view.button(cx, ids!(life_tab_sm_on)).clicked(actions) {
             if self.life_tab != crate::LifeTab::StateMachine {
                 self.life_tab = crate::LifeTab::StateMachine;
@@ -1115,6 +1165,15 @@ impl OctoBuddyView {
                             || d.title.starts_with(&slug)
                     });
                     self.relayout(cx);
+                }
+                LifeAction::Selected(slug) => {
+                    // Its card on the flow canvas, lit.
+                    let peer = self.selected.and_then(|at| self.store.session(at))
+                        .and_then(|s| s.peers().iter().rev().find(|p| p.slug == slug).map(|p| p.id.clone()));
+                    if peer.is_some() && self.life_flow_lit != peer {
+                        self.life_flow_lit = peer;
+                        self.relayout(cx);
+                    }
                 }
                 LifeAction::None => {}
             }
@@ -1267,5 +1326,123 @@ mod tests {
         // The two widths the narrow/wide switch actually produces.
         assert_eq!(split_canvas(900.0).1, 240.0);
         assert_eq!(split_canvas(400.0).1, 180.0);
+    }
+}
+
+/// The canvas's shapes as plain quads (`DrawColor`), the way its texts and
+/// background are drawn: `DrawVector` meshes landed shifted from them once
+/// the canvas sat under the flow graph. Same calls as `DrawVector`; a fill
+/// is scanned into rows, a stroke laid as small squares along its path.
+#[derive(Default)]
+struct Pen {
+    color: Vec4f,
+    /// The path being built: its subpaths, and whether each is closed.
+    path: Vec<(Vec<DVec2>, bool)>,
+    /// What is to be drawn, in order: (rect, colour).
+    quads: Vec<(Rect, Vec4f)>,
+}
+
+impl Pen {
+    fn begin(&mut self) {
+        self.path.clear();
+        self.quads.clear();
+    }
+    fn set_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.color = vec4(r, g, b, a);
+    }
+    fn set_color_hex(&mut self, hex: u32, alpha: f32) {
+        let c = |s: u32| ((hex >> s) & 0xff) as f32 / 255.0;
+        self.color = vec4(c(16), c(8), c(0), alpha);
+    }
+    fn move_to(&mut self, x: f32, y: f32) {
+        self.path.push((vec![dvec2(x as f64, y as f64)], false));
+    }
+    fn line_to(&mut self, x: f32, y: f32) {
+        match self.path.last_mut() {
+            Some((points, _)) => points.push(dvec2(x as f64, y as f64)),
+            None => self.move_to(x, y),
+        }
+    }
+    fn bezier_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let Some(a) = self.path.last().and_then(|(p, _)| p.last().copied()) else { return };
+        let (c1, c2, b) = (dvec2(x1 as f64, y1 as f64), dvec2(x2 as f64, y2 as f64), dvec2(x as f64, y as f64));
+        for i in 1..=24 {
+            let t = i as f64 / 24.0;
+            let u = 1.0 - t;
+            let p = a * (u * u * u) + c1 * (3.0 * u * u * t) + c2 * (3.0 * u * t * t) + b * (t * t * t);
+            self.line_to(p.x as f32, p.y as f32);
+        }
+    }
+    fn close(&mut self) {
+        if let Some((_, closed)) = self.path.last_mut() {
+            *closed = true;
+        }
+    }
+    fn rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, _r: f32) {
+        let (x, y, w, h) = (x as f64, y as f64, w as f64, h as f64);
+        self.path.push((vec![dvec2(x, y), dvec2(x + w, y), dvec2(x + w, y + h), dvec2(x, y + h)], true));
+    }
+    fn circle(&mut self, cx: f32, cy: f32, r: f32) {
+        let (cx, cy, r) = (cx as f64, cy as f64, r as f64);
+        let points = (0..20).map(|i| {
+            let a = i as f64 / 20.0 * std::f64::consts::TAU;
+            dvec2(cx + r * a.cos(), cy + r * a.sin())
+        }).collect();
+        self.path.push((points, true));
+    }
+    /// Each subpath filled (a convex outline: a row's span is its extremes).
+    fn fill(&mut self) {
+        for (points, _) in std::mem::take(&mut self.path) {
+            if points.len() < 3 {
+                continue;
+            }
+            let top = points.iter().map(|p| p.y).fold(f64::MAX, f64::min);
+            let bottom = points.iter().map(|p| p.y).fold(f64::MIN, f64::max);
+            let (left, right) = (points.iter().map(|p| p.x).fold(f64::MAX, f64::min), points.iter().map(|p| p.x).fold(f64::MIN, f64::max));
+            // An upright rectangle: one quad.
+            if points.len() == 4 && points.iter().all(|p| (p.x - left).abs() < 0.01 || (p.x - right).abs() < 0.01) {
+                self.quads.push((Rect { pos: dvec2(left, top), size: dvec2(right - left, bottom - top) }, self.color));
+                continue;
+            }
+            let mut y = top;
+            while y < bottom {
+                let row = y + 0.5;
+                let mut span: Option<(f64, f64)> = None;
+                for i in 0..points.len() {
+                    let (a, b) = (points[i], points[(i + 1) % points.len()]);
+                    if (a.y <= row && b.y > row) || (b.y <= row && a.y > row) {
+                        let x = a.x + (row - a.y) / (b.y - a.y) * (b.x - a.x);
+                        span = Some(span.map_or((x, x), |(l, r)| (l.min(x), r.max(x))));
+                    }
+                }
+                if let Some((l, r)) = span {
+                    self.quads.push((Rect { pos: dvec2(l, y), size: dvec2(r - l, 1.0) }, self.color));
+                }
+                y += 1.0;
+            }
+        }
+    }
+    /// Each subpath's segments laid as squares `width` across.
+    fn stroke(&mut self, width: f32) {
+        let w = (width as f64).max(1.0);
+        for (mut points, closed) in std::mem::take(&mut self.path) {
+            if closed && points.len() > 2 {
+                points.push(points[0]);
+            }
+            for pair in points.windows(2) {
+                let (a, b) = (pair[0], pair[1]);
+                // Upright and level lines: one quad each.
+                if (a.x - b.x).abs() < 0.01 || (a.y - b.y).abs() < 0.01 {
+                    let (l, t) = (a.x.min(b.x) - w * 0.5, a.y.min(b.y) - w * 0.5);
+                    self.quads.push((Rect { pos: dvec2(l, t), size: dvec2((a.x - b.x).abs() + w, (a.y - b.y).abs() + w) }, self.color));
+                    continue;
+                }
+                let steps = ((b - a).length() / (w * 0.6).max(0.8)).ceil().max(1.0) as usize;
+                for i in 0..=steps {
+                    let p = a + (b - a) * (i as f64 / steps as f64);
+                    self.quads.push((Rect { pos: dvec2(p.x - w * 0.5, p.y - w * 0.5), size: dvec2(w, w) }, self.color));
+                }
+            }
+        }
     }
 }
