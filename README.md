@@ -440,7 +440,7 @@ The first time it starts there, OctoSense asks whether OctoBuddy's agent may sta
 
 ### Its pinned revisions
 
-`Cargo.toml` takes OctoSense (`b9d66d0f`) and App Hub (`3863591`) at the revisions OctoSense's main pins (as of 2026-10-11), and Makepad at the revision that App Hub names (`d653bc4`, the one OctoSense's main pins too). Cargo cannot patch a git source with another revision of the same repository, so one Makepad here means App Hub's. Inside OctoSense, its `[patch]` sections resolve all of them to the shell's own checkouts. Move them when OctoSense moves its pins.
+`Cargo.toml` takes OctoSense (`ffd5e488`) and App Hub (`3863591`) at the revisions OctoSense's main pins (as of 2026-10-14), and Makepad at the revision that App Hub names (`d653bc4`, the one OctoSense's main pins too). Cargo cannot patch a git source with another revision of the same repository, so one Makepad here means App Hub's. Inside OctoSense, its `[patch]` sections resolve all of them to the shell's own checkouts. Move them when OctoSense moves its pins.
 
 Run on its own, the divider beside the sidebar draws as a dark bar; inside OctoSense it is the thin line it should be. **Not yet looked into.**
 

@@ -440,7 +440,7 @@ MAKEPAD_WM_TEST_APP=octobuddy ./target/release/octosense
 ### 钉住的版本
 
 `Cargo.toml` 里各依赖的版本：
-- OctoSense（`b9d66d0f`）和 App Hub（`3863591`）：和 OctoSense main 钉的版本相同（2026-10-11）；
+- OctoSense（`ffd5e488`）和 App Hub（`3863591`）：和 OctoSense main 钉的版本相同（2026-10-14）；
 - makepad：用 App Hub 指定的版本 `d653bc4`，与 OctoSense main 钉的相同。
 
 Cargo 不能用同一个仓库的另一个 revision 去 patch 一个 git 来源，所以这里只能统一成 App Hub 那一份。在 OctoSense 里编译时，它的 `[patch]` 会把这些依赖全部换成 shell 自己的检出。OctoSense 升级这些版本时，这里也要跟着改。

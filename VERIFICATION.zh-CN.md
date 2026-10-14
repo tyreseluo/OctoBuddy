@@ -12,7 +12,7 @@
 | 系统 | macOS 26.0.1，Apple silicon（arm64） |
 | Rust | rustc 1.99.0（b940084d7 2026-09-28） |
 | OctoBuddy 自带的 agent | Claude Code 2.1.286、Codex 0.152.0、pi 0.99.2、octos 2.0.3-rc.12（`src/agents.rs` 钉住，校验 npm / GitHub 摘要） |
-| 依赖 | makepad `d653bc4`、App Hub `3863591`、OctoSense `b9d66d0f`（与 OctoSense main 2026-10-11 钉的相同） |
+| 依赖 | makepad `d653bc4`、App Hub `3863591`、OctoSense `ffd5e488`（与 OctoSense main 2026-10-14 钉的相同） |
 | 编入 OctoSense 的形态 | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344) head `95dff53`（钉 OctoBuddy `v0.3.0`），基于 OctoSense main `b9d66d0f` |
 | 本地 App Hub | `~/.octobuddy/hub`（真实的 catalog、artifact、发布者密钥） |
 

@@ -29,10 +29,10 @@ makepad-app-module = { git = "https://github.com/OctoSense-org/makepad.git", rev
 makepad-terminal = { git = "https://github.com/OctoSense-org/makepad.git", rev = "d653bc4493619ab979ccff165cf48c0c63b77d19" }
 # Reads the providers OctoSense's AI providers app enabled. Its loopback
 # proxy adds their key to the requests it forwards; no child sees the key.
-octosense-llm-config = { git = "https://github.com/OctoSense-org/OctoSense.git", rev = "b9d66d0f2e07040c806c7db8a16f450a8599aaf1" }
+octosense-llm-config = { git = "https://github.com/OctoSense-org/OctoSense.git", rev = "ffd5e4889a9a1f84fdc5213edefe64c36b4377a2" }
 # The shell's kernel core dir, where AI providers writes the profile: the
 # sanctioned route to the kernel for an app (as Rinx uses it).
-octosense-app-peers = { git = "https://github.com/OctoSense-org/OctoSense.git", rev = "b9d66d0f2e07040c806c7db8a16f450a8599aaf1", features = ["octos-core"] }
+octosense-app-peers = { git = "https://github.com/OctoSense-org/OctoSense.git", rev = "ffd5e4889a9a1f84fdc5213edefe64c36b4377a2", features = ["octos-core"] }
 # An app project's app, previewed under its manifest the way the shell runs
 # one (admission, the isolate's jail and limits, its artwork's origin).
 octosense-app-policy = { git = "https://github.com/OctoSense-org/OctoSense-App-Hub", rev = "386359153ed6377b5f047bd9ed2767a6a2ac2bc7", features = ["splash"] }
