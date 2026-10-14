@@ -269,10 +269,16 @@ impl OctoBuddyView {
         }
         // The disk tools run off the UI thread; an inner loop's check does too.
         if let Some(stripped) = name.strip_prefix("octobuddy_disk_") {
+            // The project's disk, not the worktree this loop works in.
+            let Some(project) = self.store.find_peer(peer).map(|at| &self.store.projects[at.0]) else {
+                let _ = reply.send(Err("no such inner loop".into()));
+                return;
+            };
+            let (path, id) = (project.path.clone(), project.id.clone());
             let args = args.clone();
             let tool = stripped.to_string();
             std::thread::spawn(move || {
-                let _ = reply.send(crate::plugins::disk_map::run_tool(&dir, &tool, &args));
+                let _ = reply.send(crate::plugins::disk_map::run_tool(&path, &id, &tool, &args));
             });
             return;
         }

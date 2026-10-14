@@ -2023,7 +2023,7 @@ script_mod! {
                             width: Fill height: Fill new_batch: true
                             margin: Inset{left: 12 right: 12}
                             draw_bg.color: th_raised draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: th_line
-                            disk_canvas := DiskCanvas{width: Fill height: Fill draw_bg +: {color: #x00000000}}
+                            disk_canvas := DiskCanvas{width: Fill height: Fill}
                         }
                         // The tile picked: up one level, where it is, ask about it.
                         View{
@@ -3933,11 +3933,9 @@ impl OctoBuddyView {
             self.reset_disk_scan();
         }
         self.view.label(cx, ids!(disk_title)).set_text(cx, i18n::t("Disk map", "磁盘地图"));
-        let worktrees = project.as_deref().map(plugins::disk_map::worktrees_root).unwrap_or_default();
-        let worktrees_exists = worktrees.exists();
-        let id = project.as_deref().unwrap_or("");
-        let project_id = std::path::Path::new(id).file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let has_worktrees = worktrees_exists && !project_id.is_empty();
+        // The inner loops' worktrees live under the project's id, not its folder.
+        let project_id = self.disk_project_id(project.as_deref());
+        let has_worktrees = !project_id.is_empty() && plugins::disk_map::worktrees_root(&project_id).is_dir();
         // The root toggle: the pill that is lit names the root scanned; a
         // project without worktrees offers no choice, so no toggle at all.
         let want_project = plugins::disk_map::Root::from_u8(self.disk_root_kind) == plugins::disk_map::Root::Project;
@@ -4106,11 +4104,16 @@ impl OctoBuddyView {
     /// and the UI thread only updates state and redraws. One scan per
     /// project and root at a time: a second ask for the same pair waits
     /// for the one already walking.
+    /// The store's id of the project at `path` (its worktrees' folder name).
+    fn disk_project_id(&self, path: Option<&str>) -> String {
+        path.and_then(|path| self.store.projects.iter().find(|p| p.path == path)).map(|p| p.id.clone()).unwrap_or_default()
+    }
+
     fn start_disk_scan(&mut self, project: String, mut kind: plugins::disk_map::Root) {
         // A worktrees root that does not exist cannot be scanned (its toggle
         // hides, but the choice can outlive the folder): the project root is
         // the fallback, or there would be nothing to scan and no way back.
-        let project_id = std::path::Path::new(&project).file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let project_id = self.disk_project_id(Some(&project));
         if kind == plugins::disk_map::Root::Worktrees && !plugins::disk_map::root_for(std::path::Path::new(&project), &project_id, plugins::disk_map::Root::Worktrees).exists() {
             kind = plugins::disk_map::Root::Project;
             self.disk_root_kind = kind.to_u8();

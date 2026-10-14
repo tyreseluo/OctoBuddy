@@ -2038,11 +2038,11 @@ It works for you now: message it, review its work, or close it.)\n"));
                     let _ = reply.send(Err("no such session".into()));
                     return;
                 };
-                let dir = self.store.projects[at.0].path.clone();
+                let (dir, id) = (self.store.projects[at.0].path.clone(), self.store.projects[at.0].id.clone());
                 let tool = name.strip_prefix("octobuddy_disk_").unwrap_or("").to_string();
                 let args = args.clone();
                 std::thread::spawn(move || {
-                    let _ = reply.send(crate::plugins::disk_map::run_tool(&dir, &tool, &args));
+                    let _ = reply.send(crate::plugins::disk_map::run_tool(&dir, &id, &tool, &args));
                 });
             }
             LoopEvent::McpCall { session, name, args, reply } => {

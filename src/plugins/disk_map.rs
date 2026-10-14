@@ -608,14 +608,15 @@ fn now_secs() -> u64 {
 }
 
 fn format_time(at: u64) -> String {
-    // Local time, the way OctoBuddy shows times elsewhere; no chrono to
-    // keep the dep list flat.
-    let secs_in_day = 86_400;
-    let days = at / secs_in_day;
-    let secs = at % secs_in_day;
-    let hour = secs / 3600;
-    let minute = (secs % 3600) / 60;
-    format!("{days}d {hour:02}:{minute:02}")
+    // How long ago, the way the panel's own line says it: a day count
+    // since 1970 means nothing to the person.
+    let ago = now_secs().saturating_sub(at);
+    match ago {
+        0..=59 => i18n::pick("just now".to_string(), "刚刚".to_string()),
+        60..=3_599 => i18n::pick(format!("{} min ago", ago / 60), format!("{} 分钟前", ago / 60)),
+        3_600..=86_399 => i18n::pick(format!("{} h ago", ago / 3_600), format!("{} 小时前", ago / 3_600)),
+        _ => i18n::pick(format!("{} d ago", ago / 86_400), format!("{} 天前", ago / 86_400)),
+    }
 }
 
 /// A tile-by-tile answer for the panel's "ask the outer loop" button:
@@ -704,7 +705,7 @@ fn root_label_for(root: &Path, project: &Path) -> &'static str {
 /// Run one of the three disk tools against `project`. Returns the tool's
 /// text answer, or an error to send back to the agent. Reads `args` as JSON
 /// (the same shape as the MCP `inputSchema`); rejects unknown args.
-pub fn run_tool(project: &str, name: &str, args: &serde_json::Value) -> Result<String, String> {
+pub fn run_tool(project: &str, project_id: &str, name: &str, args: &serde_json::Value) -> Result<String, String> {
     use serde_json::Value;
     if !crate::plugins::enabled(crate::plugins::DISK_MAP) {
         return Err(crate::i18n::pick(
@@ -721,7 +722,6 @@ pub fn run_tool(project: &str, name: &str, args: &serde_json::Value) -> Result<S
         _ => Root::Project,
     };
     let project_path = std::path::Path::new(project);
-    let project_id = project_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let scan_root = root_for(project_path, project_id, kind);
     if !scan_root.exists() {
         return Err(crate::i18n::pick(
