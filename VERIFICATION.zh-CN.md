@@ -1,19 +1,19 @@
-# 验证记录（v0.3.0）
+# 验证记录（v0.3.2）
 
 [English](VERIFICATION.md) | 简体中文
 
-这里记录 v0.3.0 每一项机制是怎么验证的：哪些是真实运行，哪些是 stub 合成的，命令是什么，证据在哪里，结果如何；最后单列还没验证的部分。证据文件都写明了当时的 OctoBuddy 提交。
+这里记录 v0.3.2 每一项机制是怎么验证的：哪些是真实运行，哪些是 stub 合成的，命令是什么，证据在哪里，结果如何；最后单列还没验证的部分。证据文件都写明了当时的 OctoBuddy 提交。
 
 ## 环境
 
 | 项 | 值 |
 | --- | --- |
-| OctoBuddy | [v0.3.0](https://github.com/tyreseluo/OctoBuddy/releases/tag/v0.3.0)（tag 提交 `f714871`；证据文件里写的是各自记录时的提交） |
+| OctoBuddy | [v0.3.2](https://github.com/tyreseluo/OctoBuddy/releases/tag/v0.3.2)（证据文件里写的是各自记录时的提交；v0.3.0 的各项机制在 `f714871` 上验证） |
 | 系统 | macOS 26.0.1，Apple silicon（arm64） |
 | Rust | rustc 1.99.0（b940084d7 2026-09-28） |
 | OctoBuddy 自带的 agent | Claude Code 2.1.286、Codex 0.152.0、pi 0.99.2、octos 2.0.3-rc.12（`src/agents.rs` 钉住，校验 npm / GitHub 摘要） |
 | 依赖 | makepad `d653bc4`、App Hub `3863591`、OctoSense `ffd5e488`（与 OctoSense main 2026-10-14 钉的相同） |
-| 编入 OctoSense 的形态 | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344) head `d1956f4`（钉 OctoBuddy `f5cc3b1`，v0.3.1 之后），基于 OctoSense main `ffd5e488` |
+| 编入 OctoSense 的形态 | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344)，基于 OctoSense main `ffd5e488`，钉 OctoBuddy `v0.3.2` |
 | 本地 App Hub | `~/.octobuddy/hub`（真实的 catalog、artifact、发布者密钥） |
 
 ## 真实运行与合成运行

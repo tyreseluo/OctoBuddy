@@ -1,19 +1,19 @@
-# Verification (v0.3.0)
+# Verification (v0.3.2)
 
 English | [简体中文](VERIFICATION.zh-CN.md)
 
-How each mechanism of v0.3.0 was verified: what ran for real and what was a stub, the command, where the evidence is, and what it showed; then what has not been verified. Each evidence file names the OctoBuddy commit it was made at.
+How each mechanism of v0.3.2 was verified: what ran for real and what was a stub, the command, where the evidence is, and what it showed; then what has not been verified. Each evidence file names the OctoBuddy commit it was made at.
 
 ## Environment
 
 | | |
 | --- | --- |
-| OctoBuddy | [v0.3.0](https://github.com/tyreseluo/OctoBuddy/releases/tag/v0.3.0) (the tag's commit is `f714871`; each evidence file names the commit it was recorded at) |
+| OctoBuddy | [v0.3.2](https://github.com/tyreseluo/OctoBuddy/releases/tag/v0.3.2) (each evidence file names the commit it was recorded at; v0.3.0's mechanisms were verified at `f714871`) |
 | System | macOS 26.0.1, Apple silicon (arm64) |
 | Rust | rustc 1.99.0 (b940084d7 2026-09-28) |
 | OctoBuddy's own agents | Claude Code 2.1.286, Codex 0.152.0, pi 0.99.2, octos 2.0.3-rc.12 (pinned in `src/agents.rs`, checked against npm's / GitHub's digests) |
 | Dependencies | Makepad `d653bc4`, App Hub `3863591`, OctoSense `ffd5e488` (what OctoSense's main pins, 2026-10-14) |
-| Inside OctoSense | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344), head `d1956f4` (pinning OctoBuddy `f5cc3b1`, after `v0.3.1`), on OctoSense main `ffd5e488` |
+| Inside OctoSense | [OctoSense#344](https://github.com/OctoSense-org/OctoSense/pull/344), on OctoSense main `ffd5e488`, pinning OctoBuddy `v0.3.2` |
 | Local App Hub | `~/.octobuddy/hub` (a real catalog, artifacts and publisher key) |
 
 ## Real runs and synthetic ones
